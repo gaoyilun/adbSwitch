@@ -78,7 +78,10 @@ public class MainActivity extends PreferenceActivity {
     private Preference swMasterPref;      // 主开关：普通 Preference + 自定义 widget（箭头 + Switch）
     private Switch masterSwitch;          // 主开关行内的 Switch 控件
     private Boolean masterManualExpanded; // 用户手动覆盖的展开态；null=跟随开关状态
-    private boolean subSwitchesShown;     // 两个子开关当前是否已加入 category
+    // 两个子开关当前是否已加入 category。
+    // 必须初始化为 true：prefs.xml 里它们本来就写在 catDebug 内，
+    // 初始化成 false 会导致首次刷新时「关闭态 want=false == 当前 false」而跳过 remove，折叠失效。
+    private boolean subSwitchesShown = true;
     private SwitchPreference swUsbPref;
     private SwitchPreference swLinkagePref;
     private SwitchPreference swNotifyPref;
