@@ -100,6 +100,7 @@ public class MainActivity extends PreferenceActivity {
     private static boolean sLinkageLaunched = false;
     private long lastPickerOpenAt = 0;        // 打开选择器防抖：行点击与 preference click 可能同时触发
     private long lastLiveOpenAt = 0;          // 同上，实时动态弹窗防抖
+    private boolean settingsObserverRegistered = false; // Settings 监听是否已注册（防重复注册/泄漏）
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -111,6 +112,38 @@ public class MainActivity extends PreferenceActivity {
             }
         }
     };
+
+    /**
+     * 监听 Settings.Global 里两个调试键的外部变化。
+     *
+     * 为什么必须监听：stateReceiver 只覆盖「本 App 自己写的」情况（ACTION_STATE）。
+     * 但调试状态还可能被本 App 之外的东西改掉 —— 用户手动改系统开发者选项、
+     * 系统按场景自动收无线调试、其他 App 改设置等。此时 App 不知情，
+     * 界面会一直停在旧值上，出现「明明 adbd 已停、界面却显示已开启」的骗人状态。
+     * 而这个 App 存在的意义恰恰是让用户确认真实状态，所以必须监听。
+     *
+     * 一次外部操作往往连改多个键，故做去抖合并，延迟 300ms 再统一刷新。
+     */
+    private final android.database.ContentObserver settingsObserver =
+            new android.database.ContentObserver(new android.os.Handler(Looper.getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    scheduleResync();
+                }
+            };
+
+    private final Runnable resyncRunnable = () -> {
+        if (!prefsLoaded) {
+            return;
+        }
+        refresh(DebugController.read());
+    };
+
+    private void scheduleResync() {
+        android.os.Handler h = new android.os.Handler(Looper.getMainLooper());
+        h.removeCallbacks(resyncRunnable);
+        h.postDelayed(resyncRunnable, 300);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -844,6 +877,37 @@ public class MainActivity extends PreferenceActivity {
         // 且滚动后新出现的行也需要重新挂，故每次 resume 都重新挂一遍。
         if (prefsLoaded) {
             scheduleWireRowClicks();
+        }
+        // 开始监听外部对这两个 Settings 键的改动（App 在前台的场景，onResume 的回读覆盖不到）
+        observeSettings(true);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        observeSettings(false);
+    }
+
+    /** 注册/反注册 Settings 监听，避免泄漏与无谓开销 */
+    private void observeSettings(boolean register) {
+        try {
+            android.content.ContentResolver cr = getContentResolver();
+            if (register) {
+                if (settingsObserverRegistered) {
+                    return;
+                }
+                cr.registerContentObserver(
+                        Settings.Global.CONTENT_URI, true, settingsObserver);
+                settingsObserverRegistered = true;
+            } else {
+                if (!settingsObserverRegistered) {
+                    return;
+                }
+                cr.unregisterContentObserver(settingsObserver);
+                settingsObserverRegistered = false;
+            }
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "observe settings failed", t);
         }
     }
 
