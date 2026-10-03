@@ -18,6 +18,7 @@ import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -62,8 +63,8 @@ public class MainActivity extends PreferenceActivity {
     private static final String EXTRA_MASTER_ON = "master_on";
     /** 桌面快捷方式「一键开关」：切换主开关，执行完直接退出 */
     private static final String ACTION_TOGGLE_MASTER = "com.elleng.usbdebug.action.TOGGLE_MASTER";
-    /** 桌面快捷方式「联动启动」：强制执行一次联动（关调试 + 跳转），不进设置页 */
-    private static final String ACTION_LINKAGE_LAUNCH = "com.elleng.usbdebug.action.LINKAGE_LAUNCH";
+    /** 桌面快捷方式「创建桌面快捷方式」：先打开本 App，关掉调试后联动启动目标应用 */
+    private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.usbdebug.action.DESKTOP_LINKAGE";
     private static final String TAG = "UsbSwitch";
     private static final String PREFS = "cfg";
     private static final String PREF_LINKAGE = "linkage_enabled";
@@ -91,6 +92,7 @@ public class MainActivity extends PreferenceActivity {
     private Preference runNowPref;
     private Preference liveUpdatePref;
     private Preference buildInfoPref;
+    private Preference createShortcutPref;
 
     private boolean syncing = false;          // 防止 setChecked 触发回环
     private boolean rootAvailable = false;    // 是否已拿到 root，进入页面时刷新
@@ -227,20 +229,25 @@ public class MainActivity extends PreferenceActivity {
             return true;
         }
 
-        // 桌面快捷方式「联动启动」：强制执行一次联动（关调试 + 跳转），不受自动跳转次数限制
-        if (ACTION_LINKAGE_LAUNCH.equals(in.getAction())) {
-            String p = sp.getString(PREF_PKG, "");
-            if (p.isEmpty()) {
+        // 桌面快捷方式「创建桌面快捷方式」：先打开本 App，关掉调试后联动启动目标应用。
+        // 这是显式触发（用户点了快捷方式），故不走 PREF_LINKAGE 开关、也不受
+        // sLinkageLaunched 守卫限制——每次点都应重新关调试并跳目标应用。
+        if (ACTION_DESKTOP_LINKAGE.equals(in.getAction())) {
+            String pkg = sp.getString(PREF_PKG, "");
+            if (pkg.isEmpty()) {
                 Toast.makeText(this, R.string.linkage_no_app, Toast.LENGTH_LONG).show();
-                return false;
+                finish();
+                return true;
             }
+            // Android 13+ 缺通知权限时，常驻通知会被系统抑制，联动流程依赖它，
+            // 故先提示并落到设置页（showSettings 会补发权限申请），不跳转。
             if (Build.VERSION.SDK_INT >= 33
                     && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                     != PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, R.string.linkage_need_notif, Toast.LENGTH_LONG).show();
                 return false;
             }
-            runLinkage(p);
+            runLinkage(pkg);
             return true;
         }
 
@@ -298,15 +305,18 @@ public class MainActivity extends PreferenceActivity {
         updateAppLabel();
     }
 
-    /** 原生顶栏：标题 + 副标题 + USB 图标 + 主色背景（系统自动预留状态栏区域） */
+    /** 原生顶栏：标题 + 副标题 + 主色背景（系统自动预留状态栏区域）。
+     *  不显示 App 图标：左端留白，只留标题/副标题。 */
     private void setupActionBar() {
         ActionBar ab = getActionBar();
         if (ab == null) {
             return;
         }
-        ab.setDisplayShowHomeEnabled(true);
-        ab.setDisplayUseLogoEnabled(true);
-        ab.setLogo(R.drawable.ic_launcher);
+        // 关掉 Home/Logo 显示开关，否则 framework 会把 App 图标画在标题左边
+        //（注意：framework 的 ActionBar 没有 setDisplayHomeAsActionEnabled，那是 androidx 的 API）
+        ab.setDisplayShowHomeEnabled(false);
+        ab.setDisplayUseLogoEnabled(false);
+        ab.setLogo(null);
         ab.setTitle(R.string.app_name);
         ab.setSubtitle(R.string.header_subtitle);
         ab.setBackgroundDrawable(new ColorDrawable(getResources().getColor(R.color.colorPrimary)));
@@ -323,6 +333,13 @@ public class MainActivity extends PreferenceActivity {
         runNowPref = findPreference("linkageRunNow");
         liveUpdatePref = findPreference("liveUpdate");
         buildInfoPref = findPreference("buildInfo");
+        createShortcutPref = findPreference("createShortcut");
+        if (createShortcutPref != null) {
+            createShortcutPref.setOnPreferenceClickListener(p -> {
+                createDesktopShortcut();
+                return true;
+            });
+        }
         // 底部显示本 APK 的构建时间，便于确认设备上装的是否为最新版本
         if (buildInfoPref != null) {
             String t = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
@@ -571,7 +588,7 @@ public class MainActivity extends PreferenceActivity {
         swUsbPref.setIcon(stateIcon(s.usb ? R.color.stateOn : R.color.stateSafe));
 
         swWirelessPref.setSummary(s.wireless ? R.string.wireless_on : R.string.wireless_off);
-        swWirelessPref.setIcon(stateIcon(s.wireless ? R.color.error : R.color.stateSafe));
+        swWirelessPref.setIcon(stateIcon(s.wireless ? R.color.stateOn : R.color.stateSafe));
 
         syncing = true;
         swUsbPref.setChecked(s.usb);
@@ -731,6 +748,7 @@ public class MainActivity extends PreferenceActivity {
         String appTitle = getString(R.string.linkage_app_label);
         String runNowTitle = getString(R.string.linkage_run_now_title);
         String masterTitle = getString(R.string.master_title);
+        String createShortcutTitle = getString(R.string.create_shortcut_title);
         for (int i = 0; i < list.getChildCount(); i++) {
             View row = list.getChildAt(i);
             if (row == null) {
@@ -793,6 +811,8 @@ public class MainActivity extends PreferenceActivity {
                 row.setOnClickListener(v -> openLiveUpdate());
             } else if (runNowTitle.equals(title)) {
                 row.setOnClickListener(v -> runLinkageManual());
+            } else if (createShortcutTitle.equals(title)) {
+                row.setOnClickListener(v -> createDesktopShortcut());
             }
         }
     }
@@ -835,12 +855,12 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
-    /** 状态圆点图标（实心圆，随状态变色）；尺寸需与 pref_row 的 icon 区（40dp）协调 */
+    /** 状态圆点图标（实心圆，随状态变色）；显示尺寸由 pref_row_state 的 20dp 图标框决定，约等于一行文字高 */
     private GradientDrawable stateIcon(int colorRes) {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.OVAL);
         d.setColor(getResources().getColor(colorRes, getTheme()));
-        d.setSize(28, 28);
+        d.setSize(40, 40);
         return d;
     }
 
@@ -974,7 +994,7 @@ public class MainActivity extends PreferenceActivity {
         try {
             return getPackageManager().getApplicationIcon(pkg);
         } catch (Throwable t) {
-            return getResources().getDrawable(R.drawable.ic_launcher_foreground);
+            return getResources().getDrawable(R.mipmap.ic_launcher);
         }
     }
 
@@ -995,8 +1015,115 @@ public class MainActivity extends PreferenceActivity {
             d.draw(c);
             return Icon.createWithBitmap(bmp);
         } catch (Throwable t) {
-            return Icon.createWithResource(this, R.drawable.ic_launcher_foreground);
+            return Icon.createWithResource(this, R.mipmap.ic_launcher);
         }
+    }
+
+    /**
+     * 创建「原生桌面快捷方式」：在桌面（主屏幕）生成一个真实图标，点击直接拉起联动应用。
+     *
+     * 与 ShortcutManager 的「Shortcut」（长按应用图标弹出的菜单项）不同，这里用的是
+     * Android 自 1.6/2.3 起就有的「添加到主屏幕」机制：
+     *   - Android 7.1 及以下：发 {@code com.android.launcher.action.INSTALL_SHORTCUT} 广播；
+     *   - Android 8.0+：多数 launcher 不再响应上面的广播，改用 ShortcutManager.requestPinShortcut
+     *     钉选（同样生成真实桌面图标，且需用户确认）。
+     * 二者都会在桌面落下实体图标，区别于其它 agent 误用的「Shortcut」长按菜单项。
+     */
+    private void createDesktopShortcut() {
+        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String pkg = sp.getString(PREF_PKG, "");
+        if (pkg.isEmpty()) {
+            Toast.makeText(this, R.string.create_shortcut_no_app, Toast.LENGTH_LONG).show();
+            return;
+        }
+        CharSequence label = getApplicationLabel(pkg);
+        // 关键：快捷方式必须先打开「本 App」，由 App 关掉调试再联动启动目标应用，
+        // 而不是直接拉起目标 app（那样会绕过关调试的联动逻辑，等于什么都不做）。
+        // 用显式 Intent 指向 MainActivity + 自定义 action，图标仍用「目标应用 + 本 App 角标」
+        // 以便一眼认出这是哪个联动应用的快捷方式。
+        Intent launch = new Intent(this, MainActivity.class);
+        launch.setAction(ACTION_DESKTOP_LINKAGE);
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        Bitmap icon = badgedShortcutIcon(pkg);
+
+        // Android 8+ 优先用 LauncherApps 钉选（现代 launcher 才支持），失败再回退老广播
+        if (Build.VERSION.SDK_INT >= 26 && requestPinShortcut(label, launch, icon)) {
+            Toast.makeText(this, R.string.create_shortcut_done, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent intent = new Intent("com.android.launcher.action.INSTALL_SHORTCUT");
+        intent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, launch);
+        intent.putExtra(Intent.EXTRA_SHORTCUT_NAME, label != null ? label.toString() : pkg);
+        if (icon != null) {
+            intent.putExtra(Intent.EXTRA_SHORTCUT_ICON, icon);
+        }
+        intent.putExtra("duplicate", false);
+        try {
+            sendBroadcast(intent);
+            Toast.makeText(this, R.string.create_shortcut_done, Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            Toast.makeText(this, R.string.create_shortcut_fail, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** Android 8+：用 ShortcutManager.requestPinShortcut 把联动应用钉选为桌面图标
+     *  （区别于 shortcuts.xml 里的长按菜单「Shortcut」，这里生成的是真实桌面图标），
+     *  返回是否成功发出请求。 */
+    private boolean requestPinShortcut(CharSequence label, Intent launch, Bitmap icon) {
+        if (Build.VERSION.SDK_INT < 26) {
+            return false;
+        }
+        ShortcutManager sm = (ShortcutManager) getSystemService(SHORTCUT_SERVICE);
+        if (sm == null || !sm.isRequestPinShortcutSupported()) {
+            return false;
+        }
+        ShortcutInfo.Builder b = new ShortcutInfo.Builder(this,
+                "desktop_linkage_" + System.currentTimeMillis());
+        b.setIntent(launch);
+        b.setShortLabel(label != null ? label : getString(R.string.create_shortcut_title));
+        if (icon != null) {
+            b.setIcon(Icon.createWithBitmap(icon));
+        }
+        try {
+            return sm.requestPinShortcut(b.build(), null);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 生成「联动应用图标 + 本 App 角标」的合成位图，避免桌面快捷方式图标与原 App 图标混淆。
+     * 底层为联动应用图标，右下角叠加本 App 的小图标（白底圆），示意「由本 App 创建」。
+     */
+    private Bitmap badgedShortcutIcon(String pkg) {
+        int size = Math.max(1, (int) (48 * getResources().getDisplayMetrics().density));
+        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+
+        // 底层：联动应用图标
+        Drawable base;
+        try {
+            base = getPackageManager().getApplicationIcon(pkg);
+        } catch (Throwable t) {
+            base = getResources().getDrawable(R.mipmap.ic_launcher, getTheme());
+        }
+        base.setBounds(0, 0, size, size);
+        base.draw(c);
+
+        // 角标：本 App 图标（右下角，约 1/3 大小），白底圆提高辨识度
+        int badge = (int) (size * 0.36f);
+        int margin = (int) (size * 0.05f);
+        int left = size - badge - margin;
+        int top = size - badge - margin;
+        Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
+        dot.setColor(0xFFFFFFFF);
+        c.drawCircle(left + badge / 2f, top + badge / 2f, badge / 2f, dot);
+
+        Drawable mine = getResources().getDrawable(R.drawable.ic_shortcut_badge, getTheme());
+        mine.setBounds(left, top, left + badge, top + badge);
+        mine.draw(c);
+
+        return out;
     }
 
     @Override

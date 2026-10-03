@@ -10,20 +10,20 @@
             android:key="swMaster"
             android:title="@string/master_title"
             android:summary="@string/master_off"
-            android:layout="@layout/pref_row"
+            android:layout="@layout/pref_row_state"
             android:widgetLayout="@layout/pref_widget_master" />
 
         <SwitchPreference
             android:key="swUsb"
             android:title="@string/usb_title"
             android:summary="@string/usb_off"
-            android:layout="@layout/pref_row" />
+            android:layout="@layout/pref_row_state" />
 
         <SwitchPreference
             android:key="swWireless"
             android:title="@string/wireless_title"
             android:summary="@string/wireless_off"
-            android:layout="@layout/pref_row" />
+            android:layout="@layout/pref_row_state" />
 
     </PreferenceCategory>
 
@@ -54,6 +54,13 @@
             android:key="linkageRunNow"
             android:title="@string/linkage_run_now_title"
             android:summary="@string/linkage_run_now_sum"
+            android:layout="@layout/pref_row" />
+
+        <!-- 创建桌面快捷方式：在桌面生成联动应用的原生图标（区别于 ShortcutManager 长按菜单 Shortcut） -->
+        <Preference
+            android:key="createShortcut"
+            android:title="@string/create_shortcut_title"
+            android:summary="@string/create_shortcut_sum"
             android:layout="@layout/pref_row" />
 
     </PreferenceCategory>

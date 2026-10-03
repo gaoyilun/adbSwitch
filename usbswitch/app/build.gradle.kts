@@ -37,7 +37,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 开启 R8 混淆 + 资源压缩。
+            // 本项目零三方依赖、且所有反射都打在 Android framework 类上
+            // （Notification.Builder / NotificationManager 的 Live Updates 相关方法），
+            // bootclasspath 不会被混淆，故无需为反射加 keep。
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

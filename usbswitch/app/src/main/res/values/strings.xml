@@ -7,10 +7,6 @@
     <string name="sc_open_home_long">直接打开设置主页，不触发联动跳转</string>
     <string name="sc_toggle_short">一键开关</string>
     <string name="sc_toggle_long">一键开关调试（开变关、关变开），不打开界面</string>
-    <string name="sc_linkage_short">联动启动</string>
-    <string name="sc_linkage_long">关闭调试并跳转联动应用</string>
-    <string name="sc_launch_app_short">启动联动应用</string>
-    <string name="sc_launch_app_long_none">启动联动应用（请先在设置里选择联动应用）</string>
 
     <string name="header_subtitle">root 授权 · 一键开关 USB 与无线调试</string>
 
@@ -53,6 +49,12 @@
     <string name="linkage_run_now_sum">关调试并跳转，自动跳转每次启动只做一次</string>
     <string name="linkage_skipped">已跳过自动跳转，需再跳请点「立即执行联动」</string>
     <string name="linkage_need_notif">联动需要通知权限，请先授予</string>
+
+    <string name="create_shortcut_title">创建桌面快捷方式</string>
+    <string name="create_shortcut_sum">在桌面生成联动应用的图标（原生快捷方式）</string>
+    <string name="create_shortcut_no_app">请先选择联动应用</string>
+    <string name="create_shortcut_done">已请求在桌面创建快捷方式</string>
+    <string name="create_shortcut_fail">创建失败，请检查桌面是否被禁用</string>
 
     <string name="ptr_pull">下拉刷新应用列表</string>
     <string name="ptr_release">松开立即刷新</string>

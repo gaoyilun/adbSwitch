@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 原生「添加到主屏幕」快捷方式（Android 2.3 起）：发 INSTALL_SHORTCUT 广播所需权限 -->
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
     <!-- Android 16 Live Updates：常驻通知可被系统「提升」为实时动态（状态栏胶囊/锁屏/AOD） -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
@@ -19,7 +21,7 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">

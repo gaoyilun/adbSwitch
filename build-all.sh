@@ -1,6 +1,6 @@
 #!/bin/bash
-# 一键构建：LSPosed 模块 APK + 探针 APK + Zygisk Magisk 模块 zip
-# 产物统一放到 dist/
+# 一键构建：仅构建当前主方案「USB 调试快捷开关」APK，产物放到 dist/
+# 旧的 Xposed / Zygisk / 探针 方案已归档到 archive/，不再从这里构建。
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -30,23 +30,12 @@ if [ ! -f "$HERE/keystore/devhider.jks" ]; then
         -dname "CN=DevOptsHider, OU=Dev, O=DevOptsHider, L=HK, ST=HK, C=CN" >/dev/null
 fi
 
-echo "==> 构建 LSPosed 模块 APK / 探针 APK"
-(cd "$HERE/lsposed" && "$GRADLE" :app:assembleRelease :probe:assembleRelease \
-    --no-daemon --console=plain)
-
 echo "==> 构建 USB 调试快捷开关 APK"
 (cd "$HERE/usbswitch" && "$GRADLE" :app:assembleRelease \
     --no-daemon --console=plain)
 
-echo "==> 构建 Zygisk Magisk 模块"
-bash "$HERE/zygisk/build.sh"
-
 echo "==> 汇总产物"
 mkdir -p "$HERE/dist"
-cp "$HERE/lsposed/app/build/outputs/apk/release/app-release.apk" \
-   "$HERE/dist/DevOptsHider-LSPosed-v1.0.0.apk"
-cp "$HERE/lsposed/probe/build/outputs/apk/release/probe-release.apk" \
-   "$HERE/dist/DevOptsHider-Probe-v1.0.0.apk"
 cp "$HERE/usbswitch/app/build/outputs/apk/release/app-release.apk" \
    "$HERE/dist/DevOptsHider-UsbSwitch-v1.0.0.apk"
 

@@ -203,11 +203,14 @@ public class UsbToggleService extends Service {
         Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
                 ? new Notification.Builder(ctx, CHANNEL_ID)
                 : new Notification.Builder(ctx);
-        // 不设 ongoing：常驻通知需要一直显示到恢复调试，但也要允许手动划掉
-        // （setOngoing(true) 会禁止滑动清除，在去掉「取消置顶」按钮后就再也无法关闭了）
+        // 必须设 ongoing：Android 16 的 Live Update 提升（setRequestPromotedOngoing）以
+        // 「ongoing 通知」为前提——前台服务用的是 specialUse 类型不被提升，所以原先这里
+        // 没设 ongoing 时，实际常驻通知只显示为普通通知（不进状态栏胶囊/锁屏），
+        // 只有「实时动态测试」那条设了 ongoing 才提升成功。现已与测试通知对齐。
         b.setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(on ? "调试：已开启" : "调试：当前已关闭")
                 .setContentText(describeSubStates(s))
+                .setOngoing(true)
                 .setPriority(Notification.PRIORITY_LOW);
 
         // —— Android 16 Live Updates ——
@@ -239,7 +242,6 @@ public class UsbToggleService extends Service {
             b.addAction(0, ctx.getString(R.string.notify_settings), piSettings);
         }
 
-        // 原先这里的「取消置顶」动作已移除：常驻通知现在可以直接滑动关闭，多一个按钮反而碍事。
         // 点通知主体打开应用设置页
         Intent main = new Intent(ctx, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>USB 调试开关 App · 图标方案评审</title>
+<style>
+  :root {
+    --bg:#f5f6f8; --card:#ffffff; --line:#e3e6ec; --txt:#1b1f27;
+    --mut:#6b7280; --acc:#2563eb;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--txt);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;
+    padding:40px 32px 80px;
+  }
+  .wrap { max-width:1180px; margin:0 auto; }
+  header h1 { font-size:27px; margin:0 0 8px; letter-spacing:-.3px; }
+  header p { margin:0 0 6px; color:var(--mut); }
+  .nowarn {
+    background:#fff8e6; border:1px solid #f2d999; border-left:3px solid #d99b0b;
+    border-radius:10px; padding:13px 18px; margin:22px 0 8px; font-size:13.5px;
+  }
+  .nowarn b { color:#a86a00; }
+  .howto {
+    background:#fff; border:1px solid var(--line); border-left:3px solid var(--acc);
+    border-radius:10px; padding:14px 18px; margin:22px 0 40px; font-size:14px;
+  }
+  .howto b { color:var(--acc); }
+  section { margin-bottom:52px; }
+  h2 { font-size:19px; margin:0 0 6px; display:flex; align-items:baseline; gap:10px; }
+  h2 .n {
+    font-size:12px; background:var(--acc); color:#fff; border-radius:20px;
+    padding:2px 9px; font-weight:600; letter-spacing:.3px;
+  }
+  .lead { color:var(--mut); font-size:13.5px; margin:0 0 20px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); gap:18px; }
+  .card {
+    margin:0; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:16px; transition:.16s;
+  }
+  .card:hover { border-color:#c3cad6; transform:translateY(-2px); box-shadow:0 8px 22px rgba(20,30,50,.08); }
+  .art { display:flex; justify-content:center; padding:6px 0 14px; }
+  .art svg { width:100%; height:auto; display:block; }
+  figcaption b { display:block; font-size:14.5px; }
+  .sub { display:block; color:var(--mut); font-size:12.5px; margin-top:5px; line-height:1.55; }
+  .tag {
+    display:inline-block; margin-top:7px; font-size:10.5px; color:#5b6472;
+    background:#eef1f6; border-radius:5px; padding:2px 7px;
+    font-family:ui-monospace,Menlo,monospace;
+  }
+  footer { color:var(--mut); font-size:12.5px; border-top:1px solid var(--line); padding-top:20px; }
+</style></head><body><div class="wrap">
+
+<header>
+  <h1>调试开关 App · 图标方案</h1>
+  <p>包名 com.elleng.usbdebug ｜ 定位：root 改写 adb_enabled，一键开关调试开关。</p>
+  <p>风格基准取自你的 5 张参考图：满幅圆角方形 + 居中白色高对比符号 + 单色/渐变底 + 克制立体感。</p>
+</header>
+
+<div class="nowarn">
+  <b>已按你的要求放弃 USB 元素。</b>
+  早期版本把 USB 当主形象，但 app 实际同时管无线调试，USB 只是载体而非目的，容易误导。
+  下面所有元素都收敛到 <b>调试</b> 语义：甲虫、断点、终端、代码、堆栈、波形、芯片、开关。
+</div>
+
+<div class="howto">
+  <b>三个维度是独立的</b>，你可以各挑一个再组合：
+  ① <b>元素</b>（画什么）→ ② <b>构图</b>（怎么摆）→ ③ <b>配色</b>（什么颜色）。
+  最后 <b>组合方案</b> 是我按三者搭配好的成品，也可以只参考。
+  告诉我三个维度的选择（或直接说第几组组合），我再落地成 adaptive icon、开启混淆压缩、打包 release APK。
+</div>
+
+<section>
+  <h2><span class="n">①</span>元素 · 图标画什么</h2>
+  <p class="lead">8 种调试语义的主体符号，统一画在蓝底上以便横向比较轮廓与识别度。</p>
+  <div class="grid"><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>调试图标</b>
+    <span class="tag">bug</span>
+    <span class="sub">甲虫+触角，debug 的国际通用符号，开发者一眼就懂。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g>
+      <circle cx="512" cy="452" r="196" fill="none" stroke="#FFFFFF" stroke-width="70"/>
+      <circle cx="512" cy="452" r="74" fill="#FFFFFF"/>
+      <path d="M 172 772 L 852 772" fill="none" stroke="#FFFFFF" stroke-width="70" stroke-linecap="round"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>断点</b>
+    <span class="tag">breakpoint</span>
+    <span class="sub">圆环+实心点+基线，就是 IDE 里那颗断点，调试语境最精确。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="88" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 404 384 L 248 542 L 404 700"/>
+      <path d="M 648 700 L 836 700"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>终端 `>_`</b>
+    <span class="tag">terminal</span>
+    <span class="sub">adb shell 的标志性提示符，命令行气质浓。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="78" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 372 396 L 216 540 L 372 684"/>
+      <path d="M 652 396 L 808 540 L 652 684"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>代码括号</b>
+    <span class="tag">code</span>
+    <span class="sub">`< >`，泛化的「写代码/改配置」，不绑定任何具体外设。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="62" stroke-linejoin="round">
+      <rect x="222" y="212" width="580" height="152" rx="58"/>
+      <rect x="222" y="436" width="580" height="152" rx="58"/>
+      <rect x="222" y="660" width="580" height="152" rx="58"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>调用堆栈</b>
+    <span class="tag">stack</span>
+    <span class="sub">三层堆栈帧＝函数调用栈，程序内部结构的可视化。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="70" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 148 636 L 300 636 L 300 384 L 452 384 L 452 676 L 604 676 L 604 300 L 756 300 L 756 566 L 884 566"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>数字波形</b>
+    <span class="tag">waveform</span>
+    <span class="sub">方波＝逻辑分析仪抓的信号，硬件/底层调试的代表性图形。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="272" y="272" width="480" height="480" rx="88"/>
+      <path d="M 272 408 L 168 408 M 272 540 L 148 540 M 272 616 L 168 616"/>
+      <path d="M 752 408 L 856 408 M 752 540 L 876 540 M 752 616 L 856 616"/>
+      <path d="M 408 272 L 408 168 M 540 272 L 540 148 M 616 272 L 616 168"/>
+      <path d="M 408 752 L 408 856 M 540 752 L 540 876 M 616 752 L 616 856"/>
+      <path d="M 392 540 L 632 540 M 540 392 L 540 632" stroke-width="54"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>芯片引脚</b>
+    <span class="tag">chip</span>
+    <span class="sub">带引脚的核心芯片，指向更底层的调试对象。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g>
+      <rect x="176" y="388" width="672" height="328" rx="164" fill="none" stroke="#FFFFFF" stroke-width="74"/>
+      <circle cx="352" cy="552" r="112" fill="#FFFFFF"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>开关拨钮</b>
+    <span class="tag">toggle</span>
+    <span class="sub">唯一直接表达「一键开关」的元素，承接 app 的操作语义。</span>
+  </figcaption>
+</figure></div>
+</section>
+
+<section>
+  <h2><span class="n">②</span>构图 · 怎么摆</h2>
+  <p class="lead">统一用调试图标作主体，只比较版式与空间关系。</p>
+  <div class="grid"><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>居中大符号</b>
+    <span class="tag">center</span>
+    <span class="sub">符号撑满画布，最正统最稳，和参考图 3/5 同路子。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g fill="none" stroke="#FFFFFF" stroke-width="52" stroke-linecap="round" opacity="0.95"><path d="M 230.1 409.4 A 300.0 300.0 0 0 1 793.9 409.4 M 793.9 614.6 A 300.0 300.0 0 0 1 230.1 614.6"/></g><g fill="#FFFFFF"><path d="M 817.2 473.3 L 741.6 417.8 L 839.4 382.2 Z M 206.8 550.7 L 282.4 606.2 L 184.6 641.8 Z"/></g><g transform="translate(512,512) scale(0.56) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>循环箭头环绕</b>
+    <span class="tag">orbit</span>
+    <span class="sub">两个箭头把符号围起来，表达「反复开关 / 联动」，同参考图 1。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<rect x="152" y="196" width="720" height="632" rx="118" fill="none" stroke="#FFFFFF" stroke-width="58" opacity="0.5"/><g transform="translate(512,516) scale(0.64) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>置于设备框内</b>
+    <span class="tag">device</span>
+    <span class="sub">符号嵌在设备轮廓里，暗示「在设备上开关调试」。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g>
+      <rect x="196" y="222" width="566" height="430" rx="76" fill="#BFD9FF" opacity="0.42" transform="rotate(-10 512 512)"/>
+      <rect x="262" y="336" width="566" height="430" rx="76" fill="#FFFFFF" opacity="0.30" transform="rotate(8 512 512)"/>
+    </g><g transform="translate(512,486) scale(0.58) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>层叠卡片</b>
+    <span class="tag">cards</span>
+    <span class="sub">倾斜叠放的多层卡片，立体感最强，同参考图 4 的空间语言。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(462,462) scale(0.76) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g><circle cx="800" cy="800" r="152" fill="#BFD9FF"/><circle cx="800" cy="800" r="152" fill="none" stroke="#0A4DA2" stroke-width="20"/><g transform="translate(800,800) scale(0.66) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="82" stroke-linecap="round">
+      <path d="M 692 374 A 252 252 0 1 1 332 374"/>
+      <path d="M 512 246 L 512 548"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>主符+角标</b>
+    <span class="tag">badge</span>
+    <span class="sub">主符号缩进 + 右下角小圆徽，呼应参考图 2 的角标。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_1" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="0.499" stop-color="#3D8BFF"/><stop offset="0.5" stop-color="#0A4DA2"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_1)"/>
+</g>
+<g transform="translate(512,512) scale(0.82) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g><path d="M 0 512 L 1024 512" stroke="#0A4DA2" stroke-width="10" opacity="0.35"/>
+</svg></div>
+  <figcaption>
+    <b>上下分割</b>
+    <span class="tag">split</span>
+    <span class="sub">底色上下双色对切，符号骑在分割线上，动感与秩序兼具。</span>
+  </figcaption>
+</figure></div>
+</section>
+
+<section>
+  <h2><span class="n">③</span>配色 · 什么颜色</h2>
+  <p class="lead">统一用居中构图，只比较底色与气质。</p>
+  <div class="grid"><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_blue_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#0A4DA2"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_blue_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>亮蓝</b>
+    
+    <span class="sub">渐变 #3D8BFF → #0A4DA2</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_indigo_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#31459B"/><stop offset="1" stop-color="#0E1740"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_indigo_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>靛蓝</b>
+    
+    <span class="sub">渐变 #31459B → #0E1740</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_forest_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#12A05C"/><stop offset="1" stop-color="#052A1B"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_forest_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>墨绿</b>
+    
+    <span class="sub">渐变 #12A05C → #052A1B</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_clay_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#D4784F"/><stop offset="1" stop-color="#9C4526"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_clay_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>砖红</b>
+    
+    <span class="sub">渐变 #D4784F → #9C4526</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_graphite_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#2A2E33"/><stop offset="1" stop-color="#101215"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_graphite_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>石墨+荧光绿</b>
+    <span class="tag">深底</span>
+    <span class="sub">渐变 #2A2E33 → #101215</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_violet_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#5A6AE8"/><stop offset="1" stop-color="#282C86"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_violet_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>蓝紫</b>
+    
+    <span class="sub">渐变 #5A6AE8 → #282C86</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_teal_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#16B0B0"/><stop offset="1" stop-color="#04585A"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_teal_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>青</b>
+    
+    <span class="sub">渐变 #16B0B0 → #04585A</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_ember_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#2E333A"/><stop offset="1" stop-color="#141619"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_ember_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>炭灰+橙</b>
+    <span class="tag">深底</span>
+    <span class="sub">渐变 #2E333A → #141619</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0B0F0B"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#39FF14" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>纯黑+荧光绿</b>
+    <span class="tag">亮字深底</span>
+    <span class="sub">渐变 #0B0F0B → #000000</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix2_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#04140A"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix2_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#4CFF7A" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>墨绿黑+亮绿</b>
+    <span class="tag">亮字深底</span>
+    <span class="sub">渐变 #04140A → #000000</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix3_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0C1113"/><stop offset="1" stop-color="#010203"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix3_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#00E5A0" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>炭黑+青绿</b>
+    <span class="tag">亮字深底</span>
+    <span class="sub">渐变 #0C1113 → #010203</span>
+  </figcaption>
+</figure></div>
+</section>
+
+<section>
+  <h2><span class="n">④</span>组合方案 · 成品参考</h2>
+  <p class="lead">8 组搭配好的完整图标，可直接选其一，也可拆开重组。</p>
+  <div class="grid"><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0B0F0B"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix_0)"/>
+</g>
+<g fill="none" stroke="#39FF14" stroke-width="52" stroke-linecap="round" opacity="0.95"><path d="M 230.1 409.4 A 300.0 300.0 0 0 1 793.9 409.4 M 793.9 614.6 A 300.0 300.0 0 0 1 230.1 614.6"/></g><g fill="#39FF14"><path d="M 817.2 473.3 L 741.6 417.8 L 839.4 382.2 Z M 206.8 550.7 L 282.4 606.2 L 184.6 641.8 Z"/></g><g transform="translate(512,512) scale(0.56) translate(-512,-512)"><g fill="none" stroke="#39FF14" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>调试图标 · 环绕箭头 · 纯黑+荧光绿</b>
+    <span class="tag">bug+orbit</span>
+    <span class="sub">★ 你选定的方向：黑底绿字，像命令提示器，光标一样醒目。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix2_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#04140A"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix2_0)"/>
+</g>
+<g fill="none" stroke="#4CFF7A" stroke-width="52" stroke-linecap="round" opacity="0.95"><path d="M 230.1 409.4 A 300.0 300.0 0 0 1 793.9 409.4 M 793.9 614.6 A 300.0 300.0 0 0 1 230.1 614.6"/></g><g fill="#4CFF7A"><path d="M 817.2 473.3 L 741.6 417.8 L 839.4 382.2 Z M 206.8 550.7 L 282.4 606.2 L 184.6 641.8 Z"/></g><g transform="translate(512,512) scale(0.56) translate(-512,-512)"><g fill="none" stroke="#4CFF7A" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>调试图标 · 环绕箭头 · 墨绿黑+亮绿</b>
+    <span class="tag">bug+orbit</span>
+    <span class="sub">同上，但底色带一点绿、字更柔和，长时间看不刺眼。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix3_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0C1113"/><stop offset="1" stop-color="#010203"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix3_0)"/>
+</g>
+<g fill="none" stroke="#00E5A0" stroke-width="52" stroke-linecap="round" opacity="0.95"><path d="M 230.1 409.4 A 300.0 300.0 0 0 1 793.9 409.4 M 793.9 614.6 A 300.0 300.0 0 0 1 230.1 614.6"/></g><g fill="#00E5A0"><path d="M 817.2 473.3 L 741.6 417.8 L 839.4 382.2 Z M 206.8 550.7 L 282.4 606.2 L 184.6 641.8 Z"/></g><g transform="translate(512,512) scale(0.56) translate(-512,-512)"><g fill="none" stroke="#00E5A0" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>调试图标 · 环绕箭头 · 炭黑+青绿</b>
+    <span class="tag">bug+orbit</span>
+    <span class="sub">青调荧光绿，介于绿和蓝之间，更「技术」而非「复古终端」。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0B0F0B"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#39FF14" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>调试图标 · 居中 · 纯黑+荧光绿</b>
+    <span class="tag">bug+center</span>
+    <span class="sub">去掉环绕箭头，最干净直白，甲虫本身更突出。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0B0F0B"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix_0)"/>
+</g>
+<g fill="none" stroke="#39FF14" stroke-width="52" stroke-linecap="round" opacity="0.95"><path d="M 230.1 409.4 A 300.0 300.0 0 0 1 793.9 409.4 M 793.9 614.6 A 300.0 300.0 0 0 1 230.1 614.6"/></g><g fill="#39FF14"><path d="M 817.2 473.3 L 741.6 417.8 L 839.4 382.2 Z M 206.8 550.7 L 282.4 606.2 L 184.6 641.8 Z"/></g><g transform="translate(512,512) scale(0.56) translate(-512,-512)"><g>
+      <circle cx="512" cy="452" r="196" fill="none" stroke="#39FF14" stroke-width="70"/>
+      <circle cx="512" cy="452" r="74" fill="#39FF14"/>
+      <path d="M 172 772 L 852 772" fill="none" stroke="#39FF14" stroke-width="70" stroke-linecap="round"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>断点 · 环绕箭头 · 纯黑+荧光绿</b>
+    <span class="tag">breakpoint+orbit</span>
+    <span class="sub">断点符号更锐利，和圆环的曲线形成对比张力。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0B0F0B"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix_0)"/>
+</g>
+<g transform="translate(512,512) scale(0.88) translate(-512,-512)"><g fill="none" stroke="#39FF14" stroke-width="88" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 404 384 L 248 542 L 404 700"/>
+      <path d="M 648 700 L 836 700"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>终端 `>_` · 居中 · 纯黑+荧光绿</b>
+    <span class="tag">terminal+center</span>
+    <span class="sub">最贴近「命令行」意象，字形简单、缩到很小也清晰。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_matrix_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#0B0F0B"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_matrix_0)"/>
+</g>
+<g fill="none" stroke="#39FF14" stroke-width="52" stroke-linecap="round" opacity="0.95"><path d="M 230.1 409.4 A 300.0 300.0 0 0 1 793.9 409.4 M 793.9 614.6 A 300.0 300.0 0 0 1 230.1 614.6"/></g><g fill="#39FF14"><path d="M 817.2 473.3 L 741.6 417.8 L 839.4 382.2 Z M 206.8 550.7 L 282.4 606.2 L 184.6 641.8 Z"/></g><g transform="translate(512,512) scale(0.56) translate(-512,-512)"><g>
+      <rect x="176" y="388" width="672" height="328" rx="164" fill="none" stroke="#39FF14" stroke-width="74"/>
+      <circle cx="352" cy="552" r="112" fill="#39FF14"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>开关拨钮 · 环绕箭头 · 纯黑+荧光绿</b>
+    <span class="tag">toggle+orbit</span>
+    <span class="sub">把「一键开关」直接画出来，功能指向最明确。</span>
+  </figcaption>
+</figure><figure class="card">
+  <div class="art"><svg viewBox="0 0 1024 1024" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg_graphite_0" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#2A2E33"/><stop offset="1" stop-color="#101215"/></linearGradient>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+  <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.18"/>
+</filter>
+</defs>
+<g filter="url(#sh)">
+  <path d="M 226 0 H 798 A 226 226 0 0 1 1024 226 V 798 A 226 226 0 0 1 798 1024 H 226 A 226 226 0 0 1 0 798 V 226 A 226 226 0 0 1 226 0 Z" fill="url(#bg_graphite_0)"/>
+</g>
+<g fill="none" stroke="#FFFFFF" stroke-width="52" stroke-linecap="round" opacity="0.95"><path d="M 230.1 409.4 A 300.0 300.0 0 0 1 793.9 409.4 M 793.9 614.6 A 300.0 300.0 0 0 1 230.1 614.6"/></g><g fill="#FFFFFF"><path d="M 817.2 473.3 L 741.6 417.8 L 839.4 382.2 Z M 206.8 550.7 L 282.4 606.2 L 184.6 641.8 Z"/></g><g transform="translate(512,512) scale(0.56) translate(-512,-512)"><g fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="512" cy="604" rx="178" ry="186"/>
+      <circle cx="512" cy="318" r="98"/>
+      <path d="M442.7 248.7 L379.1 185.1"/>
+      <path d="M581.3 248.7 L644.9 185.1"/>
+      <path d="M512 500 L512 710"/>
+      <path d="M357.9 511 L275.6 463.5"/>
+      <path d="M334 604 L234 604"/>
+      <path d="M357.9 697 L275.6 744.5"/>
+      <path d="M666.1 511 L748.4 463.5"/>
+      <path d="M690 604 L790 604"/>
+      <path d="M666.1 697 L748.4 744.5"/>
+    </g></g>
+</svg></div>
+  <figcaption>
+    <b>调试图标 · 环绕箭头 · 石墨+荧光绿</b>
+    <span class="tag">bug+orbit</span>
+    <span class="sub">同样带绿调，但字是白的、更中性，供对比参考。</span>
+  </figcaption>
+</figure></div>
+</section>
+
+<footer>
+  选定后我会：出 1080px 主图 + 各密度 mipmap、生成 adaptive icon（前景/背景分层）、
+  开启混淆与资源压缩、打包 release APK。
+</footer>
+
+</div></body></html>

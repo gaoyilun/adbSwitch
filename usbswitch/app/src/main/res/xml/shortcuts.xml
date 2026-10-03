@@ -14,26 +14,13 @@
             android:targetClass="com.elleng.usbdebug.MainActivity" />
     </shortcut>
 
-    <!-- 快捷方式 2：以联动模式打开联动应用（关调试 + 跳转），不进设置页 -->
-    <shortcut
-        android:shortcutId="linkage_launch"
-        android:enabled="true"
-        android:icon="@drawable/ic_launcher_foreground"
-        android:shortcutShortLabel="@string/sc_linkage_short"
-        android:shortcutLongLabel="@string/sc_linkage_long">
-        <intent
-            android:action="com.elleng.usbdebug.action.LINKAGE_LAUNCH"
-            android:targetPackage="com.elleng.usbdebug"
-            android:targetClass="com.elleng.usbdebug.MainActivity" />
-    </shortcut>
-
-    <!-- 快捷方式 3：直接打开主页。用独立 action 标记（纯字符串，无 extra 类型歧义），
+    <!-- 快捷方式 2：直接打开主页。用独立 action 标记（纯字符串，无 extra 类型歧义），
          MainActivity 见到该 action 就跳过联动自动跳转，
          所以开启联动模式后依然能进主页改设置。 -->
     <shortcut
         android:shortcutId="open_home"
         android:enabled="true"
-        android:icon="@drawable/ic_launcher_foreground"
+        android:icon="@mipmap/ic_launcher"
         android:shortcutShortLabel="@string/sc_open_home_short"
         android:shortcutLongLabel="@string/sc_open_home_long">
         <intent
