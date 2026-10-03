@@ -1,0 +1,17 @@
+<resources>
+    <!-- 深色模式配色：深色背景 / 浅色文字，主色仍用蓝色以呼应顶栏 -->
+    <color name="colorPrimary">#1E88E5</color>
+    <color name="colorPrimaryDark">#0D47A1</color>
+    <color name="colorAccent">#42A5F5</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+
+    <color name="surface">#1E1E1E</color>
+    <color name="background">#121212</color>
+
+    <color name="textPrimary">#E8EAED</color>
+    <color name="textSecondary">#9AA0A6</color>
+
+    <color name="stateSafe">#66BB6A</color>   <!-- 已关闭：安全 -->
+    <color name="stateOn">#FFA726</color>     <!-- 已开启：调试中 -->
+    <color name="error">#EF5350</color>
+</resources>

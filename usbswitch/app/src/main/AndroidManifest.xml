@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 16 Live Updates：常驻通知可被系统「提升」为实时动态（状态栏胶囊/锁屏/AOD） -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
+    <!-- Android 11+ 包可见性：声明本应用需要「能看到并查询所有可启动（有桌面图标）的应用」，
+         否则 getInstalledApplications / getLaunchIntentForPackage 只能返回少量系统应用。
+         注意这不是运行时权限，无法在系统设置里授权，必须在 manifest 里声明 <queries>。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <!-- singleTask：任务已存在时，桌面 shortcut / 通知栏点击会回调 onNewIntent，
+             否则只会把任务带到前台（既不重建 Activity 也不回调），
+             导致「打开主页」shortcut 在后台状态下点了没反应。 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 桌面长按图标显示的快捷方式 -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- 前台服务：临时关闭 USB 调试后的常驻通知 -->
+        <service
+            android:name=".UsbToggleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="USB 调试快捷开关的常驻控制通知" />
+        </service>
+
+        <!-- 通知栏按钮的广播接收器 -->
+        <receiver
+            android:name=".NotificationReceiver"
+            android:exported="false" />
+
+        <!-- 通知控制中心（下拉快捷磁贴） -->
+        <service
+            android:name=".UsbTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

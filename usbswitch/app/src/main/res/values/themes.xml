@@ -1,0 +1,29 @@
+<resources>
+    <!-- 使用 framework 原生 ActionBar（带顶栏），系统会自动预留状态栏区域，
+         内容不再压在状态栏下面。 -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light">
+        <item name="android:colorPrimary">@color/colorPrimary</item>
+        <item name="android:colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="android:colorAccent">@color/colorAccent</item>
+        <item name="android:statusBarColor">@color/colorPrimaryDark</item>
+        <!-- 状态栏为深色，图标用浅色 -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@color/background</item>
+        <!-- 顶栏（ActionBar）样式：蓝底 + 白色标题/副标题，保证可读性 -->
+        <item name="android:actionBarStyle">@style/AppActionBar</item>
+    </style>
+
+    <style name="AppActionBar" parent="@android:style/Widget.Material.ActionBar.Solid">
+        <item name="android:background">@color/colorPrimary</item>
+        <item name="android:titleTextStyle">@style/AppActionBarTitle</item>
+        <item name="android:subtitleTextStyle">@style/AppActionBarSubtitle</item>
+    </style>
+
+    <style name="AppActionBarTitle" parent="@android:style/TextAppearance.Material.Widget.ActionBar.Title">
+        <item name="android:textColor">@color/colorOnPrimary</item>
+    </style>
+
+    <style name="AppActionBarSubtitle" parent="@android:style/TextAppearance.Material.Widget.ActionBar.Subtitle">
+        <item name="android:textColor">#C8E1FF</item>
+    </style>
+</resources>

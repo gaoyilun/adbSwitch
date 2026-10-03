@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 联动应用行右侧的「打开」按钮（作为 Preference 的 widgetLayout inflate）。
+     原先这里的「修改」按钮已移除：整行点击已经能可靠打开选择器，不必再占一个按钮位。
+     未选择联动应用时该按钮隐藏。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal">
+
+    <Button
+        android:id="@+id/btn_open_app"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="0dp"
+        android:minHeight="0dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:text="@string/pref_open"
+        android:textSize="12sp"
+        android:textColor="@color/colorAccent"
+        android:background="?android:attr/selectableItemBackgroundBorderless" />
+
+</LinearLayout>

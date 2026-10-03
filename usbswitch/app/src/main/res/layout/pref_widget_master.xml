@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主开关行的右侧控件：折叠箭头 + 主开关。
+     主开关用普通 Preference + 自定义 widget（而不是 SwitchPreference），
+     才能把「展开/折叠」和「开关」两个操作分开：点箭头折叠，点开关或行切换。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical">
+
+    <ImageButton
+        android:id="@+id/btn_expand"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:padding="6dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_expand"
+        android:tint="@color/textSecondary"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/master_expand_desc" />
+
+    <Switch
+        android:id="@+id/sw_master"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp" />
+
+</LinearLayout>

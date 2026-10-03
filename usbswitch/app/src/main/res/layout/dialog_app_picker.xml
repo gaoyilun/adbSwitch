@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <!-- 搜索框 -->
+    <EditText
+        android:id="@+id/etSearch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="8dp"
+        android:hint="@string/picker_hint"
+        android:inputType="text"
+        android:textSize="15sp"
+        android:backgroundTint="@color/colorAccent"
+        android:padding="10dp" />
+
+    <!-- 加载提示：后台线程扫描应用列表期间显示 -->
+    <TextView
+        android:id="@+id/tvLoading"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingTop="24dp"
+        android:paddingBottom="24dp"
+        android:textSize="14sp"
+        android:textColor="@color/textSecondary"
+        android:text="@string/picker_loading"
+        android:visibility="gone" />
+
+    <!-- 下拉刷新容器：顶部隐藏的刷新提示 + 可滚动列表 -->
+    <FrameLayout
+        android:id="@+id/ptrContainer"
+        android:layout_width="match_parent"
+        android:layout_height="500dp"
+        android:background="@color/background">
+
+        <TextView
+            android:id="@+id/ptrHeader"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_gravity="top"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:textColor="@color/textSecondary"
+            android:text="@string/ptr_pull" />
+
+        <ListView
+            android:id="@+id/lvApps"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="top"
+            android:background="@color/surface"
+            android:divider="#E3E6EA"
+            android:dividerHeight="1dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:scrollbars="vertical" />
+    </FrameLayout>
+
+</LinearLayout>

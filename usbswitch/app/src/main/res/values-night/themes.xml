@@ -1,0 +1,14 @@
+<resources>
+    <!-- 深色模式：继承 framework 原生深色 Material 主题（自带 ActionBar） -->
+    <style name="AppTheme" parent="@android:style/Theme.Material">
+        <item name="android:colorPrimary">@color/colorPrimary</item>
+        <item name="android:colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="android:colorAccent">@color/colorAccent</item>
+        <item name="android:statusBarColor">@color/colorPrimaryDark</item>
+        <!-- 深色状态栏，图标用浅色 -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@color/background</item>
+        <!-- 顶栏沿用蓝底 + 白色标题/副标题（AppActionBar 在默认配置中已定义，跨夜间复用） -->
+        <item name="android:actionBarStyle">@style/AppActionBar</item>
+    </style>
+</resources>

@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 白色 USB 插头符号，居中 -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M42,34h24v9h-7v32h-10v-32h-7z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M33,50h42v7h-42z" />
+</vector>

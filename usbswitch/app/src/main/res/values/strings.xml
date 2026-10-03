@@ -1,0 +1,89 @@
+<resources>
+    <string name="app_name">调试开关</string>
+    <string name="tile_label">调试开关</string>
+
+    <!-- 桌面快捷方式 -->
+    <string name="sc_open_home_short">打开主页</string>
+    <string name="sc_open_home_long">直接打开设置主页，不触发联动跳转</string>
+    <string name="sc_toggle_short">一键开关</string>
+    <string name="sc_toggle_long">一键开关调试（开变关、关变开），不打开界面</string>
+    <string name="sc_linkage_short">联动启动</string>
+    <string name="sc_linkage_long">关闭调试并跳转联动应用</string>
+    <string name="sc_launch_app_short">启动联动应用</string>
+    <string name="sc_launch_app_long_none">启动联动应用（请先在设置里选择联动应用）</string>
+
+    <string name="header_subtitle">root 授权 · 一键开关 USB 与无线调试</string>
+
+    <string name="root_missing">未检测到 root，请确认已授予超级用户权限</string>
+
+    <string name="card_debug_title">调试开关</string>
+
+    <string name="master_title">调试主开关</string>
+    <string name="master_expand_desc">展开或折叠子开关</string>
+    <string name="master_sum">一键开关，关闭时记住各子项状态</string>
+    <string name="master_on">已开启 · adbd 运行中</string>
+    <string name="master_off">已关闭 · 可通过检测</string>
+    <string name="master_partial">部分开启 · adbd 仍在运行</string>
+
+    <string name="usb_title">USB 调试</string>
+    <string name="usb_on">已开启</string>
+    <string name="usb_off">已关闭</string>
+
+    <string name="wireless_title">无线调试</string>
+    <string name="wireless_sum">开着时 adbd 同样在运行</string>
+    <string name="wireless_on">已开启 · adbd 运行中</string>
+    <string name="wireless_off">已关闭</string>
+
+    <string name="card_linkage_title">联动</string>
+    <string name="linkage_switch">开启时自动联动跳转</string>
+    <string name="linkage_app_label">联动应用</string>
+    <string name="linkage_app_none">未选择</string>
+    <string name="linkage_choose">选择应用</string>
+    <string name="linkage_sum">打开本 App 时自动关调试并跳转</string>
+    <string name="linkage_no_app">请先选择联动应用</string>
+    <string name="linkage_on">已开启联动</string>
+    <string name="linkage_off">已关闭联动</string>
+    <string name="linkage_app_set">已设置联动应用</string>
+
+    <string name="kill_before_open_title">开调试前先停止联动应用</string>
+    <string name="kill_before_open_sum">避免联动应用在状态翻转瞬间读到调试</string>
+    <string name="kill_before_open_done">已先停止联动应用，再打开调试</string>
+
+    <string name="linkage_run_now_title">立即执行联动</string>
+    <string name="linkage_run_now_sum">关调试并跳转，自动跳转每次启动只做一次</string>
+    <string name="linkage_skipped">已跳过自动跳转，需再跳请点「立即执行联动」</string>
+    <string name="linkage_need_notif">联动需要通知权限，请先授予</string>
+
+    <string name="ptr_pull">下拉刷新应用列表</string>
+    <string name="ptr_release">松开立即刷新</string>
+    <string name="ptr_refreshing">正在刷新…</string>
+    <string name="ptr_done">已刷新应用列表</string>
+
+    <string name="card_notify_title">通知</string>
+    <string name="btn_temp_close">关闭时显示通知</string>
+    <string name="temp_close_sum">关闭调试时显示可一键恢复的常驻通知</string>
+    <string name="live_update_title">测试灵动焦点通知</string>
+    <string name="live_update_sum">检测权限并发送一条测试通知</string>
+    <string name="live_update_grant">系统暂未允许显示灵动焦点通知，是否前往授权？</string>
+    <string name="live_update_test_sent">已发送测试通知，请查看状态栏胶囊 / 锁屏</string>
+    <string name="live_update_test_sent_plain">已发送测试通知，但未获授权，仅作普通通知显示</string>
+    <string name="live_update_test_title">灵动焦点通知测试</string>
+    <string name="live_update_test_text">状态栏出现胶囊即表示已生效</string>
+    <string name="live_update_on">实时动态已开启</string>
+    <string name="live_update_unsupported">当前系统不支持（需 Android 16+）</string>
+
+    <string name="pref_open">打开</string>
+    <string name="pref_edit">修改</string>
+    <string name="toast_off">已关闭，通知栏可一键恢复</string>
+    <string name="toast_root_fail">root 执行失败，请检查授权</string>
+
+    <!-- 底部调试信息 -->
+    <string name="build_info_title">构建时间（调试）</string>
+    <string name="build_info_placeholder">读取中…</string>
+
+    <string name="picker_title">选择联动应用</string>
+    <string name="picker_hint">搜索应用名称 / 包名</string>
+    <string name="picker_loading">正在读取已安装应用…</string>
+    <string name="picker_load_fail">读取应用列表失败</string>
+    <string name="notify_settings">应用设置</string>
+</resources>

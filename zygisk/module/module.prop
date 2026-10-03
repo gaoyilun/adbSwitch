@@ -1,0 +1,7 @@
+id=devopts-hider
+name=DevOpts Hider (Zygisk)
+version=1.0.0
+versionCode=100
+author=DevOptsHider
+description=对指定 App 隐藏「开发者选项 / USB 调试 / 无线调试」痕迹：拦截系统属性、adb 相关文件与端口（native 层）。与 DevOpts Hider 的 LSPosed 模块配合使用效果最完整。
+updateJson=

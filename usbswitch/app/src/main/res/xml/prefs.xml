@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 调试开关：主开关可折叠/展开，下面挂 USB 与无线两个子开关 -->
+    <PreferenceCategory
+        android:key="catDebug"
+        android:title="@string/card_debug_title">
+
+        <Preference
+            android:key="swMaster"
+            android:title="@string/master_title"
+            android:summary="@string/master_off"
+            android:layout="@layout/pref_row"
+            android:widgetLayout="@layout/pref_widget_master" />
+
+        <SwitchPreference
+            android:key="swUsb"
+            android:title="@string/usb_title"
+            android:summary="@string/usb_off"
+            android:layout="@layout/pref_row" />
+
+        <SwitchPreference
+            android:key="swWireless"
+            android:title="@string/wireless_title"
+            android:summary="@string/wireless_off"
+            android:layout="@layout/pref_row" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="@string/card_linkage_title">
+
+        <SwitchPreference
+            android:key="swLinkage"
+            android:title="@string/linkage_switch"
+            android:summary="@string/linkage_sum"
+            android:layout="@layout/pref_row" />
+
+        <Preference
+            android:key="linkageApp"
+            android:title="@string/linkage_app_label"
+            android:summary="@string/linkage_app_none"
+            android:layout="@layout/pref_row"
+            android:widgetLayout="@layout/pref_widget_open" />
+
+        <!-- 打开调试前先杀掉联动应用：避免它在调试开启的瞬间读到状态翻转 -->
+        <SwitchPreference
+            android:key="swKillBeforeOpen"
+            android:title="@string/kill_before_open_title"
+            android:summary="@string/kill_before_open_sum"
+            android:layout="@layout/pref_row" />
+
+        <!-- 手动执行联动：自动跳转每个进程只做一次，之后想再跳用这一行 -->
+        <Preference
+            android:key="linkageRunNow"
+            android:title="@string/linkage_run_now_title"
+            android:summary="@string/linkage_run_now_sum"
+            android:layout="@layout/pref_row" />
+
+    </PreferenceCategory>
+
+    <!-- 通知设置：与「调试开关」「联动」并列 -->
+    <PreferenceCategory android:title="@string/card_notify_title">
+
+        <SwitchPreference
+            android:key="swNotify"
+            android:title="@string/btn_temp_close"
+            android:summary="@string/temp_close_sum"
+            android:layout="@layout/pref_row"
+            android:defaultValue="true" />
+
+        <Preference
+            android:key="liveUpdate"
+            android:title="@string/live_update_title"
+            android:summary="@string/live_update_sum"
+            android:layout="@layout/pref_row" />
+
+    </PreferenceCategory>
+
+    <!-- 底部调试信息：显示本 APK 的构建时间，用于确认设备上装的是否为最新版本 -->
+    <Preference
+        android:key="buildInfo"
+        android:title="@string/build_info_title"
+        android:summary="@string/build_info_placeholder"
+        android:layout="@layout/pref_row"
+        android:persistent="false" />
+
+</PreferenceScreen>

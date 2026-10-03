@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">DevOpts Hider</string>
+    <string name="xposed_description">对指定 App 隐藏「开发者选项 / USB 调试 / 无线调试」痕迹（Settings + 系统属性 + 文件 + 端口，多层拦截）</string>
+    <string name="selfcheck_title">检测点自检</string>
+
+    <string name="tab_targets">目标 App</string>
+    <string name="tab_status">状态</string>
+
+    <string name="hint_search">搜索包名 / 应用名</string>
+    <string name="btn_save">保存并写入 /data/adb</string>
+    <string name="btn_selfcheck">自检</string>
+    <string name="btn_reload">重新读取</string>
+    <string name="btn_select_banks">一键选中常见金融类 App</string>
+    <string name="btn_clear">清空选择</string>
+
+    <string name="real_value">真值</string>
+    <string name="fake_value">目标 App 将看到</string>
+
+    <string-array name="module_scope" />
+</resources>
