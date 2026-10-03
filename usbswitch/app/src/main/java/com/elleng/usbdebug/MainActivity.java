@@ -719,8 +719,22 @@ public class MainActivity extends PreferenceActivity {
                 }
                 Switch sw = row.findViewById(R.id.sw_master);
                 if (sw != null) {
-                    masterSwitch = sw;
-                    sw.setOnClickListener(v -> toggleMaster());
+                    if (masterSwitch != sw) {
+                        masterSwitch = sw;
+                        // 用 checked 回调而不是 click：Switch 点击后自身状态已翻转，
+                        // 以回调里给的 isChecked 为目标状态，才不会和真值打架。
+                        sw.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                            if (syncing) {
+                                return;
+                            }
+                            applyMasterState(isChecked);
+                        });
+                    }
+                    // 关键：widget 是布局完成后才拿到的，refresh() 往往跑在它之前而漏掉同步，
+                    // 这里每次布局完都按真值同步一次，避免 Switch 停在 XML 的默认关闭态。
+                    syncing = true;
+                    sw.setChecked(DebugController.read().anyOn());
+                    syncing = false;
                 }
                 updateExpandIcon(subSwitchesShown);
             } else if (appTitle.equals(title)) {
@@ -788,12 +802,12 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
-    /** 状态圆点图标（实心圆，随状态变色） */
+    /** 状态圆点图标（实心圆，随状态变色）；尺寸需与 pref_row 的 icon 区（40dp）协调 */
     private GradientDrawable stateIcon(int colorRes) {
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.OVAL);
         d.setColor(getResources().getColor(colorRes, getTheme()));
-        d.setSize(24, 24);
+        d.setSize(28, 28);
         return d;
     }
 

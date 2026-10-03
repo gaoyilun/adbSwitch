@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 自定义设置行：收紧左侧间距。
-     系统默认行布局的 icon_frame 很宽，没图标时会空出一大块；
-     这里把图标区固定成 20dp、外边距收到 12dp。
-     必须使用 framework 的 id（@android:id/title、summary、icon、widget_frame），
-     否则 Preference 绑定时找不到对应控件。 -->
+<!-- 自定义设置行：只收紧行本身的内边距，图标尺寸与字号沿用系统默认档位。
+     注意：
+     - 图标区必须给足宽度，否则联动应用这类大图标会被压小；
+       这里用 40dp（系统默认约 48dp），既能显示图标又比默认紧凑。
+     - 字号用 textAppearanceListItem / ListItemSecondary（即系统设置项的字号），
+       不要用 textAppearanceMedium/Small，那会让标题看起来比系统设置更大。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -18,14 +19,14 @@
 
     <FrameLayout
         android:id="@android:id/icon_frame"
-        android:layout_width="20dp"
-        android:layout_height="20dp"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:layout_gravity="center_vertical">
 
         <ImageView
             android:id="@android:id/icon"
-            android:layout_width="20dp"
-            android:layout_height="20dp"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
             android:layout_gravity="center"
             android:scaleType="fitCenter" />
 
@@ -44,7 +45,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="marquee"
             android:singleLine="true"
-            android:textAppearance="?android:attr/textAppearanceMedium"
+            android:textAppearance="?android:attr/textAppearanceListItem"
             android:textColor="?android:attr/textColorPrimary" />
 
         <TextView
@@ -54,7 +55,7 @@
             android:layout_marginTop="2dp"
             android:ellipsize="end"
             android:maxLines="3"
-            android:textAppearance="?android:attr/textAppearanceSmall"
+            android:textAppearance="?android:attr/textAppearanceListItemSecondary"
             android:textColor="?android:attr/textColorSecondary" />
 
     </LinearLayout>
