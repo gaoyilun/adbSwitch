@@ -5,7 +5,7 @@
     <shortcut
         android:shortcutId="toggle_master"
         android:enabled="true"
-        android:icon="@drawable/ic_tile"
+        android:icon="@mipmap/ic_launcher"
         android:shortcutShortLabel="@string/sc_toggle_short"
         android:shortcutLongLabel="@string/sc_toggle_long">
         <intent
@@ -20,7 +20,7 @@
     <shortcut
         android:shortcutId="open_home"
         android:enabled="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_home"
         android:shortcutShortLabel="@string/sc_open_home_short"
         android:shortcutLongLabel="@string/sc_open_home_long">
         <intent

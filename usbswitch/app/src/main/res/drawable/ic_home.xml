@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 快捷方式「打开主页」图标：黑底圆角方 + 荧光绿房子，与启动图标（甲虫+开关）同一套风格 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF111111"
+        android:pathData="M24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 V24 A24,24 0 0 1 24,0 Z" />
+    <group
+        android:scaleX="3.2"
+        android:scaleY="3.2"
+        android:translateX="15.6"
+        android:translateY="15.6">
+        <path
+            android:fillColor="#FF39FF14"
+            android:pathData="M12,3L2,12h3v8h5v-6h4v6h5v-8h3L12,3z" />
+    </group>
+</vector>
