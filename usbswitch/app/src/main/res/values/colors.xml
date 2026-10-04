@@ -11,7 +11,7 @@
     <color name="textPrimary">#212121</color>
     <color name="textSecondary">#6B7280</color>
 
-    <color name="stateSafe">#2E7D32</color>   <!-- 已关闭：安全 -->
-    <color name="stateOn">#EF6C00</color>     <!-- 已开启：调试中 -->
+    <color name="stateOn">#2E7D32</color>     <!-- 已开启：绿色 -->
+    <color name="stateOff">#EF6C00</color>    <!-- 已关闭：橙色 -->
     <color name="error">#D32F2F</color>
 </resources>

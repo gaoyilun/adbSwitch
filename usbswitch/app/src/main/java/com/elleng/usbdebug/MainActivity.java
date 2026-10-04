@@ -61,8 +61,6 @@ public class MainActivity extends PreferenceActivity {
      */
     private static final String ACTION_DEBUG_MASTER = "com.elleng.usbdebug.action.DEBUG_MASTER";
     private static final String EXTRA_MASTER_ON = "master_on";
-    /** 桌面快捷方式「一键开关」：切换主开关，执行完直接退出 */
-    private static final String ACTION_TOGGLE_MASTER = "com.elleng.usbdebug.action.TOGGLE_MASTER";
     /** 桌面快捷方式「创建桌面快捷方式」：先打开本 App，关掉调试后联动启动目标应用 */
     private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.usbdebug.action.DESKTOP_LINKAGE";
     private static final String TAG = "UsbSwitch";
@@ -217,18 +215,6 @@ public class MainActivity extends PreferenceActivity {
                                 + " usb=" + DebugController.read(this).usb
                                 + " wireless=" + DebugController.read(this).wireless));
             }, 600);
-            return true;
-        }
-
-        // 桌面快捷方式「一键开关」：切换主开关后直接退出，不显示界面。
-        // 写入是异步的：完成回调里再提示 + 退场（su 挂起时界面会多留一会儿，但绝不卡主线程）。
-        if (ACTION_TOGGLE_MASTER.equals(in.getAction())) {
-            final boolean next = !DebugController.read(this).anyOn();
-            applyMasterState(next, () -> {
-                Toast.makeText(this, next ? R.string.master_on : R.string.master_off,
-                        Toast.LENGTH_SHORT).show();
-                finish();
-            });
             return true;
         }
 
@@ -418,6 +404,8 @@ public class MainActivity extends PreferenceActivity {
         swLinkagePref.setOnPreferenceChangeListener((Preference p, Object v) -> {
             boolean on = (Boolean) v;
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_LINKAGE, on).apply();
+            // shortcut 组合随联动开关变化：开→「打开主页」，关→两个子开关
+            ToggleShortcuts.publish(this);
             Toast.makeText(this, on ? R.string.linkage_on : R.string.linkage_off, Toast.LENGTH_SHORT).show();
             return true;
         });
@@ -588,7 +576,7 @@ public class MainActivity extends PreferenceActivity {
         int masterColor;
         if (s.allOff()) {
             masterSum = R.string.master_off;
-            masterColor = R.color.stateSafe;
+            masterColor = R.color.stateOff;
         } else if (s.usb && s.wireless) {
             masterSum = R.string.master_on;
             masterColor = R.color.stateOn;
@@ -600,15 +588,18 @@ public class MainActivity extends PreferenceActivity {
         swMasterPref.setIcon(stateIcon(masterColor));
 
         swUsbPref.setSummary(s.usb ? R.string.usb_on : R.string.usb_off);
-        swUsbPref.setIcon(stateIcon(s.usb ? R.color.stateOn : R.color.stateSafe));
+        swUsbPref.setIcon(stateIcon(s.usb ? R.color.stateOn : R.color.stateOff));
 
         swWirelessPref.setSummary(s.wireless ? R.string.wireless_on : R.string.wireless_off);
-        swWirelessPref.setIcon(stateIcon(s.wireless ? R.color.stateOn : R.color.stateSafe));
+        swWirelessPref.setIcon(stateIcon(s.wireless ? R.color.stateOn : R.color.stateOff));
 
         syncing = true;
         swUsbPref.setChecked(s.usb);
         swWirelessPref.setChecked(s.wireless);
         syncing = false;
+
+        // 长按快捷方式的状态灯与界面同步
+        ToggleShortcuts.publish(this);
     }
 
     /** 根据 root 可用性刷新控件与提示：无 root 时禁用并提示，授权后及时恢复 */
@@ -719,8 +710,8 @@ public class MainActivity extends PreferenceActivity {
         AppListDialog.show(this, pkg -> {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_PKG, pkg).apply();
             updateAppLabel();
-            // 选完立刻刷新「启动联动应用」快捷方式的图标与名称
-            updateLaunchAppShortcut();
+            // 选完立刻刷新动态快捷方式（含「启动联动应用」的图标与名称）
+            ToggleShortcuts.publish(this);
             Toast.makeText(this, R.string.linkage_app_set, Toast.LENGTH_SHORT).show();
         });
     }
@@ -888,7 +879,6 @@ public class MainActivity extends PreferenceActivity {
         refresh(DebugController.read(this));
         updateAppLabel();
         updateLiveUpdateState();
-        updateLaunchAppShortcut();
         // 防御性重挂行点击：framework 可能在 resume/重绑时重置行状态，导致我们的 OnClickListener 失效；
         // 且滚动后新出现的行也需要重新挂，故每次 resume 都重新挂一遍。
         if (prefsLoaded) {
@@ -940,78 +930,12 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
-    /**
-     * 注册/刷新动态快捷方式「启动联动应用」：
-     *  - 图标与名称取自用户已选择的联动应用；
-     *  - 点击后由本 Activity 中转后立刻跳到目标应用（不做关调试等联动动作），
-     *    因此该快捷方式在「联动模式」关闭时同样可用。
-     * 未选择联动应用时不发布该快捷方式。
-     */
-    private void updateLaunchAppShortcut() {
-        if (Build.VERSION.SDK_INT < 25) {
-            return;
-        }
-        ShortcutManager sm = (ShortcutManager) getSystemService(SHORTCUT_SERVICE);
-        if (sm == null) {
-            return;
-        }
-        String pkg = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_PKG, "");
-        if (pkg.isEmpty()) {
-            // 未选择：移除该动态快捷方式
-            try {
-                sm.removeDynamicShortcuts(java.util.Collections.singletonList(SC_ID_LAUNCH_APP));
-            } catch (Throwable ignored) {
-            }
-            return;
-        }
-
-        CharSequence label = getApplicationLabel(pkg);
-        Icon icon = loadAppIcon(pkg);
-
-        Intent target = new Intent(this, MainActivity.class)
-                .setAction(SC_ID_LAUNCH_APP)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-
-        ShortcutInfo info = new ShortcutInfo.Builder(this, SC_ID_LAUNCH_APP)
-                .setShortLabel(label)
-                .setLongLabel(label)
-                .setIcon(icon)
-                .setIntent(target)
-                .build();
-        try {
-            sm.setDynamicShortcuts(java.util.Collections.singletonList(info));
-        } catch (Throwable t) {
-            // 超过动态快捷方式数量上限等异常时，忽略，不影响主功能
-        }
-    }
-
     /** 取目标应用图标（Drawable，供 Preference 左侧显示）；失败回退本应用图标 */
     private Drawable loadAppDrawable(String pkg) {
         try {
             return getPackageManager().getApplicationIcon(pkg);
         } catch (Throwable t) {
             return getResources().getDrawable(R.mipmap.ic_launcher);
-        }
-    }
-
-    /** 取目标应用图标；失败则回退到本应用图标 */
-    private Icon loadAppIcon(String pkg) {
-        try {
-            Drawable d = getPackageManager().getApplicationIcon(pkg);
-            if (d instanceof BitmapDrawable) {
-                return Icon.createWithBitmap(((BitmapDrawable) d).getBitmap());
-            }
-            // 非位图 drawable：渲染成位图
-            Bitmap bmp = Bitmap.createBitmap(
-                    Math.max(1, d.getIntrinsicWidth()),
-                    Math.max(1, d.getIntrinsicHeight()),
-                    Bitmap.Config.ARGB_8888);
-            Canvas c = new Canvas(bmp);
-            d.setBounds(0, 0, bmp.getWidth(), bmp.getHeight());
-            d.draw(c);
-            return Icon.createWithBitmap(bmp);
-        } catch (Throwable t) {
-            return Icon.createWithResource(this, R.mipmap.ic_launcher);
         }
     }
 

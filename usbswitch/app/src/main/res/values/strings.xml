@@ -7,6 +7,10 @@
     <string name="sc_open_home_long">直接打开设置主页，不触发联动跳转</string>
     <string name="sc_toggle_short">一键开关</string>
     <string name="sc_toggle_long">一键开关调试（开变关、关变开），不打开界面</string>
+    <string name="sc_toggle_usb_short">USB 调试</string>
+    <string name="sc_toggle_usb_long">单独开关 USB 调试，不打开界面</string>
+    <string name="sc_toggle_wireless_short">无线调试</string>
+    <string name="sc_toggle_wireless_long">单独开关无线调试，不打开界面</string>
 
     <string name="header_subtitle">root 授权 · 一键开关 USB 与无线调试</string>
 

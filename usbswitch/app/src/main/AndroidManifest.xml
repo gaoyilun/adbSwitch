@@ -38,11 +38,20 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- 桌面长按图标显示的快捷方式 -->
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/shortcuts" />
+            <!-- 长按菜单快捷方式全部改为动态发布（ToggleShortcuts.publish）：
+                 静态项顺序与图标都无法随状态控制，见该类注释 -->
         </activity>
+
+        <!-- shortcut「一键开关」中转页：无界面（NoDisplay）完成切换后立即结束，
+             不再闪现主设置页。声明必须挂在 application 直下、exported 供 launcher 拉起。
+             taskAffinity="" 强制自建临时任务：若与主界面同任务，主界面在后台时
+             启动本页会把整个任务带到前台，切换结束就露出 MainActivity。 -->
+        <activity
+            android:name=".ShortcutToggleActivity"
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
 
         <!-- 前台服务：临时关闭 USB 调试后的常驻通知 -->
         <service

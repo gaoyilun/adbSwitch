@@ -68,6 +68,8 @@ public class UsbTileService extends TileService {
     }
 
     private void updateTile(DebugController.State s) {
+        // 磁贴刷新时顺带同步长按快捷方式的状态灯（下拉面板展开即读真值，灯能保持较新）
+        ToggleShortcuts.publish(this);
         Tile t = getQsTile();
         if (t == null) {
             return;

@@ -3,13 +3,13 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 调试图标（bug）：统一品牌蓝描边，放在白底角标上表达「本 App 负责调试开关」。
+    <!-- 调试图标（bug）：新品牌绿描边（与黑底荧光绿启动图标同系），放在白底角标上表达「本 App 负责调试开关」。
          VectorDrawable 的 <group> 不支持 strokeColor/strokeWidth/fillColor（仅支持变换），
          所以每条 <path> 必须各自携带画笔属性，否则渲染为全透明 → 只剩白圆。 -->
     <!-- 身体 -->
     <path
         android:strokeWidth="1.6"
-        android:strokeColor="#1565C0"
+        android:strokeColor="#159D15"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"
@@ -17,7 +17,7 @@
     <!-- 头 -->
     <path
         android:strokeWidth="1.6"
-        android:strokeColor="#1565C0"
+        android:strokeColor="#159D15"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"
@@ -25,7 +25,7 @@
     <!-- 触角 -->
     <path
         android:strokeWidth="1.6"
-        android:strokeColor="#1565C0"
+        android:strokeColor="#159D15"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"
@@ -33,7 +33,7 @@
     <!-- 背线 -->
     <path
         android:strokeWidth="1.6"
-        android:strokeColor="#1565C0"
+        android:strokeColor="#159D15"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"
@@ -41,7 +41,7 @@
     <!-- 腿 -->
     <path
         android:strokeWidth="1.6"
-        android:strokeColor="#1565C0"
+        android:strokeColor="#159D15"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"

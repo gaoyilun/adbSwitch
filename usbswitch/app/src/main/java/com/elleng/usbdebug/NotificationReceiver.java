@@ -23,11 +23,13 @@ public class NotificationReceiver extends BroadcastReceiver {
         if (UsbToggleService.ACTION_OPEN.equals(action)) {
             DebugController.setMaster(ctx, true, (ok, s) -> {
                 UsbToggleService.stop(ctx);
+                ToggleShortcuts.publish(ctx);
                 pr.finish();
             });
         } else if (UsbToggleService.ACTION_CLOSE.equals(action)) {
             DebugController.setMaster(ctx, false, (ok, s) -> {
                 UsbToggleService.syncCloseNotification(ctx);
+                ToggleShortcuts.publish(ctx);
                 pr.finish();
             });
         } else if (UsbToggleService.ACTION_DISMISS.equals(action)) {

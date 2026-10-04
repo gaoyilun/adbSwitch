@@ -48,6 +48,7 @@ public class UsbToggleService extends Service {
                         i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false));
                 if (s.anyOn()) {
                     // 任一被打开：adbd 又跑起来了，常驻通知没有意义，撤掉
+                    ToggleShortcuts.publish(UsbToggleService.this);
                     stopSelf();
                 } else {
                     // 实时刷新为「已关闭」状态
@@ -70,7 +71,9 @@ public class UsbToggleService extends Service {
                     new android.os.Handler(android.os.Looper.getMainLooper())) {
                 @Override
                 public void onChange(boolean selfChange) {
-                    if (DebugController.read(UsbToggleService.this).anyOn()) {
+                    DebugController.State s = DebugController.read(UsbToggleService.this);
+                    ToggleShortcuts.publish(UsbToggleService.this);
+                    if (s.anyOn()) {
                         stopSelf();
                     }
                 }
@@ -162,6 +165,7 @@ public class UsbToggleService extends Service {
 
     /** 实时刷新通知内容（状态变化或本服务内主动调用） */
     private void updateNotification(DebugController.State s) {
+        ToggleShortcuts.publish(this);
         if (nm != null) {
             nm.notify(NOTIFY_ID, buildNotification(this, s));
         }
