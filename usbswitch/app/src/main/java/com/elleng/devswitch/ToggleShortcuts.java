@@ -51,6 +51,9 @@ final class ToggleShortcuts {
     private ToggleShortcuts() {
     }
 
+    /** 上次发布的内容指纹：内容没变就不重建（发布要走 IPC 且构造图标，不该随每次状态广播重做） */
+    private static volatile String lastSignature = null;
+
     static void publish(Context ctx) {
         try {
             ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
@@ -61,6 +64,13 @@ final class ToggleShortcuts {
             SharedPreferences sp = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE);
             boolean linkage = sp.getBoolean("linkage_enabled", false);
             String pkg = sp.getString("linkage_pkg", "");
+
+            // 指纹覆盖一切会影响发布结果的因素；进程重启后 lastSignature 归零，必定重发一次
+            String sig = (s.usb ? "1" : "0") + (s.wireless ? "1" : "0") + '|' + linkage + '|' + pkg;
+            if (sig.equals(lastSignature)) {
+                return;
+            }
+            lastSignature = sig;
 
             List<ShortcutInfo> list = new ArrayList<>();
             list.add(buildToggle(ctx, s));

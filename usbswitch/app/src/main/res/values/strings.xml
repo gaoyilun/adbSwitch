@@ -14,8 +14,6 @@
 
     <string name="header_subtitle">一键开关 USB 与无线调试（root / Shizuku）</string>
 
-    <string name="root_missing">未检测到 root，请确认已授予超级用户权限</string>
-
     <string name="card_debug_title">调试开关</string>
 
     <string name="master_title">调试主开关</string>
@@ -30,7 +28,6 @@
     <string name="usb_off">已关闭</string>
 
     <string name="wireless_title">无线调试</string>
-    <string name="wireless_sum">开着时 adbd 同样在运行</string>
     <string name="wireless_on">已开启 · adbd 运行中</string>
     <string name="wireless_off">已关闭</string>
 
@@ -47,7 +44,6 @@
 
     <string name="kill_before_open_title">开调试前先停止联动应用</string>
     <string name="kill_before_open_sum">避免联动应用在状态翻转瞬间读到调试</string>
-    <string name="kill_before_open_done">已先停止联动应用，再打开调试</string>
 
     <string name="linkage_run_now_title">立即执行联动</string>
     <string name="linkage_run_now_sum">关调试并跳转，自动跳转每次启动只做一次</string>
@@ -75,12 +71,9 @@
     <string name="live_update_test_sent_plain">已发送测试通知，但未获授权，仅作普通通知显示</string>
     <string name="live_update_test_title">灵动焦点通知测试</string>
     <string name="live_update_test_text">状态栏出现胶囊即表示已生效</string>
-    <string name="live_update_on">实时动态已开启</string>
     <string name="live_update_unsupported">当前系统不支持（需 Android 16+）</string>
 
     <string name="pref_open">打开</string>
-    <string name="pref_edit">修改</string>
-    <string name="toast_off">已关闭，通知栏可一键恢复</string>
     <string name="toast_root_fail">执行失败，请检查授权模式</string>
 
     <!-- 底部调试信息 -->
@@ -93,23 +86,37 @@
     <string name="picker_load_fail">读取应用列表失败</string>
     <string name="notify_settings">应用设置</string>
 
+    <!-- 常驻通知与磁贴文案（原先硬编码在 Java 里，统一收拢便于维护） -->
+    <string name="notify_channel_name">调试开关</string>
+    <string name="notify_channel_desc">调试临时关闭后的常驻控制通知</string>
+    <string name="notify_title_on">调试：已开启</string>
+    <string name="notify_title_off">调试：当前已关闭</string>
+    <string name="notify_action_close">临时关闭</string>
+    <string name="notify_action_open">恢复打开</string>
+    <string name="notify_sub_safe">adbd 已停止，检测可通过</string>
+    <string name="notify_sub_running">adbd 仍在运行</string>
+    <string name="notify_sub_usb_on">USB 开</string>
+    <string name="notify_sub_usb_off">USB 关</string>
+    <string name="notify_sub_wifi_on">无线 开</string>
+    <string name="notify_sub_wifi_off">无线 关</string>
+    <string name="promoted_text_on">调试中</string>
+    <string name="promoted_text_off">已关闭</string>
+    <string name="tile_off">调试：已关</string>
+    <string name="tile_all_on">调试：全开</string>
+    <string name="tile_partial">调试：部分开</string>
+
     <!-- 双模式授权（root / Shizuku） -->
     <string name="auth_mode_title">授权模式</string>
     <string name="auth_mode_sum">点击选择 root 或 Shizuku</string>
     <string name="auth_mode_root">root</string>
     <string name="auth_mode_shizuku">Shizuku</string>
-    <string name="auth_status_title">授权状态</string>
-    <string name="auth_status_summary">—</string>
     <string name="auth_retry">重试</string>
     <string name="auth_status_root_ok">root模式 · 已授权</string>
     <string name="auth_status_root_no">root模式 · 未授权</string>
     <string name="auth_status_shizuku_ok">Shizuku模式 · 已授权</string>
     <string name="auth_status_shizuku_no">Shizuku模式 · 未授权</string>
     <string name="auth_choose_title">选择授权模式</string>
-    <string name="auth_shizuku_missing">Shizuku 未授权，请在 Shizuku 中授权或切换模式</string>
-    <string name="auth_toast_shizuku_ok">Shizuku模式已授权</string>
     <string name="auth_toast_shizuku_no">Shizuku模式未授权</string>
-    <string name="auth_toast_root_ok">root模式已授权</string>
     <string name="auth_toast_root_no">root模式未授权，请检查权限或切换至Shizuku模式</string>
     <string name="auth_need_start">请先在 Shizuku 应用中启动服务</string>
     <string name="auth_no_priv">未授权，无法写入调试开关</string>

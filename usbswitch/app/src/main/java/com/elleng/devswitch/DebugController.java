@@ -40,6 +40,10 @@ public final class DebugController {
     /** 聚合状态：usb || wireless，即 adbd 是否在跑 */
     public static final String EXTRA_ON = "extra_on";
 
+    /** 两个被管理的 Settings.Global 键（监听 URI 与读写都复用，避免散落字符串字面量） */
+    public static final String KEY_USB = "adb_enabled";
+    public static final String KEY_WIRELESS = "adb_wifi_enabled";
+
     private static final String PREFS = "cfg";
     private static final String SAVED_USB = "saved_usb";
     private static final String SAVED_WIRELESS = "saved_wireless";
@@ -132,6 +136,17 @@ public final class DebugController {
     }
 
     /**
+     * 外部改动感知：把缓存标记为「未校准」并立刻后台重新校准。
+     * 用于 ContentObserver 回调 —— 此时回读拿到的仍是缓存（且本 ROM 向 App 隐藏真值），
+     * 不作废就永远刷不出外部改动。校准完成后会广播，UI 由各自的 stateReceiver 更新。
+     */
+    public static void invalidateAndRefresh(Context ctx) {
+        cachedAt = 0;
+        lastRefreshReqAt = 0; // 外部改动优先级最高，不受节流挡住
+        triggerRefresh(ctx);
+    }
+
+    /**
      * 写完后用授权通道回读真值并刷新缓存（仅可在后台线程调用）。
      *
      * 必须显式调用：broadcast() 内部走的是 read()，而 read() 只返回缓存；
@@ -151,9 +166,9 @@ public final class DebugController {
      * @return 读不到有效值时返回 null（调用方保留旧缓存，不覆盖为真假难辨的状态）
      */
     private static State readViaPrivileged(Context app) {
-        RootUtil.Result ru = runPrivileged(app, "settings get global adb_enabled");
+        RootUtil.Result ru = runPrivileged(app, "settings get global " + KEY_USB);
         String u = (ru.out == null ? "" : ru.out.trim());
-        RootUtil.Result rw = runPrivileged(app, "settings get global adb_wifi_enabled");
+        RootUtil.Result rw = runPrivileged(app, "settings get global " + KEY_WIRELESS);
         String w = (rw.out == null ? "" : rw.out.trim());
         if (!("0".equals(u) || "1".equals(u)) || !("0".equals(w) || "1".equals(w))) {
             android.util.Log.w(TAG, "privileged read got invalid values: usb=[" + u
@@ -164,11 +179,11 @@ public final class DebugController {
     }
 
     static boolean readUsb(Context ctx) {
-        return getInt(ctx, "adb_enabled") == 1;
+        return getInt(ctx, KEY_USB) == 1;
     }
 
     static boolean readWireless(Context ctx) {
-        return getInt(ctx, "adb_wifi_enabled") == 1;
+        return getInt(ctx, KEY_WIRELESS) == 1;
     }
 
     private static int getInt(Context ctx, String key) {
@@ -214,11 +229,11 @@ public final class DebugController {
     // —— 写（底层，仅本类内部调用）——
 
     private static boolean writeUsb(Context ctx, boolean on) {
-        return runPrivileged(ctx, "settings put global adb_enabled " + (on ? "1" : "0")).ok();
+        return runPrivileged(ctx, "settings put global " + KEY_USB + " " + (on ? "1" : "0")).ok();
     }
 
     private static boolean writeWireless(Context ctx, boolean on) {
-        return runPrivileged(ctx, "settings put global adb_wifi_enabled " + (on ? "1" : "0")).ok();
+        return runPrivileged(ctx, "settings put global " + KEY_WIRELESS + " " + (on ? "1" : "0")).ok();
     }
 
     /** 按当前授权模式选执行通道：Shizuku 走 shell(uid 2000)，否则走 su。

@@ -3,6 +3,7 @@ package com.elleng.devswitch;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.widget.Toast;
 
 /**
  * 处理通知栏按钮动作。
@@ -22,13 +23,22 @@ public class NotificationReceiver extends BroadcastReceiver {
         String action = intent.getAction();
         if (UsbToggleService.ACTION_OPEN.equals(action)) {
             DebugController.setMaster(ctx, true, (ok, s) -> {
-                UsbToggleService.stop(ctx);
+                // 写入失败必须让用户知道：只改通知会留下「点了没反应」的错觉
+                if (!ok) {
+                    Toast.makeText(ctx, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                } else {
+                    UsbToggleService.stop(ctx);
+                }
                 ToggleShortcuts.publish(ctx);
                 pr.finish();
             });
         } else if (UsbToggleService.ACTION_CLOSE.equals(action)) {
             DebugController.setMaster(ctx, false, (ok, s) -> {
-                UsbToggleService.syncCloseNotification(ctx);
+                if (!ok) {
+                    Toast.makeText(ctx, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                } else {
+                    UsbToggleService.syncCloseNotification(ctx);
+                }
                 ToggleShortcuts.publish(ctx);
                 pr.finish();
             });

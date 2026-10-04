@@ -53,6 +53,13 @@ public class AppListDialog {
     private AlertDialog dialog;
     private final Handler main = new Handler(Looper.getMainLooper());
     private int iconSizePx;
+    /**
+     * 图标解码的共享后台线程。
+     * 原先 getView 里每行 new Thread：快速滑动会瞬间起几十上百个线程（解码图标是重活），
+     * 既抢 CPU 又可能 OOM。改成一个串行线程排队解码，配合 ViewHolder 复用行即可。
+     */
+    private final java.util.concurrent.ExecutorService iconLoader =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
 
     private float startY = -1;
     private boolean pulling = false;
@@ -143,6 +150,9 @@ public class AppListDialog {
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
 
+        // 弹窗关闭时释放线程与 dialog 引用，避免 Activity 被 dialog 长期持有
+        dialog.setOnDismissListener(d -> release());
+
         // 先把弹窗显示出来，再去后台扫描应用。
         // 之前 loadApps() 在主线程同步跑（几百个 loadIcon），而 dialog.show() 写在它后面，
         // 导致点击后界面长时间无反应（Android 17 上尤其明显）。
@@ -150,6 +160,11 @@ public class AppListDialog {
         dialog.show();
 
         scanAppsAsync(false);
+    }
+
+    private void release() {
+        iconLoader.shutdownNow();
+        dialog = null;
     }
 
     /** 后台扫描已安装应用，完成后回主线程刷新列表 */
@@ -349,37 +364,59 @@ public class AppListDialog {
 
         @Override
         public View getView(int i, View convertView, ViewGroup parent) {
+            ViewHolder h;
             if (convertView == null) {
                 convertView = LayoutInflater.from(context)
                         .inflate(R.layout.item_app, parent, false);
+                h = new ViewHolder();
+                h.label = convertView.findViewById(R.id.tvLabel);
+                h.pkg = convertView.findViewById(R.id.tvPkg);
+                h.icon = convertView.findViewById(R.id.ivIcon);
+                convertView.setTag(h);
+            } else {
+                h = (ViewHolder) convertView.getTag();
             }
             AppInfo info = filtered.get(i);
-            ((TextView) convertView.findViewById(R.id.tvLabel)).setText(info.label);
-            ((TextView) convertView.findViewById(R.id.tvPkg)).setText(info.pkg);
-            final ImageView iv = convertView.findViewById(R.id.ivIcon);
+            h.label.setText(info.label);
+            h.pkg.setText(info.pkg);
             final String key = info.pkg;
-            iv.setTag(key);
-            iv.setImageBitmap(info.icon);
+            h.icon.setTag(key);
+            h.icon.setImageBitmap(info.icon);
             // 后台解码图标，完成后回主线程填充（Bitmap 不可变，跨线程安全）
             if (info.icon == null && !info.iconLoading) {
                 info.iconLoading = true;
                 final AppInfo target = info;
-                new Thread(() -> {
-                    Bitmap bmp = decodeIcon(target.ai, iconSizePx);
-                    target.icon = bmp;
-                    target.iconLoading = false;
-                    main.post(() -> {
-                        if (dialog == null || !dialog.isShowing()) {
+                try {
+                    iconLoader.execute(() -> {
+                        if (iconLoader.isShutdown()) {
                             return;
                         }
-                        ImageView cur = listView.findViewWithTag(key);
-                        if (cur != null) {
-                            cur.setImageBitmap(bmp);
-                        }
+                        Bitmap bmp = decodeIcon(target.ai, iconSizePx);
+                        target.icon = bmp;
+                        target.iconLoading = false;
+                        main.post(() -> {
+                            if (dialog == null || !dialog.isShowing()) {
+                                return;
+                            }
+                            ImageView cur = listView.findViewWithTag(key);
+                            if (cur != null) {
+                                cur.setImageBitmap(bmp);
+                            }
+                        });
                     });
-                }, "app-icon").start();
+                } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                    // 弹窗已关闭、线程已停：图标不加载也不影响功能
+                    target.iconLoading = false;
+                }
             }
             return convertView;
         }
+    }
+
+    /** 行复用：避免每次 getView 都 findViewById */
+    private static class ViewHolder {
+        TextView label;
+        TextView pkg;
+        ImageView icon;
     }
 }

@@ -75,8 +75,8 @@ public class UsbTileService extends TileService {
             return;
         }
         t.setState(s.anyOn() ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
-        t.setLabel(s.allOff() ? "调试：已关"
-                : (s.usb && s.wireless ? "调试：全开" : "调试：部分开"));
+        t.setLabel(getString(s.allOff() ? R.string.tile_off
+                : (s.usb && s.wireless ? R.string.tile_all_on : R.string.tile_partial)));
         t.updateTile();
     }
 }

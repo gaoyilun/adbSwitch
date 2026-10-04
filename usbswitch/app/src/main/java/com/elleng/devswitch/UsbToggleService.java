@@ -71,11 +71,11 @@ public class UsbToggleService extends Service {
                     new android.os.Handler(android.os.Looper.getMainLooper())) {
                 @Override
                 public void onChange(boolean selfChange) {
-                    DebugController.State s = DebugController.read(UsbToggleService.this);
-                    ToggleShortcuts.publish(UsbToggleService.this);
-                    if (s.anyOn()) {
-                        stopSelf();
-                    }
+                    // 只做一件事：作废缓存并后台重新校准。
+                    // 校准完成后会广播，stateReceiver 才是判断「该不该退场」的唯一地方 ——
+                    // 在这里同步 read() 拿到的是作废前的旧缓存（服务存续期间必然是「两个都关」），
+                    // 判断永远为假，等于白判。
+                    DebugController.invalidateAndRefresh(UsbToggleService.this);
                 }
             };
 
@@ -91,8 +91,12 @@ public class UsbToggleService extends Service {
             registerReceiver(stateReceiver, f);
         }
         try {
-            getContentResolver().registerContentObserver(
-                    android.provider.Settings.Global.CONTENT_URI, true, settingsObserver);
+            // 只监听这两个键：监听整个 Settings.Global.CONTENT_URI 会让任何 global 变更都回调一次
+            for (String key : new String[]{
+                    DebugController.KEY_USB, DebugController.KEY_WIRELESS}) {
+                getContentResolver().registerContentObserver(
+                        android.provider.Settings.Global.getUriFor(key), false, settingsObserver);
+            }
             observerRegistered = true;
         } catch (Throwable t) {
             Log.w(TAG, "register settings observer failed", t);
@@ -240,8 +244,9 @@ public class UsbToggleService extends Service {
             // Live Updates 要求重要性高于 MIN；用 DEFAULT 保证可被系统提升为实时动态，
             // 同时仍属低打扰（无音效、collapse 行为由系统控制）。
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "调试开关", NotificationManager.IMPORTANCE_DEFAULT);
-            ch.setDescription("调试临时关闭后的常驻控制通知");
+                    CHANNEL_ID, ctx.getString(R.string.notify_channel_name),
+                    NotificationManager.IMPORTANCE_DEFAULT);
+            ch.setDescription(ctx.getString(R.string.notify_channel_desc));
             ch.setShowBadge(false);
             nmm.createNotificationChannel(ch);
         }
@@ -262,8 +267,8 @@ public class UsbToggleService extends Service {
         // 没设 ongoing 时，实际常驻通知只显示为普通通知（不进状态栏胶囊/锁屏），
         // 只有「实时动态测试」那条设了 ongoing 才提升成功。现已与测试通知对齐。
         b.setSmallIcon(R.drawable.ic_tile)
-                .setContentTitle(on ? "调试：已开启" : "调试：当前已关闭")
-                .setContentText(describeSubStates(s))
+                .setContentTitle(ctx.getString(on ? R.string.notify_title_on : R.string.notify_title_off))
+                .setContentText(describeSubStates(ctx, s))
                 .setOngoing(true)
                 .setPriority(Notification.PRIORITY_LOW);
 
@@ -279,15 +284,15 @@ public class UsbToggleService extends Service {
             // 状态栏胶囊里的短文本（Live Update 才有意义）
             android.app.Notification.Builder.class
                     .getMethod("setShortCriticalText", String.class)
-                    .invoke(b, on ? "调试中" : "已关闭");
+                    .invoke(b, ctx.getString(on ? R.string.promoted_text_on : R.string.promoted_text_off));
         } catch (Throwable t) {
             Log.w(TAG, "promoted ongoing not supported on this API level", t);
         }
 
         if (on) {
-            b.addAction(0, "临时关闭", piClose);
+            b.addAction(0, ctx.getString(R.string.notify_action_close), piClose);
         } else {
-            b.addAction(0, "恢复打开", piOpen);
+            b.addAction(0, ctx.getString(R.string.notify_action_open), piOpen);
             // 联动模式下，提供「应用设置」入口，避免开启联动后无法改设置
             Intent settings = new Intent(ctx, MainActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -306,13 +311,12 @@ public class UsbToggleService extends Service {
     }
 
     /** 通知副文本：把两个子开关的真值都摊开，一眼看出 adbd 为什么还在跑 */
-    private static String describeSubStates(DebugController.State s) {
-        String usb = s.usb ? "USB 开" : "USB 关";
-        String wifi = s.wireless ? "无线 开" : "无线 关";
-        if (s.allOff()) {
-            return usb + " · " + wifi + " · adbd 已停止，检测可通过";
-        }
-        return usb + " · " + wifi + " · adbd 仍在运行";
+    private static String describeSubStates(Context ctx, DebugController.State s) {
+        String usb = ctx.getString(s.usb ? R.string.notify_sub_usb_on : R.string.notify_sub_usb_off);
+        String wifi = ctx.getString(s.wireless
+                ? R.string.notify_sub_wifi_on : R.string.notify_sub_wifi_off);
+        return usb + " · " + wifi + " · " + ctx.getString(
+                s.allOff() ? R.string.notify_sub_safe : R.string.notify_sub_running);
     }
 
     @Override

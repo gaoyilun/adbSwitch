@@ -12,14 +12,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -36,12 +34,7 @@ import android.preference.PreferenceActivity;
 import android.preference.SwitchPreference;
 import android.provider.Settings;
 import android.view.View;
-import android.view.Gravity;
 import android.preference.PreferenceCategory;
-import android.widget.Button;
-import android.widget.FrameLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -76,6 +69,9 @@ public class MainActivity extends PreferenceActivity {
     private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.devswitch.action.DESKTOP_LINKAGE";
     private static final String TAG = "UsbSwitch";
     private static final String PREFS = "cfg";
+    /** 需要监听外部改动的 Settings 键（与 DebugController 写入的是同一组） */
+    private static final String[] OBSERVED_KEYS =
+            {DebugController.KEY_USB, DebugController.KEY_WIRELESS};
     private static final String PREF_LINKAGE = "linkage_enabled";
     private static final String PREF_PKG = "linkage_pkg";
     /** 「临时关闭时弹通知」开关 */
@@ -109,9 +105,6 @@ public class MainActivity extends PreferenceActivity {
     private boolean privilegedAvailable = true;
     private boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
     private boolean rowClicksWired = false;   // 行点击的布局监听是否已注册（避免重复注册）
-    /** 双检测得到的两个后端可用状态（用于悬浮通知判定） */
-    private boolean lastRootOk = false;
-    private boolean lastShizukuOk = false;
     /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
     private com.google.android.material.snackbar.Snackbar authSnackbar = null;
     /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
@@ -121,6 +114,10 @@ public class MainActivity extends PreferenceActivity {
     private long lastPickerOpenAt = 0;        // 打开选择器防抖：行点击与 preference click 可能同时触发
     private long lastLiveOpenAt = 0;          // 同上，实时动态弹窗防抖
     private boolean settingsObserverRegistered = false; // Settings 监听是否已注册（防重复注册/泄漏）
+    /** 主线程 Handler：去抖与所有 post 都复用它，否则每次 new 一个 Handler 都拿不到上次的 callback，去抖等于失效 */
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    /** 行点击接线用的标题缓存：布局每帧都会回调，getString 不该每次重做 */
+    private String titleMaster, titleApp, titleLive, titleRunNow, titleShortcut, titleAuth;
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -156,13 +153,14 @@ public class MainActivity extends PreferenceActivity {
         if (!prefsLoaded) {
             return;
         }
-        refresh(DebugController.read(this));
+        // 必须把缓存作废再校准：HyperOS 会向第三方 App 隐藏这两个键，直接回读拿到的仍是缓存，
+        // 不作废就永远刷不出「外部改了设置」的新状态。校准完成后会广播，UI 由 stateReceiver 更新。
+        DebugController.invalidateAndRefresh(this);
     };
 
     private void scheduleResync() {
-        android.os.Handler h = new android.os.Handler(Looper.getMainLooper());
-        h.removeCallbacks(resyncRunnable);
-        h.postDelayed(resyncRunnable, 300);
+        mainHandler.removeCallbacks(resyncRunnable);
+        mainHandler.postDelayed(resyncRunnable, 300);
     }
 
     @Override
@@ -366,8 +364,6 @@ public class MainActivity extends PreferenceActivity {
             final AuthManager.Mode mode = AuthManager.getMode(MainActivity.this);
             final boolean ok = (mode == AuthManager.Mode.SHIZUKU) ? shizukuOk : rootOk;
             new Handler(Looper.getMainLooper()).post(() -> {
-                lastRootOk = rootOk;
-                lastShizukuOk = shizukuOk;
                 privilegedAvailable = ok;
                 applyRootState();
                 updateAuthStatusUI();
@@ -400,6 +396,14 @@ public class MainActivity extends PreferenceActivity {
     }
 
     private void initPrefs() {
+        // 行点击按标题文本识别，标题每次布局都要比一次 —— 在此取一次缓存起来，别每帧 getString
+        titleMaster = getString(R.string.master_title);
+        titleApp = getString(R.string.linkage_app_label);
+        titleLive = getString(R.string.live_update_title);
+        titleRunNow = getString(R.string.linkage_run_now_title);
+        titleShortcut = getString(R.string.create_shortcut_title);
+        titleAuth = getString(R.string.auth_mode_title);
+
         swMasterPref = findPreference("swMaster");
         swUsbPref = (SwitchPreference) findPreference("swUsb");
         swLinkagePref = (SwitchPreference) findPreference("swLinkage");
@@ -665,8 +669,12 @@ public class MainActivity extends PreferenceActivity {
             masterSum = R.string.master_partial;
             masterColor = R.color.error;
         }
-        swMasterPref.setSummary(masterSum);
-        swMasterPref.setIcon(stateIcon(masterColor));
+        // 未授权时主开关行显示的是「未授权，无法写入调试开关」（见 applyRootState），
+        // 这里不能覆盖它 —— 否则一次状态广播就把未授权提示冲掉了。
+        if (privilegedAvailable) {
+            swMasterPref.setSummary(masterSum);
+            swMasterPref.setIcon(stateIcon(masterColor));
+        }
 
         swUsbPref.setSummary(s.usb ? R.string.usb_on : R.string.usb_off);
         swUsbPref.setIcon(stateIcon(s.usb ? R.color.stateOn : R.color.stateOff));
@@ -697,6 +705,9 @@ public class MainActivity extends PreferenceActivity {
             appPref.setEnabled(true);
             swNotifyPref.setEnabled(true);
             swWirelessPref.setEnabled(true);
+            // 授权恢复：把主开关行从「未授权，无法写入」改回真实状态文案。
+            // （refresh 在未授权时不再覆盖文案，故必须在这里补一次，否则会一直停在未授权提示上）
+            refresh(DebugController.read(this));
         } else {
             swMasterPref.setSummary(R.string.auth_no_priv);
             swMasterPref.setIcon(stateIcon(R.color.error));
@@ -831,12 +842,6 @@ public class MainActivity extends PreferenceActivity {
             return;
         }
         String pkg = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_PKG, "");
-        String liveTitle = getString(R.string.live_update_title);
-        String appTitle = getString(R.string.linkage_app_label);
-        String runNowTitle = getString(R.string.linkage_run_now_title);
-        String masterTitle = getString(R.string.master_title);
-        String createShortcutTitle = getString(R.string.create_shortcut_title);
-        String authTitle = getString(R.string.auth_mode_title);
         for (int i = 0; i < list.getChildCount(); i++) {
             View row = list.getChildAt(i);
             if (row == null) {
@@ -849,12 +854,18 @@ public class MainActivity extends PreferenceActivity {
             if (title == null) {
                 continue;
             }
-            if (masterTitle.equals(title)) {
-                // 主开关行：整行切换开关；箭头按钮单独消费点击，用于折叠/展开
-                row.setOnClickListener(v -> toggleMaster());
-                View arrow = row.findViewById(R.id.btn_expand);
-                if (arrow != null) {
-                    arrow.setOnClickListener(v -> toggleExpanded());
+            // 本回调每次布局都会跑（OnGlobalLayoutListener），行没变就没必要重挂监听。
+            // 用「行上记的已接线标题」判断：ListView 复用后标题变了会重新接线，标题没变则跳过。
+            final boolean wired = title.equals(row.getTag(R.id.tag_row_wired));
+            row.setTag(R.id.tag_row_wired, title);
+            if (titleMaster.equals(title)) {
+                if (!wired) {
+                    // 主开关行：整行切换开关；箭头按钮单独消费点击，用于折叠/展开
+                    row.setOnClickListener(v -> toggleMaster());
+                    View arrow = row.findViewById(R.id.btn_expand);
+                    if (arrow != null) {
+                        arrow.setOnClickListener(v -> toggleExpanded());
+                    }
                 }
                 Switch sw = row.findViewById(R.id.sw_master);
                 if (sw != null) {
@@ -876,9 +887,11 @@ public class MainActivity extends PreferenceActivity {
                     syncing = false;
                 }
                 updateExpandIcon(subSwitchesShown);
-            } else if (appTitle.equals(title)) {
-                // 整行触发选择器（「修改」按钮已移除，整行点击即选择应用）
-                row.setOnClickListener(v -> openAppPicker());
+            } else if (titleApp.equals(title)) {
+                if (!wired) {
+                    // 整行触发选择器（「修改」按钮已移除，整行点击即选择应用）
+                    row.setOnClickListener(v -> openAppPicker());
+                }
                 final String curPkg = pkg;
                 View openBtn = row.findViewById(R.id.btn_open_app);
                 if (openBtn != null) {
@@ -886,24 +899,35 @@ public class MainActivity extends PreferenceActivity {
                         openBtn.setVisibility(View.GONE);
                     } else {
                         openBtn.setVisibility(View.VISIBLE);
-                        openBtn.setOnClickListener(v -> {
-                            if (privilegedAvailable) {
-                                launchApp(curPkg);
-                            } else {
-                                Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
-                            }
-                        });
+                        if (!wired) {
+                            openBtn.setOnClickListener(v -> {
+                                if (privilegedAvailable) {
+                                    launchApp(curPkg);
+                                } else {
+                                    Toast.makeText(this, R.string.auth_need_grant,
+                                            Toast.LENGTH_SHORT).show();
+                                }
+                            });
+                        }
                     }
                 }
-            } else if (liveTitle.equals(title)) {
-                row.setOnClickListener(v -> openLiveUpdate());
-            } else if (runNowTitle.equals(title)) {
-                row.setOnClickListener(v -> runLinkageManual());
-            } else if (createShortcutTitle.equals(title)) {
-                row.setOnClickListener(v -> createDesktopShortcut());
-            } else if (authTitle.equals(title)) {
+            } else if (titleLive.equals(title)) {
+                if (!wired) {
+                    row.setOnClickListener(v -> openLiveUpdate());
+                }
+            } else if (titleRunNow.equals(title)) {
+                if (!wired) {
+                    row.setOnClickListener(v -> runLinkageManual());
+                }
+            } else if (titleShortcut.equals(title)) {
+                if (!wired) {
+                    row.setOnClickListener(v -> createDesktopShortcut());
+                }
+            } else if (titleAuth.equals(title)) {
                 // 合并项「授权模式」整行点击 = 打开授权模式选择对话框
-                row.setOnClickListener(v -> chooseAuthMode());
+                if (!wired) {
+                    row.setOnClickListener(v -> chooseAuthMode());
+                }
             }
         }
     }
@@ -978,7 +1002,12 @@ public class MainActivity extends PreferenceActivity {
         observeSettings(false);
     }
 
-    /** 注册/反注册 Settings 监听，避免泄漏与无谓开销 */
+    /**
+     * 注册/反注册 Settings 监听，避免泄漏与无谓开销。
+     *
+     * 只监听 adb_enabled / adb_wifi_enabled 两个键的 URI，不监听整个 Settings.Global.CONTENT_URI：
+     * 后者会让任何 global 设置变更（亮度、飞行模式等）都回调一次，白白触发一轮状态刷新。
+     */
     private void observeSettings(boolean register) {
         try {
             android.content.ContentResolver cr = getContentResolver();
@@ -986,8 +1015,10 @@ public class MainActivity extends PreferenceActivity {
                 if (settingsObserverRegistered) {
                     return;
                 }
-                cr.registerContentObserver(
-                        Settings.Global.CONTENT_URI, true, settingsObserver);
+                for (String key : OBSERVED_KEYS) {
+                    cr.registerContentObserver(
+                            Settings.Global.getUriFor(key), false, settingsObserver);
+                }
                 settingsObserverRegistered = true;
             } else {
                 if (!settingsObserverRegistered) {
@@ -1091,23 +1122,11 @@ public class MainActivity extends PreferenceActivity {
         if (AuthManager.getMode(this) != AuthManager.Mode.SHIZUKU) {
             return;
         }
-        boolean ping;
-        try {
-            ping = Shizuku.pingBinder();
-        } catch (Throwable t) {
-            ping = false;
-        }
-        if (!ping) {
+        if (!ShizukuUtil.running()) {
             android.util.Log.i(TAG, "Shizuku binder not alive, skip permission request");
             return;
         }
-        int perm;
-        try {
-            perm = Shizuku.checkSelfPermission();
-        } catch (Throwable t) {
-            perm = android.content.pm.PackageManager.PERMISSION_DENIED;
-        }
-        if (perm == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        if (ShizukuUtil.permissionGranted()) {
             return;
         }
         long now = android.os.SystemClock.uptimeMillis();
@@ -1127,23 +1146,11 @@ public class MainActivity extends PreferenceActivity {
     private void onAuthRetry() {
         AuthManager.Mode mode = AuthManager.getMode(this);
         if (mode == AuthManager.Mode.SHIZUKU) {
-            boolean ping;
-            try {
-                ping = Shizuku.pingBinder();
-            } catch (Throwable t) {
-                ping = false;
-            }
-            if (!ping) {
+            if (!ShizukuUtil.running()) {
                 Toast.makeText(this, R.string.auth_need_start, Toast.LENGTH_LONG).show();
                 return;
             }
-            int perm;
-            try {
-                perm = Shizuku.checkSelfPermission();
-            } catch (Throwable t) {
-                perm = android.content.pm.PackageManager.PERMISSION_DENIED;
-            }
-            if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (!ShizukuUtil.permissionGranted()) {
                 // force=true：用户明确点了「重试」，必须立即弹授权
                 maybeRequestShizukuPermission(true);
                 return; // 结果由 OnRequestPermissionResultListener 收后再重测
@@ -1217,10 +1224,6 @@ public class MainActivity extends PreferenceActivity {
     }
 
     /** dp -> px 助手 */
-    private int dip(int dp) {
-        return Math.round(dp * getResources().getDisplayMetrics().density);
-    }
-
     /** 取目标应用图标（Drawable，供 Preference 左侧显示）；失败回退本应用图标 */
     private Drawable loadAppDrawable(String pkg) {
         try {
@@ -1346,11 +1349,8 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        // 是否授予只影响常驻通知是否可见，不影响 root 开关功能。
-    }
+    // 通知权限的授予结果不覆写处理：是否授予只影响常驻通知可见性，不影响开关写入功能，
+    // 且发送通知处（checkAndPromptLiveUpdate / syncCloseNotification）各自做了能力判定。
 
     /**
      * Android 16 Live Updates：检查本应用是否被允许发布「实时动态」通知。

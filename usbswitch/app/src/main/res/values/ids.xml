@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 行点击接线标记：wireRowClicks 每次布局都会跑，用它记住「该行上一个接好的标题」，
+         标题没变就跳过重挂监听（ListView 复用后标题变了会自然重新接线） -->
+    <item name="tag_row_wired" type="id" />
+</resources>

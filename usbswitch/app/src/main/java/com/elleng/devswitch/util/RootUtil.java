@@ -35,9 +35,22 @@ public final class RootUtil {
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
-            res.out = drain(p.getInputStream());
-            res.err = drain(p.getErrorStream());
-            res.code = p.waitFor();
+            // 必须先并发抽干 stdout / stderr，再 waitFor：
+            // 顺序读的话，子进程一旦把另一条管道写满而阻塞，读当前这条永远等不到 EOF，
+            // 于是 waitFor 永远不返回。su 还在等授权弹窗时尤其容易卡死。
+            // （ShizukuUtil 是同一个坑，两边保持一致。）
+            final Process proc = p;
+            final StringBuilder outB = new StringBuilder();
+            final StringBuilder errB = new StringBuilder();
+            Thread tOut = new Thread(() -> outB.append(drain(proc.getInputStream())));
+            Thread tErr = new Thread(() -> errB.append(drain(proc.getErrorStream())));
+            tOut.start();
+            tErr.start();
+            res.code = proc.waitFor();
+            tOut.join(2000);
+            tErr.join(2000);
+            res.out = outB.toString();
+            res.err = errB.toString();
         } catch (Throwable t) {
             res.code = -1;
             res.err = String.valueOf(t);
