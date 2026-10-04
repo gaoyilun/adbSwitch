@@ -37,6 +37,17 @@
     public boolean canPostPromotedNotifications();
 }
 
+# ── 在线更新（当前 ENABLED=false，休眠状态）────────────────────
+# 这个包必须显式 keep，原因不是反射，而是**资源裁剪**：
+#   UpdateConfig.ENABLED 是编译期常量 false，R8 会把 isActive() 折叠成常量，
+#   于是「检查更新 → 弹窗 → 下载」这条链上的调用点被判定为不可达而整段移除，
+#   连带它们对 R.layout/dialog_update、R.string/update_* 的引用也消失；
+#   随后 isShrinkResources 判定这些资源无人引用，直接从 resources.arsc 里裁掉。
+#   实测后果：代码在、dialog_update 布局和 7 个 update_* 字符串没了，
+#   等正式上线把 ENABLED 打开就会 Resources.NotFoundException 崩溃。
+# 保留整包即可让资源引用活下来；等更新功能真正上线并稳定后，可考虑去掉本段。
+-keep class com.elleng.devswitch.update.** { *; }
+
 # ── 行号与源文件名 ────────────────────────────────────
 # 保留行号便于定位 root / 通知相关崩溃。
 -keepattributes SourceFile,LineNumberTable

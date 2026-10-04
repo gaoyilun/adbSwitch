@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 更新 APK 下载到 getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)，
+         这里必须与该目录严格对应，否则 FileProvider.getUriForFile 会抛 IllegalArgumentException。 -->
+    <external-files-path
+        name="updates"
+        path="Download" />
+</paths>

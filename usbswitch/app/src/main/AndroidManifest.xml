@@ -4,6 +4,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 在线更新检测（当前 ENABLED=false，实际不会发请求；启用前保留） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 安装下载下来的更新 APK 需要「安装未知应用」授权（API 26+） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 原生「添加到主屏幕」快捷方式（Android 2.3 起）：发 INSTALL_SHORTCUT 广播所需权限 -->
     <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
     <!-- Android 16 Live Updates：常驻通知可被系统「提升」为实时动态（状态栏胶囊/锁屏/AOD） -->
@@ -80,6 +84,18 @@
             android:exported="true"
             android:multiprocess="false"
             android:permission="moe.shizuku.manager.permission.API_V23" />
+
+        <!-- 在线更新：把下载到应用专属目录的 APK 以 content:// 交给系统安装器。
+             exported 必须为 false（仅本应用与被授权的系统安装器使用）。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- 通知控制中心（下拉快捷磁贴） -->
         <service

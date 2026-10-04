@@ -35,11 +35,15 @@ import android.preference.SwitchPreference;
 import android.provider.Settings;
 import android.view.View;
 import android.preference.PreferenceCategory;
+import android.widget.Button;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.elleng.devswitch.util.RootUtil;
+import com.elleng.devswitch.update.UpdateChecker;
+import com.elleng.devswitch.update.UpdateDialog;
+import com.elleng.devswitch.update.UpdateInfo;
 
 import rikka.shizuku.Shizuku;
 
@@ -339,12 +343,109 @@ public class MainActivity extends PreferenceActivity {
             wireRowClicks();
             scheduleWireRowClicks();
             prefsLoaded = true;
+            checkUpdateOnStart();
         }
 
         performAuthCheck();
         refresh(DebugController.read(this));
         applyRootState();
         updateAppLabel();
+    }
+
+    // —— 在线更新 ——
+
+    /**
+     * 启动后自动检测更新（24h 节流）。
+     *
+     * 当前 {@link UpdateConfig#ENABLED} 为 false，本方法第一行就返回，一次网络请求都不会发。
+     * 启用后的行为与 LivePhoto 一致：成功拿到结果才写节流时间戳，网络失败不写，
+     * 避免弱网用户被节流 24 小时。
+     */
+    private void checkUpdateOnStart() {
+        if (!UpdateChecker.isActive() || !UpdateChecker.shouldCheck(this)) {
+            return;
+        }
+        new Thread(() -> {
+            UpdateInfo info = null;
+            try {
+                info = UpdateChecker.check(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME);
+            } catch (Throwable t) {
+                android.util.Log.w("UsbSwitch", "update check failed", t);
+            }
+            if (info == null) {
+                return; // 所有通道失败：不写节流，下次启动重试
+            }
+            UpdateChecker.markChecked(this);
+            if (!info.hasUpdate || info.versionCode <= UpdateChecker.ignoredVersion(this)) {
+                return;
+            }
+            final UpdateInfo found = info;
+            runOnUiThread(() -> UpdateDialog.show(this, found, new UpdateDialog.Listener() {
+                @Override
+                public void onOpenUrl(String url) {
+                    openExternalUrl(url);
+                }
+
+                @Override
+                public void onIgnored(UpdateInfo ignored) {
+                    // 记住该版本，之后不再弹（仅靠 24h 节流的话同版本一过节流就会再来一次）
+                    UpdateChecker.ignoreVersion(MainActivity.this, ignored.versionCode);
+                }
+            }));
+        }, "update-check").start();
+    }
+
+    /** 「关于」弹窗里的手动检查入口（总开关关闭时按钮不出现）。 */
+    private void manualCheckUpdate() {
+        if (!UpdateChecker.isActive()) {
+            Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, R.string.update_checking, Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            UpdateInfo info = null;
+            try {
+                info = UpdateChecker.check(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME);
+            } catch (Throwable t) {
+                android.util.Log.w("UsbSwitch", "update check failed", t);
+            }
+            if (info != null) {
+                UpdateChecker.markChecked(this);
+            }
+            final UpdateInfo result = info;
+            runOnUiThread(() -> {
+                if (result == null) {
+                    Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
+                } else if (!result.hasUpdate
+                        || result.versionCode <= UpdateChecker.ignoredVersion(this)) {
+                    Toast.makeText(this, R.string.update_already_latest, Toast.LENGTH_SHORT).show();
+                } else {
+                    UpdateDialog.show(this, result, new UpdateDialog.Listener() {
+                        @Override
+                        public void onOpenUrl(String url) {
+                            openExternalUrl(url);
+                        }
+
+                        @Override
+                        public void onIgnored(UpdateInfo ignored) {
+                            UpdateChecker.ignoreVersion(MainActivity.this, ignored.versionCode);
+                        }
+                    });
+                }
+            });
+        }, "update-check-manual").start();
+    }
+
+    private void openExternalUrl(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+        } catch (Throwable t) {
+            android.util.Log.w("UsbSwitch", "open url failed: " + url, t);
+            Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
+        }
     }
 
     /**
@@ -639,11 +740,19 @@ public class MainActivity extends PreferenceActivity {
                 + (privilegedAvailable ? "" : "（" + getString(R.string.about_not_authorized) + "）")
                 + "\n" + getString(R.string.about_signature) + shortSignature();
 
-        new AlertDialog.Builder(this)
+        final AlertDialog dlg = new AlertDialog.Builder(this)
                 .setTitle(R.string.about_title)
                 .setMessage(msg)
                 .setPositiveButton(android.R.string.ok, null)
-                .show();
+                .setNeutralButton(R.string.update_check, null) // 点击逻辑在 onShow 里接管
+                .create();
+        dlg.setOnShowListener(d -> {
+            Button neutral = dlg.getButton(AlertDialog.BUTTON_NEUTRAL);
+            // 功能未上线时隐藏该入口：出现一个必然失败的按钮比不出现更糟
+            neutral.setVisibility(UpdateChecker.isActive() ? View.VISIBLE : View.GONE);
+            neutral.setOnClickListener(v -> manualCheckUpdate());
+        });
+        dlg.show();
     }
 
     /** 取签名证书的 SHA-256 指纹前 16 位（够用来确认是不是同一个签名，不宜在界面里铺满） */

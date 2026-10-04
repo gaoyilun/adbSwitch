@@ -18,7 +18,6 @@
 
     <string name="master_title">调试主开关</string>
     <string name="master_expand_desc">展开或折叠子开关</string>
-    <string name="master_sum">一键开关，关闭时记住各子项状态</string>
     <string name="master_on">已开启 · adbd 运行中</string>
     <string name="master_off">已关闭 · 可通过检测</string>
     <string name="master_partial">部分开启 · adbd 仍在运行</string>
@@ -35,7 +34,6 @@
     <string name="linkage_switch">开启时自动联动跳转</string>
     <string name="linkage_app_label">联动应用</string>
     <string name="linkage_app_none">未选择</string>
-    <string name="linkage_choose">选择应用</string>
     <string name="linkage_sum">打开本 App 时自动关调试并跳转</string>
     <string name="linkage_no_app">请先选择联动应用</string>
     <string name="linkage_on">已开启联动</string>
@@ -83,6 +81,23 @@
     <string name="about_auth_mode">授权模式：%1$s</string>
     <string name="about_not_authorized">未授权</string>
     <string name="about_signature">签名：%1$s</string>
+
+    <!-- 在线更新（功能当前未启用：UpdateConfig.ENABLED=false 且 URL/密钥留空） -->
+    <string name="update_check">检查更新</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_found">发现新版本 v%1$s</string>
+    <string name="update_now">立刻更新</string>
+    <string name="update_later">忽略</string>
+    <string name="update_backup">备用下载</string>
+    <string name="update_open_page">前往下载</string>
+    <string name="update_preparing">正在准备下载…</string>
+    <string name="update_downloading">正在下载…</string>
+    <string name="update_progress">%1$s / %2$s · %3$s/s</string>
+    <string name="update_download_failed">下载失败，请检查网络后重试</string>
+    <string name="update_need_install_permission">未获得「安装未知应用」授权，已跳转系统设置，请授权后重试</string>
+    <string name="update_retry">重试</string>
+    <string name="update_check_failed">检查更新失败，请稍后再试</string>
+    <string name="update_already_latest">已是最新版本</string>
 
     <string name="picker_title">选择联动应用</string>
     <string name="picker_hint">搜索应用名称 / 包名</string>
