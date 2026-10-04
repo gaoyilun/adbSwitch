@@ -1,4 +1,4 @@
-package com.elleng.usbdebug;
+package com.elleng.devswitch;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

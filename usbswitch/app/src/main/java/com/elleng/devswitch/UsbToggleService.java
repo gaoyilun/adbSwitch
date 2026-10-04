@@ -1,4 +1,4 @@
-package com.elleng.usbdebug;
+package com.elleng.devswitch;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -28,11 +28,11 @@ public class UsbToggleService extends Service {
     public static final String CHANNEL_ID = "usb_switch_channel";
     public static final int NOTIFY_ID = 1;
 
-    public static final String ACTION_OPEN = "com.elleng.usbdebug.ACTION_OPEN";
-    public static final String ACTION_CLOSE = "com.elleng.usbdebug.ACTION_CLOSE";
-    public static final String ACTION_SETTINGS = "com.elleng.usbdebug.ACTION_SETTINGS";
+    public static final String ACTION_OPEN = "com.elleng.devswitch.ACTION_OPEN";
+    public static final String ACTION_CLOSE = "com.elleng.devswitch.ACTION_CLOSE";
+    public static final String ACTION_SETTINGS = "com.elleng.devswitch.ACTION_SETTINGS";
     /** Live Update「取消置顶」：撤掉常驻通知（不改 adb_enabled 真值） */
-    public static final String ACTION_DISMISS = "com.elleng.usbdebug.ACTION_DISMISS";
+    public static final String ACTION_DISMISS = "com.elleng.devswitch.ACTION_DISMISS";
     /** 启动时由调用方告知「当前应为关闭态」，避免在服务里做阻塞 su 读状态导致通知延迟 */
     public static final String EXTRA_STATE_ON = "state_on";
 

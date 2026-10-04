@@ -1,4 +1,4 @@
-package com.elleng.usbdebug.util;
+package com.elleng.devswitch.util;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

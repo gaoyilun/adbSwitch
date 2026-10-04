@@ -8,7 +8,7 @@ plugins {
 val buildTimeMs = System.currentTimeMillis()
 
 android {
-    namespace = "com.elleng.usbdebug"
+    namespace = "com.elleng.devswitch"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
 
@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.elleng.usbdebug"
+        applicationId = "com.elleng.devswitch"
         minSdk = 27
         targetSdk = 36
         versionCode = 1
@@ -59,6 +59,12 @@ android {
     }
 }
 
-// 刻意保持零外部依赖：只用 framework 自带控件，避免任何三方库拉取失败。
+// 主开关的真实写入走双后端：root（su）或 Shizuku（shell uid 2000）。
+// Shizuku 的三个工件（api / provider / aidl）13.1.5 已在本机 Gradle 缓存，可离线构建。
 dependencies {
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("dev.rikka.shizuku:aidl:13.1.5")
+    // 原生底部提示控件 Snackbar（替代手写的悬浮卡片）
+    implementation("com.google.android.material:material:1.12.0")
 }

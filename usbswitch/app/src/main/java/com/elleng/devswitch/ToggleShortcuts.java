@@ -1,4 +1,4 @@
-package com.elleng.usbdebug;
+package com.elleng.devswitch;
 
 import android.content.Context;
 import android.content.Intent;
@@ -39,13 +39,13 @@ import java.util.List;
 final class ToggleShortcuts {
 
     static final String ID = "toggle_master";
-    static final String ACTION_TOGGLE = "com.elleng.usbdebug.action.TOGGLE_MASTER";
+    static final String ACTION_TOGGLE = "com.elleng.devswitch.action.TOGGLE_MASTER";
     static final String ID_USB = "toggle_usb";
-    static final String ACTION_TOGGLE_USB = "com.elleng.usbdebug.action.TOGGLE_USB";
+    static final String ACTION_TOGGLE_USB = "com.elleng.devswitch.action.TOGGLE_USB";
     static final String ID_WIRELESS = "toggle_wireless";
-    static final String ACTION_TOGGLE_WIRELESS = "com.elleng.usbdebug.action.TOGGLE_WIRELESS";
+    static final String ACTION_TOGGLE_WIRELESS = "com.elleng.devswitch.action.TOGGLE_WIRELESS";
     static final String ID_HOME = "open_home";
-    static final String ACTION_OPEN_HOME = "com.elleng.usbdebug.action.OPEN_HOME";
+    static final String ACTION_OPEN_HOME = "com.elleng.devswitch.action.OPEN_HOME";
     static final String ID_LAUNCH = "launch_linkage_app";
 
     private ToggleShortcuts() {

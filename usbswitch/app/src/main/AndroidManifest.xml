@@ -8,6 +8,8 @@
     <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
     <!-- Android 16 Live Updates：常驻通知可被系统「提升」为实时动态（状态栏胶囊/锁屏/AOD） -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- Shizuku：用 shell(uid 2000) 权限真实改写 Settings，无需 root -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <!-- Android 11+ 包可见性：声明本应用需要「能看到并查询所有可启动（有桌面图标）的应用」，
          否则 getInstalledApplications / getLaunchIntentForPackage 只能返回少量系统应用。
@@ -67,6 +69,17 @@
         <receiver
             android:name=".NotificationReceiver"
             android:exported="false" />
+
+        <!-- Shizuku 桥接：本 App 通过它拿到 shell 权限的 Binder（仅 Shizuku 管理器可访问）。
+             注意：provider 必须 android:exported="true" —— 它是跨 UID（Shizuku 管理器）回调传递
+             Binder 的入口，targetSdk>=31 时若设为 false，系统会抛
+             "IllegalStateException: android:exported must be true" 导致一启动即闪退。 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="moe.shizuku.manager.permission.API_V23" />
 
         <!-- 通知控制中心（下拉快捷磁贴） -->
         <service

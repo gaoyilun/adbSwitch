@@ -1,7 +1,10 @@
 <resources>
-    <!-- 使用 framework 原生 ActionBar（带顶栏），系统会自动预留状态栏区域，
-         内容不再压在状态栏下面。 -->
-    <style name="AppTheme" parent="@android:style/Theme.Material.Light">
+    <!-- 主题挂在 MaterialComponents 下：底部提示用原生 Snackbar（Material 组件），
+         其布局会解析 colorSurface / textAppearance 等 Material 属性，
+         挂在纯 framework 主题下会直接 InflateException 崩溃。
+         这里沿用 .DarkActionBar 变体并显式覆盖 android: 颜色，
+         framework ActionBar / Preference 的观感与原先一致。 -->
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.DarkActionBar">
         <item name="android:colorPrimary">@color/colorPrimary</item>
         <item name="android:colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="android:colorAccent">@color/colorAccent</item>
@@ -9,6 +12,11 @@
         <!-- 状态栏为深色，图标用浅色 -->
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowBackground">@color/background</item>
+        <!-- 关键：MaterialComponents/AppCompat 主题只支持 androidx 的支持 ActionBar（要 AppCompatActivity），
+             本 App 是 framework PreferenceActivity，走的是 framework ActionBar，
+             因此必须显式打开 android:windowActionBar 并关掉 NoTitle，否则顶栏会整条消失。 -->
+        <item name="android:windowActionBar">true</item>
+        <item name="android:windowNoTitle">false</item>
         <!-- 顶栏（ActionBar）样式：蓝底 + 白色标题/副标题，保证可读性 -->
         <item name="android:actionBarStyle">@style/AppActionBar</item>
     </style>

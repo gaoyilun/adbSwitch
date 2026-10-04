@@ -25,6 +25,15 @@
             android:summary="@string/wireless_off"
             android:layout="@layout/pref_row_state" />
 
+        <!-- 双模式授权：模式选择 + 授权状态合并为同一项。
+             标题=授权模式；副标题直接显示「root模式 · 未授权」等（无【】括号）。
+             点击打开模式选择对话框；重试按钮已移到底部 Snackbar。 -->
+        <Preference
+            android:key="auth"
+            android:title="@string/auth_mode_title"
+            android:summary="@string/auth_mode_sum"
+            android:layout="@layout/pref_row" />
+
     </PreferenceCategory>
 
     <PreferenceCategory android:title="@string/card_linkage_title">

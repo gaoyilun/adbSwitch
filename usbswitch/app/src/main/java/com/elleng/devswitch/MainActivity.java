@@ -1,4 +1,4 @@
-package com.elleng.usbdebug;
+package com.elleng.devswitch;
 
 import android.Manifest;
 import android.app.ActionBar;
@@ -30,16 +30,27 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.preference.Preference;
+import android.text.SpannableString;
+import android.text.style.ForegroundColorSpan;
 import android.preference.PreferenceActivity;
 import android.preference.SwitchPreference;
 import android.provider.Settings;
 import android.view.View;
+import android.view.Gravity;
 import android.preference.PreferenceCategory;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.elleng.usbdebug.util.RootUtil;
+import com.elleng.devswitch.util.RootUtil;
+
+import rikka.shizuku.Shizuku;
+
+import com.google.android.material.snackbar.Snackbar;
 
 /**
  * 主界面：使用 framework 原生 PreferenceActivity（Android 原生 Material 设置页），
@@ -50,19 +61,19 @@ public class MainActivity extends PreferenceActivity {
 
     public static final String EXTRA_SETTINGS = "extra_settings";
     /** 静态 shortcut「打开主页」的 action：见到它就跳过联动自动跳转 */
-    private static final String ACTION_OPEN_HOME = "com.elleng.usbdebug.action.OPEN_HOME";
+    private static final String ACTION_OPEN_HOME = "com.elleng.devswitch.action.OPEN_HOME";
     /** 调试用 action：直接拉起联动应用选择器（便于 adb 远程验证弹窗是否正常） */
-    private static final String ACTION_DEBUG_PICKER = "com.elleng.usbdebug.action.DEBUG_PICKER";
+    private static final String ACTION_DEBUG_PICKER = "com.elleng.devswitch.action.DEBUG_PICKER";
     /**
      * 调试用 action：从前台 Activity 直接拨主开关，等价于用户手动拨。
      * 存在的理由：adb 连发广播会被 HyperOS 的 Greezer 拦截（"need cached broadcast"），
      * 走 Activity 则不受限，可稳定远程验证一键开关。
-     * 用法：am start -n .../.MainActivity -a com.elleng.usbdebug.action.DEBUG_MASTER --ez master_on false
+     * 用法：am start -n .../.MainActivity -a com.elleng.devswitch.action.DEBUG_MASTER --ez master_on false
      */
-    private static final String ACTION_DEBUG_MASTER = "com.elleng.usbdebug.action.DEBUG_MASTER";
+    private static final String ACTION_DEBUG_MASTER = "com.elleng.devswitch.action.DEBUG_MASTER";
     private static final String EXTRA_MASTER_ON = "master_on";
     /** 桌面快捷方式「创建桌面快捷方式」：先打开本 App，关掉调试后联动启动目标应用 */
-    private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.usbdebug.action.DESKTOP_LINKAGE";
+    private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.devswitch.action.DESKTOP_LINKAGE";
     private static final String TAG = "UsbSwitch";
     private static final String PREFS = "cfg";
     private static final String PREF_LINKAGE = "linkage_enabled";
@@ -91,11 +102,20 @@ public class MainActivity extends PreferenceActivity {
     private Preference liveUpdatePref;
     private Preference buildInfoPref;
     private Preference createShortcutPref;
+    private Preference authPref;              // 授权模式（root / Shizuku）与授权状态合并项
 
     private boolean syncing = false;          // 防止 setChecked 触发回环
-    private boolean rootAvailable = true;     // 乐观假定有 root，探测（fork su，较慢）在后台回主线程纠正
+    /** 当前授权模式是否可用（即能否真实写入调试开关）。乐观假定可用，后台双检测纠正 */
+    private boolean privilegedAvailable = true;
     private boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
     private boolean rowClicksWired = false;   // 行点击的布局监听是否已注册（避免重复注册）
+    /** 双检测得到的两个后端可用状态（用于悬浮通知判定） */
+    private boolean lastRootOk = false;
+    private boolean lastShizukuOk = false;
+    /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
+    private com.google.android.material.snackbar.Snackbar authSnackbar = null;
+    /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
+    private long lastShizukuRequestAt = 0;
     /** 进程级：本次进程内是否已自动跳转过联动应用（static 保证 Activity 重建后仍记得） */
     private static boolean sLinkageLaunched = false;
     private long lastPickerOpenAt = 0;        // 打开选择器防抖：行点击与 preference click 可能同时触发
@@ -148,8 +168,43 @@ public class MainActivity extends PreferenceActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        initShizuku();
         if (!handleEntry(getIntent())) {
             showSettings();
+        }
+    }
+
+    /**
+     * 注册 Shizuku 桥接监听：
+     *  - OnBinderReceivedListener（sticky）：Shizuku 服务就绪后立刻重新检测授权，
+     *    若当前是 Shizuku 模式且尚未授权，则主动弹授权请求；
+     *  - OnRequestPermissionResultListener：用户点完 Shizuku 授权弹窗后回写状态并重测。
+     * 这些监听与「未授权时每次进页面双检测」互补：即使页面没重建（例如 Shizuku 在后台启动），
+     * 也能即时感知并刷新授权状态。
+     */
+    private void initShizuku() {
+        try {
+            Shizuku.addBinderReceivedListenerSticky(new Shizuku.OnBinderReceivedListener() {
+                @Override
+                public void onBinderReceived() {
+                    android.util.Log.i(TAG, "Shizuku binder received");
+                    // 服务就绪：Shizuku 模式且未授权时主动弹授权（force=false 走防抖）
+                    maybeRequestShizukuPermission(false);
+                    // 无论是否已授权都重测一次，刷新授权状态行与控件可用性
+                    performAuthCheck();
+                }
+            });
+            Shizuku.addRequestPermissionResultListener(new Shizuku.OnRequestPermissionResultListener() {
+                @Override
+                public void onRequestPermissionResult(int requestCode, int grantResult) {
+                    if (requestCode == AuthManager.SHIZUKU_PERM_REQUEST) {
+                        android.util.Log.i(TAG, "Shizuku permission result=" + grantResult);
+                        performAuthCheck();
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "initShizuku failed", t);
         }
     }
 
@@ -288,27 +343,43 @@ public class MainActivity extends PreferenceActivity {
             prefsLoaded = true;
         }
 
-        probeRoot();
+        performAuthCheck();
         refresh(DebugController.read(this));
         applyRootState();
         updateAppLabel();
     }
 
-    /** root 探测要 fork su（阻塞调用），放后台线程；完成后回主线程纠正禁用态 */
-    private void probeRoot() {
+    /**
+     * 双模式授权检测（替换原 probeRoot）：
+     * 后台同时探测 root 与 Shizuku 两个后端是否可用（root 要 fork su，较慢；Shizuku 是 binder 调用，很快），
+     * 回主线程后据「当前选中的模式」决定 privilegedAvailable（控件是否可写），
+     * 刷新授权状态行与重试按钮，并在当前模式未授权时弹出底部悬浮通知。
+     */
+    private void performAuthCheck() {
+        if (!prefsLoaded) {
+            return;
+        }
         new Thread(() -> {
-            final boolean has = RootUtil.hasRoot();
+            final boolean rootOk = RootUtil.hasRoot();
+            final boolean shizukuOk = ShizukuUtil.available();
+            final boolean shizukuRunning = ShizukuUtil.running();
+            final AuthManager.Mode mode = AuthManager.getMode(MainActivity.this);
+            final boolean ok = (mode == AuthManager.Mode.SHIZUKU) ? shizukuOk : rootOk;
             new Handler(Looper.getMainLooper()).post(() -> {
-                if (rootAvailable == has) {
-                    return;
-                }
-                rootAvailable = has;
-                if (prefsLoaded) {
-                    refresh(DebugController.read(this));
-                }
+                lastRootOk = rootOk;
+                lastShizukuOk = shizukuOk;
+                privilegedAvailable = ok;
                 applyRootState();
+                updateAuthStatusUI();
+                // Shizuku 模式且服务在跑却没授权：主动弹 Shizuku 授权对话框
+                if (!ok && mode == AuthManager.Mode.SHIZUKU) {
+                    maybeRequestShizukuPermission(false);
+                }
+                if (!ok) {
+                    showAuthNotice(mode, shizukuRunning);
+                }
             });
-        }, "root-probe").start();
+        }, "auth-probe").start();
     }
 
     /** 原生顶栏：标题 + 副标题 + 主色背景（系统自动预留状态栏区域）。
@@ -346,6 +417,16 @@ public class MainActivity extends PreferenceActivity {
                 return true;
             });
         }
+        // 双模式授权：模式选择 + 授权状态已合并为同一项。点击整行 = 打开模式选择对话框
+        authPref = findPreference("auth");
+        if (authPref != null) {
+            authPref.setOnPreferenceClickListener(p -> {
+                chooseAuthMode();
+                return true;
+            });
+        }
+        // 初次进入即用当前模式渲染一次授权状态（精确结果等后台双检测回来再纠正）
+        updateAuthStatusUI();
         // 底部显示本 APK 的构建时间，便于确认设备上装的是否为最新版本
         if (buildInfoPref != null) {
             String t = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
@@ -602,14 +683,14 @@ public class MainActivity extends PreferenceActivity {
         ToggleShortcuts.publish(this);
     }
 
-    /** 根据 root 可用性刷新控件与提示：无 root 时禁用并提示，授权后及时恢复 */
+    /** 根据当前授权模式是否可用刷新控件与提示：未授权时禁用并提示，授权后及时恢复 */
     private void applyRootState() {
         // 偏好项任一为 null 说明设置页还没建好，直接跳过刷新
         if (swMasterPref == null || swUsbPref == null || swLinkagePref == null
                 || swNotifyPref == null || swWirelessPref == null || appPref == null) {
             return;
         }
-        if (rootAvailable) {
+        if (privilegedAvailable) {
             swMasterPref.setEnabled(true);
             swUsbPref.setEnabled(true);
             swLinkagePref.setEnabled(true);
@@ -617,7 +698,7 @@ public class MainActivity extends PreferenceActivity {
             swNotifyPref.setEnabled(true);
             swWirelessPref.setEnabled(true);
         } else {
-            swMasterPref.setSummary(R.string.root_missing);
+            swMasterPref.setSummary(R.string.auth_no_priv);
             swMasterPref.setIcon(stateIcon(R.color.error));
             swMasterPref.setEnabled(false);
             swUsbPref.setEnabled(false);
@@ -626,7 +707,7 @@ public class MainActivity extends PreferenceActivity {
             swNotifyPref.setEnabled(false);
             swWirelessPref.setEnabled(false);
         }
-        // 实时动态项的可用性只跟系统版本有关，不受 root 影响
+        // 实时动态项的可用性只跟系统版本有关，不受授权模式影响
         updateLiveUpdateState();
     }
 
@@ -667,10 +748,10 @@ public class MainActivity extends PreferenceActivity {
         }
         openBtn.setVisibility(View.VISIBLE);
         openBtn.setOnClickListener(v -> {
-            if (rootAvailable) {
+            if (privilegedAvailable) {
                 launchApp(pkg);
             } else {
-                Toast.makeText(this, R.string.root_missing, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -755,6 +836,7 @@ public class MainActivity extends PreferenceActivity {
         String runNowTitle = getString(R.string.linkage_run_now_title);
         String masterTitle = getString(R.string.master_title);
         String createShortcutTitle = getString(R.string.create_shortcut_title);
+        String authTitle = getString(R.string.auth_mode_title);
         for (int i = 0; i < list.getChildCount(); i++) {
             View row = list.getChildAt(i);
             if (row == null) {
@@ -805,10 +887,10 @@ public class MainActivity extends PreferenceActivity {
                     } else {
                         openBtn.setVisibility(View.VISIBLE);
                         openBtn.setOnClickListener(v -> {
-                            if (rootAvailable) {
+                            if (privilegedAvailable) {
                                 launchApp(curPkg);
                             } else {
-                                Toast.makeText(this, R.string.root_missing, Toast.LENGTH_SHORT).show();
+                                Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
                             }
                         });
                     }
@@ -819,6 +901,9 @@ public class MainActivity extends PreferenceActivity {
                 row.setOnClickListener(v -> runLinkageManual());
             } else if (createShortcutTitle.equals(title)) {
                 row.setOnClickListener(v -> createDesktopShortcut());
+            } else if (authTitle.equals(title)) {
+                // 合并项「授权模式」整行点击 = 打开授权模式选择对话框
+                row.setOnClickListener(v -> chooseAuthMode());
             }
         }
     }
@@ -870,10 +955,9 @@ public class MainActivity extends PreferenceActivity {
         if (!prefsLoaded) {
             return;
         }
-        // 无 root 时每次进入页面都重新探测：用户在别处授权 superuser 后回到本 App 可即时恢复
-        if (!rootAvailable) {
-            rootAvailable = RootUtil.hasRoot();
-            applyRootState();
+        // 当前模式未授权时，每次回到前台都重新双检测：用户在别处授权（superuser / Shizuku）后回到本 App 可即时恢复
+        if (!privilegedAvailable) {
+            performAuthCheck();
         }
         // 每次回到前台都回读真值：可能在别处（通知/磁贴/adb）被改过
         refresh(DebugController.read(this));
@@ -928,6 +1012,213 @@ public class MainActivity extends PreferenceActivity {
         } else {
             liveUpdatePref.setEnabled(true);
         }
+    }
+
+    // —— 双模式授权 ——
+
+    /** 弹出授权模式选择对话框（root / Shizuku），选中后持久化并立即重测 */
+    private void chooseAuthMode() {
+        final AuthManager.Mode cur = AuthManager.getMode(this);
+        final int checked = (cur == AuthManager.Mode.SHIZUKU) ? 1 : 0;
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.auth_choose_title)
+                .setSingleChoiceItems(
+                        new CharSequence[]{getString(R.string.auth_mode_root),
+                                getString(R.string.auth_mode_shizuku)},
+                        checked,
+                        (d, which) -> {
+                            AuthManager.Mode mode = (which == 1)
+                                    ? AuthManager.Mode.SHIZUKU : AuthManager.Mode.ROOT;
+                            AuthManager.setMode(MainActivity.this, mode);
+                            d.dismiss();
+                            updateAuthStatusUI();
+                            // 切到新模式下立刻双检测：root 模式 fork su；
+                            // Shizuku 模式先主动请求授权（force，用户是刚明确切过来的）
+                            maybeRequestShizukuPermission(true);
+                            performAuthCheck();
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** 渲染合并的「授权模式」行（标题=授权模式，副标题直接显示「root模式 · 未授权」等）
+     *  规则：未授权 → 摘要整段改红字作警告（不挂圆形状态图标）；已授权 → 还原默认样式，
+     *  并关掉底部未授权的 Snackbar。 */
+    private void updateAuthStatusUI() {
+        if (authPref == null) {
+            return;
+        }
+        AuthManager.Mode mode = AuthManager.getMode(this);
+        boolean ok = privilegedAvailable;
+        int statusRes = (mode == AuthManager.Mode.SHIZUKU)
+                ? (ok ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no)
+                : (ok ? R.string.auth_status_root_ok : R.string.auth_status_root_no);
+
+        if (ok) {
+            // 已授权：还原默认样式，不单独变色、不挂图标
+            authPref.setSummary(statusRes);
+            // 授权成功后关掉底部未授权提示（含「重试」那条）
+            dismissAuthSnackbar();
+        } else {
+            // 未授权：整段摘要改红字警告（行首不加圆形指示图标）
+            SpannableString sp = new SpannableString(getString(statusRes));
+            sp.setSpan(new ForegroundColorSpan(
+                            getResources().getColor(R.color.error, getTheme())),
+                    0, sp.length(), SpannableString.SPAN_INCLUSIVE_INCLUSIVE);
+            authPref.setSummary(sp);
+        }
+    }
+
+    /** 关掉底部未授权提示（带「重试」的那条） */
+    private void dismissAuthSnackbar() {
+        if (authSnackbar != null) {
+            authSnackbar.dismiss();
+            authSnackbar = null;
+        }
+    }
+
+    /**
+     * Shizuku 模式且尚未授权时，向 Shizuku 管理器请求授权（弹出 Shizuku 授权对话框）。
+     *
+     * 触发时机：① Shizuku 服务就绪（binder 到达）；② 切到 Shizuku 模式；③ Shizuku 模式点「重试」。
+     * 前置条件：Shizuku 已在运行（pingBinder）—— 服务没起来时请求无意义，Shizuku 会直接拒绝、也不弹窗。
+     *
+     * @param force true=忽略防抖立即请求（用户主动动作：切模式 / 点重试）；
+     *              false=走 5s 防抖。防抖是必要的：授权结果回调会再次触发 performAuthCheck，
+     *              若未授权就无防抖地再次请求，会形成「请求 -> 结果 -> 重测 -> 请求」的循环。
+     */
+    private void maybeRequestShizukuPermission(boolean force) {
+        if (AuthManager.getMode(this) != AuthManager.Mode.SHIZUKU) {
+            return;
+        }
+        boolean ping;
+        try {
+            ping = Shizuku.pingBinder();
+        } catch (Throwable t) {
+            ping = false;
+        }
+        if (!ping) {
+            android.util.Log.i(TAG, "Shizuku binder not alive, skip permission request");
+            return;
+        }
+        int perm;
+        try {
+            perm = Shizuku.checkSelfPermission();
+        } catch (Throwable t) {
+            perm = android.content.pm.PackageManager.PERMISSION_DENIED;
+        }
+        if (perm == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (!force && now - lastShizukuRequestAt < 5000) {
+            return;
+        }
+        lastShizukuRequestAt = now;
+        android.util.Log.i(TAG, "requesting Shizuku permission (force=" + force + ")");
+        try {
+            Shizuku.requestPermission(AuthManager.SHIZUKU_PERM_REQUEST);
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "requestPermission failed", t);
+        }
+    }
+
+    /** 未授权时「重试」：root 模式直接重测；Shizuku 模式先确认服务在跑，未授权则弹授权请求 */
+    private void onAuthRetry() {
+        AuthManager.Mode mode = AuthManager.getMode(this);
+        if (mode == AuthManager.Mode.SHIZUKU) {
+            boolean ping;
+            try {
+                ping = Shizuku.pingBinder();
+            } catch (Throwable t) {
+                ping = false;
+            }
+            if (!ping) {
+                Toast.makeText(this, R.string.auth_need_start, Toast.LENGTH_LONG).show();
+                return;
+            }
+            int perm;
+            try {
+                perm = Shizuku.checkSelfPermission();
+            } catch (Throwable t) {
+                perm = android.content.pm.PackageManager.PERMISSION_DENIED;
+            }
+            if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                // force=true：用户明确点了「重试」，必须立即弹授权
+                maybeRequestShizukuPermission(true);
+                return; // 结果由 OnRequestPermissionResultListener 收后再重测
+            }
+        }
+        performAuthCheck();
+    }
+
+    /**
+     * 底部未授权提示（原生 Snackbar，带「重试」）。
+     *
+     * 文案严格绑定当前授权模式 —— 底部提示与「授权模式」那一行是同一件事的两种呈现，
+     * 不能出现「选了 root 模式却提示 Shizuku 已授权」这种错位引导（旧实现的 bug：
+     * 它按双检测结果挑「哪个后端可用」来提示，跟用户选的模式无关）。
+     * Shizuku 模式下再细分「服务没启动」与「已启动但没授权」，否则只说"未授权"用户无从下手。
+     */
+    private void showAuthNotice(AuthManager.Mode mode, boolean shizukuRunning) {
+        final int textRes;
+        if (mode == AuthManager.Mode.SHIZUKU) {
+            textRes = shizukuRunning ? R.string.auth_toast_shizuku_no : R.string.auth_need_start;
+        } else {
+            textRes = R.string.auth_toast_root_no;
+        }
+        runOnUiThread(() -> showAuthSnackbar(getString(textRes), true));
+    }
+
+    /** 真正的 Snackbar：与应用主题无关的显式配色，避免在 framework 主题下取不到 Material 色值而显示异常 */
+    private void showAuthSnackbar(String text, boolean unauthorized) {
+        try {
+            View root = getWindow().getDecorView().findViewById(android.R.id.content);
+            if (root == null) {
+                // 兜底：拿不到内容视图时退化为普通 Toast
+                Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+                return;
+            }
+            // 同一时刻只保留一个提示
+            if (authSnackbar != null) {
+                authSnackbar.dismiss();
+                authSnackbar = null;
+            }
+            Snackbar sb = Snackbar.make(root, text,
+                    unauthorized ? Snackbar.LENGTH_INDEFINITE : Snackbar.LENGTH_LONG);
+            View v = sb.getView();
+            v.setBackgroundColor(0xFF323232); // 与原生 Snackbar 一致的深色底
+            TextView tv = v.findViewById(com.google.android.material.R.id.snackbar_text);
+            if (tv != null) {
+                // 未授权用红色作警告；已授权类提示保持白字
+                tv.setTextColor(unauthorized
+                        ? getResources().getColor(R.color.error, getTheme())
+                        : 0xFFFFFFFF);
+            }
+            if (unauthorized) {
+                sb.setActionTextColor(0xFFFFFFFF);
+                sb.setAction(R.string.auth_retry, x -> onAuthRetry());
+            }
+            authSnackbar = sb;
+            sb.addCallback(new Snackbar.Callback() {
+                @Override
+                public void onDismissed(Snackbar transientBottomBar, int event) {
+                    if (authSnackbar == transientBottomBar) {
+                        authSnackbar = null;
+                    }
+                }
+            });
+            sb.show();
+        } catch (Throwable t) {
+            // Snackbar 在个别主题/ROM 下可能 inflate 失败：绝不因此闪退，降级为 Toast
+            android.util.Log.w(TAG, "Snackbar show failed, fallback to Toast", t);
+            Toast.makeText(this, text, unauthorized ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** dp -> px 助手 */
+    private int dip(int dp) {
+        return Math.round(dp * getResources().getDisplayMetrics().density);
     }
 
     /** 取目标应用图标（Drawable，供 Preference 左侧显示）；失败回退本应用图标 */

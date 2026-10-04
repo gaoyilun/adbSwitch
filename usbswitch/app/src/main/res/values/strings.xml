@@ -12,7 +12,7 @@
     <string name="sc_toggle_wireless_short">无线调试</string>
     <string name="sc_toggle_wireless_long">单独开关无线调试，不打开界面</string>
 
-    <string name="header_subtitle">root 授权 · 一键开关 USB 与无线调试</string>
+    <string name="header_subtitle">一键开关 USB 与无线调试（root / Shizuku）</string>
 
     <string name="root_missing">未检测到 root，请确认已授予超级用户权限</string>
 
@@ -81,7 +81,7 @@
     <string name="pref_open">打开</string>
     <string name="pref_edit">修改</string>
     <string name="toast_off">已关闭，通知栏可一键恢复</string>
-    <string name="toast_root_fail">root 执行失败，请检查授权</string>
+    <string name="toast_root_fail">执行失败，请检查授权模式</string>
 
     <!-- 底部调试信息 -->
     <string name="build_info_title">构建时间（调试）</string>
@@ -92,4 +92,26 @@
     <string name="picker_loading">正在读取已安装应用…</string>
     <string name="picker_load_fail">读取应用列表失败</string>
     <string name="notify_settings">应用设置</string>
+
+    <!-- 双模式授权（root / Shizuku） -->
+    <string name="auth_mode_title">授权模式</string>
+    <string name="auth_mode_sum">点击选择 root 或 Shizuku</string>
+    <string name="auth_mode_root">root</string>
+    <string name="auth_mode_shizuku">Shizuku</string>
+    <string name="auth_status_title">授权状态</string>
+    <string name="auth_status_summary">—</string>
+    <string name="auth_retry">重试</string>
+    <string name="auth_status_root_ok">root模式 · 已授权</string>
+    <string name="auth_status_root_no">root模式 · 未授权</string>
+    <string name="auth_status_shizuku_ok">Shizuku模式 · 已授权</string>
+    <string name="auth_status_shizuku_no">Shizuku模式 · 未授权</string>
+    <string name="auth_choose_title">选择授权模式</string>
+    <string name="auth_shizuku_missing">Shizuku 未授权，请在 Shizuku 中授权或切换模式</string>
+    <string name="auth_toast_shizuku_ok">Shizuku模式已授权</string>
+    <string name="auth_toast_shizuku_no">Shizuku模式未授权</string>
+    <string name="auth_toast_root_ok">root模式已授权</string>
+    <string name="auth_toast_root_no">root模式未授权，请检查权限或切换至Shizuku模式</string>
+    <string name="auth_need_start">请先在 Shizuku 应用中启动服务</string>
+    <string name="auth_no_priv">未授权，无法写入调试开关</string>
+    <string name="auth_need_grant">请先完成授权（root 或 Shizuku）</string>
 </resources>
