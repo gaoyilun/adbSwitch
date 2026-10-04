@@ -63,8 +63,11 @@ public class UsbToggleService extends Service {
      * 那时内部广播不会发，通知会停在「已关闭」骗人——与 App 的确认真实状态使命冲突。
      * 故服务存续期间监听 Settings，发现任一开启就自动退场。
      */
+    // 注意：字段初始化在 Service 构造函数阶段执行，此时 attachBaseContext 还没发生，
+    // 绝不能用实例的 getMainLooper()（会 NPE 且直接崩掉服务），必须用静态 Looper。
     private final android.database.ContentObserver settingsObserver =
-            new android.database.ContentObserver(new android.os.Handler(getMainLooper())) {
+            new android.database.ContentObserver(
+                    new android.os.Handler(android.os.Looper.getMainLooper())) {
                 @Override
                 public void onChange(boolean selfChange) {
                     if (DebugController.read(UsbToggleService.this).anyOn()) {
