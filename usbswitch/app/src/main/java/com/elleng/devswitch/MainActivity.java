@@ -94,8 +94,8 @@ public class MainActivity extends PreferenceActivity {
     private SwitchPreference swWirelessPref;
     private SwitchPreference swKillPref;
     private Preference appPref;
-    private Preference runNowPref;
     private Preference liveUpdatePref;
+    /** 「关于」行：点击弹窗展示版本/构建时间/授权模式（原「构建时间」行） */
     private Preference buildInfoPref;
     private Preference createShortcutPref;
     private Preference authPref;              // 授权模式（root / Shizuku）与授权状态合并项
@@ -117,7 +117,7 @@ public class MainActivity extends PreferenceActivity {
     /** 主线程 Handler：去抖与所有 post 都复用它，否则每次 new 一个 Handler 都拿不到上次的 callback，去抖等于失效 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     /** 行点击接线用的标题缓存：布局每帧都会回调，getString 不该每次重做 */
-    private String titleMaster, titleApp, titleLive, titleRunNow, titleShortcut, titleAuth;
+    private String titleMaster, titleApp, titleLive, titleShortcut, titleAuth, titleAbout;
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -400,8 +400,8 @@ public class MainActivity extends PreferenceActivity {
         titleMaster = getString(R.string.master_title);
         titleApp = getString(R.string.linkage_app_label);
         titleLive = getString(R.string.live_update_title);
-        titleRunNow = getString(R.string.linkage_run_now_title);
         titleShortcut = getString(R.string.create_shortcut_title);
+        titleAbout = getString(R.string.about_title);
         titleAuth = getString(R.string.auth_mode_title);
 
         swMasterPref = findPreference("swMaster");
@@ -411,7 +411,6 @@ public class MainActivity extends PreferenceActivity {
         swWirelessPref = (SwitchPreference) findPreference("swWireless");
         swKillPref = (SwitchPreference) findPreference("swKillBeforeOpen");
         appPref = findPreference("linkageApp");
-        runNowPref = findPreference("linkageRunNow");
         liveUpdatePref = findPreference("liveUpdate");
         buildInfoPref = findPreference("buildInfo");
         createShortcutPref = findPreference("createShortcut");
@@ -431,12 +430,7 @@ public class MainActivity extends PreferenceActivity {
         }
         // 初次进入即用当前模式渲染一次授权状态（精确结果等后台双检测回来再纠正）
         updateAuthStatusUI();
-        // 底部显示本 APK 的构建时间，便于确认设备上装的是否为最新版本
-        if (buildInfoPref != null) {
-            String t = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                    .format(new java.util.Date(BuildConfig.BUILD_TIME_MS));
-            buildInfoPref.setSummary(t);
-        }
+        // 底部「关于」行：点击弹窗展示版本/构建时间等（构建时间不再直接占用行摘要）
 
         // 主开关：一键开/关。关闭时记住两个子开关的组合，打开时原样还原。
         // 注意它是普通 Preference：整行点击与行内 Switch 都在 wireRowClicks() 里接线，
@@ -622,7 +616,58 @@ public class MainActivity extends PreferenceActivity {
         });
     }
 
-    /** 「立即执行联动」手动入口：不受"只自动跳一次"限制 */
+    /**
+     * 「关于」弹窗：版本号 / 包名 / 构建时间 / 当前授权模式 / 签名指纹。
+     *
+     * 构建时间放在这里而不是行摘要上：行摘要只放一行字，塞不下这些；
+     * 而「设备上装的是不是最新版本」恰恰是排查问题时最常要的信息，
+     * 放进弹窗后仍可一键查看，不会因为折叠而看不到。
+     */
+    private void showAboutDialog() {
+        String buildTime = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
+                java.util.Locale.getDefault())
+                .format(new java.util.Date(BuildConfig.BUILD_TIME_MS));
+        AuthManager.Mode mode = AuthManager.getMode(this);
+        String modeText = getString(mode == AuthManager.Mode.SHIZUKU
+                ? R.string.auth_mode_shizuku : R.string.auth_mode_root);
+
+        String msg = getString(R.string.app_name) + " " + BuildConfig.VERSION_NAME
+                + "\n" + getString(R.string.about_version_code) + BuildConfig.VERSION_CODE
+                + "\n" + getString(R.string.about_package) + getPackageName()
+                + "\n" + getString(R.string.about_build_time) + buildTime
+                + "\n" + getString(R.string.about_auth_mode) + modeText
+                + (privilegedAvailable ? "" : "（" + getString(R.string.about_not_authorized) + "）")
+                + "\n" + getString(R.string.about_signature) + shortSignature();
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.about_title)
+                .setMessage(msg)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    /** 取签名证书的 SHA-256 指纹前 16 位（够用来确认是不是同一个签名，不宜在界面里铺满） */
+    private String shortSignature() {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            android.content.pm.Signature[] sigs = getPackageManager()
+                    .getPackageInfo(getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES)
+                    .signatures;
+            if (sigs == null || sigs.length == 0) {
+                return "-";
+            }
+            byte[] d = md.digest(sigs[0].toByteArray());
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 8 && i < d.length; i++) {
+                sb.append(String.format("%02X", d[i]));
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "-";
+        }
+    }
+
+    /** 「联动打开」：关掉调试并跳转到已选联动应用。 */
     private void runLinkageManual() {
         SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
         String pkg = sp.getString(PREF_PKG, "");
@@ -740,15 +785,14 @@ public class MainActivity extends PreferenceActivity {
     }
 
     /**
-     * 给「联动应用」行右侧按钮接线：
-     *   - 「修改」：打开应用选择器（framework 整行点击不可靠，按钮入口最稳，始终可见）；
-     *   - 「打开」：直接启动已选应用（未选应用时隐藏）。
+     * 给「联动应用」行右侧按钮接线：「联动打开」= 关调试并跳转到已选联动应用。
+     * 注意不能直接 launchApp —— 那会绕过关调试这一步，等于什么都没做。
+     * （未选应用时按钮隐藏；整行点击仍是打开应用选择器。）
      */
     private void bindOpenButton(String pkg) {
         if (appPref == null) {
             return;
         }
-        // 只接「打开」按钮；「修改」按钮已移除，改由整行点击打开选择器
         View openBtn = findViewDeep(R.id.btn_open_app);
         if (openBtn == null) {
             return;
@@ -759,11 +803,11 @@ public class MainActivity extends PreferenceActivity {
         }
         openBtn.setVisibility(View.VISIBLE);
         openBtn.setOnClickListener(v -> {
-            if (privilegedAvailable) {
-                launchApp(pkg);
-            } else {
+            if (!privilegedAvailable) {
                 Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
+                return;
             }
+            runLinkageManual();
         });
     }
 
@@ -915,13 +959,13 @@ public class MainActivity extends PreferenceActivity {
                 if (!wired) {
                     row.setOnClickListener(v -> openLiveUpdate());
                 }
-            } else if (titleRunNow.equals(title)) {
-                if (!wired) {
-                    row.setOnClickListener(v -> runLinkageManual());
-                }
             } else if (titleShortcut.equals(title)) {
                 if (!wired) {
                     row.setOnClickListener(v -> createDesktopShortcut());
+                }
+            } else if (titleAbout.equals(title)) {
+                if (!wired) {
+                    row.setOnClickListener(v -> showAboutDialog());
                 }
             } else if (titleAuth.equals(title)) {
                 // 合并项「授权模式」整行点击 = 打开授权模式选择对话框

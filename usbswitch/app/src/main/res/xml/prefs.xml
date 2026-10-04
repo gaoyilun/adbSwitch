@@ -58,12 +58,8 @@
             android:summary="@string/kill_before_open_sum"
             android:layout="@layout/pref_row" />
 
-        <!-- 手动执行联动：自动跳转每个进程只做一次，之后想再跳用这一行 -->
-        <Preference
-            android:key="linkageRunNow"
-            android:title="@string/linkage_run_now_title"
-            android:summary="@string/linkage_run_now_sum"
-            android:layout="@layout/pref_row" />
+        <!-- 手动联动入口已并入「联动应用」行右侧的「联动打开」按钮，
+             不再单列一项（避免同一个动作出现两个入口）。 -->
 
         <!-- 创建桌面快捷方式：在桌面生成联动应用的原生图标（区别于 ShortcutManager 长按菜单 Shortcut） -->
         <Preference
@@ -92,11 +88,12 @@
 
     </PreferenceCategory>
 
-    <!-- 底部调试信息：显示本 APK 的构建时间，用于确认设备上装的是否为最新版本 -->
+    <!-- 关于：点击弹窗展示版本号 / 包名 / 构建时间 / 授权模式 / 签名指纹。
+         构建时间原先直接当行摘要显示，改为放进弹窗（摘要位置留给更有价值的信息）。 -->
     <Preference
         android:key="buildInfo"
-        android:title="@string/build_info_title"
-        android:summary="@string/build_info_placeholder"
+        android:title="@string/about_title"
+        android:summary="@string/about_summary"
         android:layout="@layout/pref_row"
         android:persistent="false" />
 

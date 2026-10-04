@@ -41,13 +41,12 @@
     <string name="linkage_on">已开启联动</string>
     <string name="linkage_off">已关闭联动</string>
     <string name="linkage_app_set">已设置联动应用</string>
+    <string name="linkage_open_btn">联动打开</string>
 
     <string name="kill_before_open_title">开调试前先停止联动应用</string>
     <string name="kill_before_open_sum">避免联动应用在状态翻转瞬间读到调试</string>
 
-    <string name="linkage_run_now_title">立即执行联动</string>
-    <string name="linkage_run_now_sum">关调试并跳转，自动跳转每次启动只做一次</string>
-    <string name="linkage_skipped">已跳过自动跳转，需再跳请点「立即执行联动」</string>
+    <string name="linkage_skipped">已跳过自动跳转，需再跳请点「联动应用」右侧的「联动打开」</string>
     <string name="linkage_need_notif">联动需要通知权限，请先授予</string>
 
     <string name="create_shortcut_title">创建桌面快捷方式</string>
@@ -73,12 +72,17 @@
     <string name="live_update_test_text">状态栏出现胶囊即表示已生效</string>
     <string name="live_update_unsupported">当前系统不支持（需 Android 16+）</string>
 
-    <string name="pref_open">打开</string>
     <string name="toast_root_fail">执行失败，请检查授权模式</string>
 
-    <!-- 底部调试信息 -->
-    <string name="build_info_title">构建时间（调试）</string>
-    <string name="build_info_placeholder">读取中…</string>
+    <!-- 关于 -->
+    <string name="about_title">关于</string>
+    <string name="about_summary">版本、构建时间与授权状态</string>
+    <string name="about_version_code">版本号：%1$d\n</string>
+    <string name="about_package">包名：%1$s\n</string>
+    <string name="about_build_time">构建时间：%1$s\n</string>
+    <string name="about_auth_mode">授权模式：%1$s</string>
+    <string name="about_not_authorized">未授权</string>
+    <string name="about_signature">签名：%1$s</string>
 
     <string name="picker_title">选择联动应用</string>
     <string name="picker_hint">搜索应用名称 / 包名</string>
