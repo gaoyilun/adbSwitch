@@ -37,6 +37,8 @@ public class UsbToggleService extends Service {
     public static final String EXTRA_STATE_ON = "state_on";
 
     private NotificationManager nm;
+    private boolean observerRegistered = false;
+
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
@@ -55,6 +57,22 @@ public class UsbToggleService extends Service {
         }
     };
 
+    /**
+     * 外部改动感知：常驻通知存续的唯一条件是「两个都关」。
+     * 但调试状态可能被本 App 之外的东西打开（系统开发者选项、adb、别的 root 工具），
+     * 那时内部广播不会发，通知会停在「已关闭」骗人——与 App 的确认真实状态使命冲突。
+     * 故服务存续期间监听 Settings，发现任一开启就自动退场。
+     */
+    private final android.database.ContentObserver settingsObserver =
+            new android.database.ContentObserver(new android.os.Handler(getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    if (DebugController.read(UsbToggleService.this).anyOn()) {
+                        stopSelf();
+                    }
+                }
+            };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -66,6 +84,13 @@ public class UsbToggleService extends Service {
         } else {
             registerReceiver(stateReceiver, f);
         }
+        try {
+            getContentResolver().registerContentObserver(
+                    android.provider.Settings.Global.CONTENT_URI, true, settingsObserver);
+            observerRegistered = true;
+        } catch (Throwable t) {
+            Log.w(TAG, "register settings observer failed", t);
+        }
     }
 
     @Override
@@ -76,7 +101,7 @@ public class UsbToggleService extends Service {
             boolean anyOn = intent.getBooleanExtra(EXTRA_STATE_ON, false);
             s = anyOn ? new DebugController.State(true, false) : new DebugController.State(false, false);
         } else {
-            s = DebugController.read();
+            s = DebugController.read(this);
         }
         if (s.anyOn()) {
             // 任一还开着：不需要常驻通知
@@ -120,6 +145,13 @@ public class UsbToggleService extends Service {
             unregisterReceiver(stateReceiver);
         } catch (Throwable ignored) {
         }
+        if (observerRegistered) {
+            try {
+                getContentResolver().unregisterContentObserver(settingsObserver);
+            } catch (Throwable ignored) {
+            }
+            observerRegistered = false;
+        }
         if (nm != null) {
             nm.cancel(NOTIFY_ID);
         }
@@ -129,6 +161,21 @@ public class UsbToggleService extends Service {
     private void updateNotification(DebugController.State s) {
         if (nm != null) {
             nm.notify(NOTIFY_ID, buildNotification(this, s));
+        }
+    }
+
+    /**
+     * 关闭调试后的统一收口：按「临时关闭时弹通知」开关决定常驻通知的去留。
+     * 主界面 / 磁贴 / 通知按钮都走这里，保证三个入口语义一致。
+     * （键名 cfg/notify_on_close 与 MainActivity、prefs.xml 共用同一份配置）
+     */
+    public static void syncCloseNotification(Context ctx) {
+        boolean notifyOnClose = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE)
+                .getBoolean("notify_on_close", true);
+        if (notifyOnClose) {
+            start(ctx);
+        } else {
+            stop(ctx);
         }
     }
 
@@ -147,7 +194,7 @@ public class UsbToggleService extends Service {
             ctx.startForegroundService(i);
         } catch (Throwable t) {
             Log.w(TAG, "startForegroundService not allowed, fallback to direct notify", t);
-            postDirect(ctx, DebugController.read());
+            postDirect(ctx, DebugController.read(ctx));
         }
     }
 

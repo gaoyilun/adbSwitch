@@ -3,8 +3,14 @@ package com.elleng.usbdebug;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
 
 import com.elleng.usbdebug.util.RootUtil;
+
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * 调试开关的唯一状态层与唯一写入口。
@@ -68,24 +74,32 @@ public final class DebugController {
 
     // —— 读 ——
 
-    public static State read() {
-        return new State(readUsb(), readWireless());
+    /**
+     * 读取不需要 root：Settings.Global 是全局可读表，我们用 su 写的就是这张表，
+     * ContentResolver 直读与 su 读取得到同一个值。之前每次 read() fork 两个 su 进程，
+     * 又被主线程高频调用（onResume / 每次布局完成 / ContentObserver 去抖），
+     * 慢设备或 root 授权挂起时会卡 UI 甚至 ANR。写仍是唯一需要 su 的地方。
+     */
+    public static State read(Context ctx) {
+        return new State(readUsb(ctx), readWireless(ctx));
     }
 
-    static boolean readUsb() {
-        String v = RootUtil.su("settings get global adb_enabled").out.trim();
-        if ("1".equals(v)) {
-            return true;
-        }
-        if ("0".equals(v)) {
-            return false;
-        }
-        // 从未写入过时，看 USB 配置里是否还挂着 adb
-        return RootUtil.su("getprop sys.usb.config").out.contains("adb");
+    static boolean readUsb(Context ctx) {
+        return getInt(ctx, "adb_enabled") == 1;
     }
 
-    static boolean readWireless() {
-        return "1".equals(RootUtil.su("settings get global adb_wifi_enabled").out.trim());
+    static boolean readWireless(Context ctx) {
+        return getInt(ctx, "adb_wifi_enabled") == 1;
+    }
+
+    private static int getInt(Context ctx, String key) {
+        try {
+            return Settings.Global.getInt(ctx.getContentResolver(), key);
+        } catch (Throwable t) {
+            // 读不到（键不存在/Provider 异常）按「未开启」处理；真值会在下一次刷新回读纠正
+            android.util.Log.w(TAG, "read " + key + " failed", t);
+            return -1;
+        }
     }
 
     /**
@@ -124,50 +138,72 @@ public final class DebugController {
         return RootUtil.su("settings put global adb_wifi_enabled " + (on ? "1" : "0")).ok();
     }
 
-    // —— 对外写入口 ——
+    // —— 对外写入口（全部异步：su 可能阻塞数百毫秒甚至因授权弹窗挂住，禁止在主线程执行）——
+
+    public interface ResultCallback {
+        /** ok=写入是否全部成功；state=写入后回读到的最新真实状态（主线程回调） */
+        void onResult(boolean ok, State state);
+    }
+
+    private static final Executor IO = Executors.newSingleThreadExecutor();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     /**
      * 一键开关（主开关）。
      *
      * @param on true=打开（还原记忆的组合）；false=关闭（记忆当前组合并把两个都关掉）
      */
-    public static boolean setMaster(Context ctx, boolean on) {
-        State cur = read();
-        boolean ok;
-        if (on) {
-            killLinkageAppIfNeeded(ctx, true); // 顺序：先杀联动应用，再开调试
-            android.util.Log.i(TAG, "kill done, now turning debug ON");
-            State target = loadSaved(ctx);
-            boolean a = writeUsb(target.usb);
-            boolean b = writeWireless(target.wireless);
-            ok = a && b;
-        } else {
-            // 只在确实开着时记忆：避免把「两个都关」这种无效组合写进 saved
-            if (cur.anyOn()) {
-                save(ctx, cur);
+    public static void setMaster(Context ctx, final boolean on, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        IO.execute(() -> {
+            State cur = read(app);
+            boolean ok;
+            if (on) {
+                killLinkageAppIfNeeded(app, true); // 顺序：先杀联动应用，再开调试
+                State target = loadSaved(app);
+                boolean a = writeUsb(target.usb);
+                boolean b = writeWireless(target.wireless);
+                ok = a && b;
+            } else {
+                // 只在确实开着时记忆：避免把「两个都关」这种无效组合写进 saved
+                if (cur.anyOn()) {
+                    save(app, cur);
+                }
+                boolean a = writeUsb(false);
+                boolean b = writeWireless(false);
+                ok = a && b;
             }
-            boolean a = writeUsb(false);
-            boolean b = writeWireless(false);
-            ok = a && b;
-        }
-        broadcast(ctx);
-        return ok;
+            State after = broadcast(app);
+            if (cb != null) {
+                MAIN.post(() -> cb.onResult(ok, after));
+            }
+        });
     }
 
     /** 单独改 USB 调试（不动 saved） */
-    public static boolean setUsb(Context ctx, boolean on) {
-        killLinkageAppIfNeeded(ctx, on);
-        boolean ok = writeUsb(on);
-        broadcast(ctx);
-        return ok;
+    public static void setUsb(Context ctx, final boolean on, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        IO.execute(() -> {
+            killLinkageAppIfNeeded(app, on);
+            boolean ok = writeUsb(on);
+            State after = broadcast(app);
+            if (cb != null) {
+                MAIN.post(() -> cb.onResult(ok, after));
+            }
+        });
     }
 
     /** 单独改无线调试（不动 saved） */
-    public static boolean setWireless(Context ctx, boolean on) {
-        killLinkageAppIfNeeded(ctx, on);
-        boolean ok = writeWireless(on);
-        broadcast(ctx);
-        return ok;
+    public static void setWireless(Context ctx, final boolean on, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        IO.execute(() -> {
+            killLinkageAppIfNeeded(app, on);
+            boolean ok = writeWireless(on);
+            State after = broadcast(app);
+            if (cb != null) {
+                MAIN.post(() -> cb.onResult(ok, after));
+            }
+        });
     }
 
     // —— 记忆 ——
@@ -192,14 +228,15 @@ public final class DebugController {
 
     // —— 广播 ——
 
-    /** 广播当前完整状态（读真值，不传参，保证各消费者看到的都是最新） */
-    public static void broadcast(Context ctx) {
-        State s = read();
+    /** 广播当前完整状态（读真值，不传参，保证各消费者看到的都是最新），并把状态回传给调用方 */
+    public static State broadcast(Context ctx) {
+        State s = read(ctx);
         Intent i = new Intent(ACTION_STATE);
         i.setPackage(ctx.getPackageName());
         i.putExtra(EXTRA_USB, s.usb);
         i.putExtra(EXTRA_WIRELESS, s.wireless);
         i.putExtra(EXTRA_ON, s.anyOn());
         ctx.sendBroadcast(i);
+        return s;
     }
 }

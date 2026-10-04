@@ -35,7 +35,7 @@ public class UsbTileService extends TileService {
         } else {
             registerReceiver(stateReceiver, f);
         }
-        updateTile(DebugController.read());
+        updateTile(DebugController.read(this));
     }
 
     @Override
@@ -47,21 +47,24 @@ public class UsbTileService extends TileService {
         }
     }
 
+    /**
+     * 点击磁贴：主开关语义。写入走 DebugController 后台线程（su 不能卡控制面板主线程），
+     * 完成后在回调里刷新磁贴；常驻通知按「临时关闭时弹通知」开关决定，与主界面一致。
+     */
     @Override
     public void onClick() {
         super.onClick();
-        DebugController.State cur = DebugController.read();
-        boolean next = !cur.anyOn();
-        boolean ok = DebugController.setMaster(this, next);
-        if (ok) {
-            if (next) {
-                UsbToggleService.stop(this);
-            } else {
-                UsbToggleService.start(this);
+        final boolean next = !DebugController.read(this).anyOn();
+        DebugController.setMaster(this, next, (ok, s) -> {
+            if (ok) {
+                if (s.anyOn()) {
+                    UsbToggleService.stop(this);
+                } else {
+                    UsbToggleService.syncCloseNotification(this);
+                }
             }
-        }
-        DebugController.State after = DebugController.read();
-        updateTile(after);
+            updateTile(s);
+        });
     }
 
     private void updateTile(DebugController.State s) {

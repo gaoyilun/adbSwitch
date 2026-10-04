@@ -95,7 +95,7 @@ public class MainActivity extends PreferenceActivity {
     private Preference createShortcutPref;
 
     private boolean syncing = false;          // 防止 setChecked 触发回环
-    private boolean rootAvailable = false;    // 是否已拿到 root，进入页面时刷新
+    private boolean rootAvailable = true;     // 乐观假定有 root，探测（fork su，较慢）在后台回主线程纠正
     private boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
     private boolean rowClicksWired = false;   // 行点击的布局监听是否已注册（避免重复注册）
     /** 进程级：本次进程内是否已自动跳转过联动应用（static 保证 Activity 重建后仍记得） */
@@ -138,7 +138,7 @@ public class MainActivity extends PreferenceActivity {
         if (!prefsLoaded) {
             return;
         }
-        refresh(DebugController.read());
+        refresh(DebugController.read(this));
     };
 
     private void scheduleResync() {
@@ -211,21 +211,24 @@ public class MainActivity extends PreferenceActivity {
             final boolean masterOn = in.getBooleanExtra(EXTRA_MASTER_ON, false);
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 showSettings();
-                applyMasterState(masterOn);
-                android.util.Log.i(TAG, "DEBUG_MASTER done, on=" + masterOn
-                        + " usb=" + DebugController.read().usb
-                        + " wireless=" + DebugController.read().wireless);
+                // 写入是异步的：日志打在完成回调里，才反映写入后的真值
+                applyMasterState(masterOn, () -> android.util.Log.i(TAG,
+                        "DEBUG_MASTER done, on=" + masterOn
+                                + " usb=" + DebugController.read(this).usb
+                                + " wireless=" + DebugController.read(this).wireless));
             }, 600);
             return true;
         }
 
-        // 桌面快捷方式「一键开关」：切换主开关后直接退出，不显示界面
+        // 桌面快捷方式「一键开关」：切换主开关后直接退出，不显示界面。
+        // 写入是异步的：完成回调里再提示 + 退场（su 挂起时界面会多留一会儿，但绝不卡主线程）。
         if (ACTION_TOGGLE_MASTER.equals(in.getAction())) {
-            final boolean next = !DebugController.read().anyOn();
-            applyMasterState(next);
-            Toast.makeText(this, next ? R.string.master_on : R.string.master_off,
-                    Toast.LENGTH_SHORT).show();
-            finish();
+            final boolean next = !DebugController.read(this).anyOn();
+            applyMasterState(next, () -> {
+                Toast.makeText(this, next ? R.string.master_on : R.string.master_off,
+                        Toast.LENGTH_SHORT).show();
+                finish();
+            });
             return true;
         }
 
@@ -299,10 +302,27 @@ public class MainActivity extends PreferenceActivity {
             prefsLoaded = true;
         }
 
-        rootAvailable = RootUtil.hasRoot();
-        refresh(DebugController.read());
+        probeRoot();
+        refresh(DebugController.read(this));
         applyRootState();
         updateAppLabel();
+    }
+
+    /** root 探测要 fork su（阻塞调用），放后台线程；完成后回主线程纠正禁用态 */
+    private void probeRoot() {
+        new Thread(() -> {
+            final boolean has = RootUtil.hasRoot();
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if (rootAvailable == has) {
+                    return;
+                }
+                rootAvailable = has;
+                if (prefsLoaded) {
+                    refresh(DebugController.read(this));
+                }
+                applyRootState();
+            });
+        }, "root-probe").start();
     }
 
     /** 原生顶栏：标题 + 副标题 + 主色背景（系统自动预留状态栏区域）。
@@ -360,10 +380,13 @@ public class MainActivity extends PreferenceActivity {
             if (syncing) {
                 return true;
             }
-            if (!DebugController.setUsb(this, (Boolean) v)) {
-                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
-            }
-            refresh(DebugController.read());
+            final boolean want = (Boolean) v;
+            DebugController.setUsb(this, want, (ok, s) -> {
+                if (!ok) {
+                    Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                }
+                refresh(s);
+            });
             return true;
         });
 
@@ -371,10 +394,13 @@ public class MainActivity extends PreferenceActivity {
             if (syncing) {
                 return true;
             }
-            if (!DebugController.setWireless(this, (Boolean) v)) {
-                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
-            }
-            refresh(DebugController.read());
+            final boolean want = (Boolean) v;
+            DebugController.setWireless(this, want, (ok, s) -> {
+                if (!ok) {
+                    Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                }
+                refresh(s);
+            });
             return true;
         });
 
@@ -415,18 +441,13 @@ public class MainActivity extends PreferenceActivity {
             boolean on = (Boolean) v;
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NOTIFY, on).apply();
             // 立即同步：若当前已是关闭态，开->弹通知，关->撤通知
-            if (DebugController.read().allOff()) {
+            if (DebugController.read(this).allOff()) {
                 if (on) {
                     UsbToggleService.start(this);
                 } else {
                     UsbToggleService.stop(this);
                 }
             }
-            return true;
-        });
-
-        liveUpdatePref.setOnPreferenceClickListener(p -> {
-            checkAndPromptLiveUpdate();
             return true;
         });
 
@@ -440,7 +461,7 @@ public class MainActivity extends PreferenceActivity {
 
     /** 切换主开关（行点击与 widget 内 Switch 共用） */
     private void toggleMaster() {
-        boolean next = !DebugController.read().anyOn();
+        boolean next = !DebugController.read(this).anyOn();
         applyMasterState(next);
     }
 
@@ -479,7 +500,7 @@ public class MainActivity extends PreferenceActivity {
 
     /** 点箭头：手动切换展开态 */
     private void toggleExpanded() {
-        if (!DebugController.read().anyOn()) {
+        if (!DebugController.read(this).anyOn()) {
             return; // 关闭态强制保持折叠
         }
         masterManualExpanded = !subSwitchesShown;
@@ -487,51 +508,45 @@ public class MainActivity extends PreferenceActivity {
     }
 
     /**
-     * 主开关一键写入：唯一入口，两个子开关一起处理。
+     * 主开关一键写入：唯一入口，两个子开关一起处理（su 写入在后台线程，回调回主线程）。
      * 关 -> 记忆当前组合并全关，按「临时关闭时弹通知」决定是否拉起常驻通知；
      * 开 -> 还原记忆的组合并撤掉常驻通知。
      */
     private void applyMasterState(boolean on) {
-        boolean ok = DebugController.setMaster(this, on);
-        if (!ok) {
-            Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
-            refresh(DebugController.read());
-            return;
-        }
-        if (on) {
-            UsbToggleService.stop(this);
-        } else {
-            if (notifyOnClose()) {
-                UsbToggleService.start(this);
-            } else {
-                // 开关关闭：静默临时关闭，不具备常驻通知
+        applyMasterState(on, null);
+    }
+
+    private void applyMasterState(boolean on, final Runnable done) {
+        DebugController.setMaster(this, on, (ok, s) -> {
+            if (!ok) {
+                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+            } else if (on) {
                 UsbToggleService.stop(this);
+            } else {
+                // 按「临时关闭时弹通知」开关决定：开->常驻通知，关->静默
+                UsbToggleService.syncCloseNotification(this);
             }
-        }
-        refresh(DebugController.read());
+            refresh(s);
+            if (done != null) {
+                done.run();
+            }
+        });
     }
 
-    private boolean notifyOnClose() {
-        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_NOTIFY, true);
-    }
-
-    /** 执行联动：关闭调试 -> 拉起常驻通知 -> 跳转联动应用 */
+    /** 执行联动：关闭调试 -> 按开关拉起常驻通知 -> 跳转联动应用（写入完成后在回调里依序执行） */
     private void runLinkage(String pkg) {
-        // 联动走统一入口：一键关闭会记住当前组合并把 USB / 无线都关掉
-        DebugController.setMaster(this, false);
-        // 先拉起常驻通知（若开关开启），再跳联动应用。
-        // 不立刻 finish：给前台服务一点时间完成 startForeground，
-        // 否则 Activity 立即退场会让通知迟到（要等回到本 App 才出现）。
-        if (notifyOnClose()) {
-            UsbToggleService.start(this);
-        } else {
-            UsbToggleService.stop(this);
-        }
         sLinkageLaunched = true;
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+        // 联动走统一入口：一键关闭会记住当前组合并把 USB / 无线都关掉。
+        // 常驻通知在 su 写完之后才拉起，天然比旧版的固定 250ms 延时更稳。
+        DebugController.setMaster(this, false, (ok, s) -> {
+            if (!ok) {
+                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+            } else {
+                UsbToggleService.syncCloseNotification(this);
+            }
             launchApp(pkg);
             finish();
-        }, 250);
+        });
     }
 
     /** 「立即执行联动」手动入口：不受"只自动跳一次"限制 */
@@ -784,7 +799,7 @@ public class MainActivity extends PreferenceActivity {
                     // 关键：widget 是布局完成后才拿到的，refresh() 往往跑在它之前而漏掉同步，
                     // 这里每次布局完都按真值同步一次，避免 Switch 停在 XML 的默认关闭态。
                     syncing = true;
-                    sw.setChecked(DebugController.read().anyOn());
+                    sw.setChecked(DebugController.read(this).anyOn());
                     syncing = false;
                 }
                 updateExpandIcon(subSwitchesShown);
@@ -825,25 +840,6 @@ public class MainActivity extends PreferenceActivity {
         }
         lastLiveOpenAt = now;
         checkAndPromptLiveUpdate();
-    }
-
-    private View findOpenButton(View root) {
-        if (root == null) {
-            return null;
-        }
-        if (root.getId() == R.id.btn_open_app) {
-            return root;
-        }
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup vg = (android.view.ViewGroup) root;
-            for (int i = 0; i < vg.getChildCount(); i++) {
-                View found = findOpenButton(vg.getChildAt(i));
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null;
     }
 
     private CharSequence getApplicationLabel(String pkg) {
@@ -889,7 +885,7 @@ public class MainActivity extends PreferenceActivity {
             applyRootState();
         }
         // 每次回到前台都回读真值：可能在别处（通知/磁贴/adb）被改过
-        refresh(DebugController.read());
+        refresh(DebugController.read(this));
         updateAppLabel();
         updateLiveUpdateState();
         updateLaunchAppShortcut();
@@ -1233,5 +1229,12 @@ public class MainActivity extends PreferenceActivity {
             nm.notify(99, b.build());
         } catch (Throwable ignored) {
         }
+        // 测试通知必须能自行消失：它是 ongoing（滑动去不掉），若不主动取消就会永久驻留
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                nm.cancel(99);
+            } catch (Throwable ignored) {
+            }
+        }, 10_000);
     }
 }
