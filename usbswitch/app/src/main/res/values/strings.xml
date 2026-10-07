@@ -75,12 +75,13 @@
     <!-- 关于 -->
     <string name="about_title">关于</string>
     <string name="about_summary">版本、构建时间与授权状态</string>
-    <string name="about_version_code">版本号：%1$d\n</string>
-    <string name="about_package">包名：%1$s\n</string>
-    <string name="about_build_time">构建时间：%1$s\n</string>
-    <string name="about_auth_mode">授权模式：%1$s</string>
-    <string name="about_not_authorized">未授权</string>
-    <string name="about_signature">签名：%1$s</string>
+    <!-- 关于弹窗构建时间行的标签（弹窗改用结构化布局 dialog_about.xml，直接给 TextView 设文本，
+         不再使用带 %1$s/%1$d 占位符的字符串，避免占位符未被 String.format 填充而原样显示） -->
+    <string name="about_build_time_label">构建时间：</string>
+    <!-- 关于弹窗左下角署名按钮（与右下角「确定」对应）；点击跳转 elleng.eu.org -->
+    <string name="about_credit">@伦Ellen</string>
+    <string name="about_info_desc">项目仓库</string>
+    <string name="about_open_failed">无法打开链接</string>
 
     <!-- 在线更新（功能当前未启用：UpdateConfig.ENABLED=false 且 URL/密钥留空） -->
     <string name="update_check">检查更新</string>

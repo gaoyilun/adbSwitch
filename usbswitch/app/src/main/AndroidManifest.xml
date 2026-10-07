@@ -74,16 +74,22 @@
             android:name=".NotificationReceiver"
             android:exported="false" />
 
-        <!-- Shizuku 桥接：本 App 通过它拿到 shell 权限的 Binder（仅 Shizuku 管理器可访问）。
+        <!-- Shizuku 桥接：本 App 通过它拿到 shell 权限的 Binder（跨 UID 回传入口）。
              注意：provider 必须 android:exported="true" —— 它是跨 UID（Shizuku 管理器）回调传递
              Binder 的入口，targetSdk>=31 时若设为 false，系统会抛
-             "IllegalStateException: android:exported must be true" 导致一启动即闪退。 -->
+             "IllegalStateException: android:exported must be true" 导致一启动即闪退。
+             ⚠️ provider 的 android:permission 必须是 INTERACT_ACROSS_USERS_FULL（Shizuku 官方模板）：
+             它是 Shizuku 服务器（adb 模式下为 shell uid 2000）回传 Binder 时持有的权限。
+             若误写成 moe.shizuku.manager.permission.API_V23（管理器签名权限），
+             adb 模式下的 shell 服务器没有该签名权限 → 系统拦下回传 → getBinder 为 null →
+             pingBinder 返回 false → 显示「未授权」；root 模式(uid 0)绕过权限检查故正常。
+             这正是「root 能用、adb 提示未授权」的根因。运行时权限 API_V23 仍由 <uses-permission> 声明。 -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
             android:exported="true"
             android:multiprocess="false"
-            android:permission="moe.shizuku.manager.permission.API_V23" />
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!-- 在线更新：把下载到应用专属目录的 APK 以 content:// 交给系统安装器。
              exported 必须为 false（仅本应用与被授权的系统安装器使用）。 -->

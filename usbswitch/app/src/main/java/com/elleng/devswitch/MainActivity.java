@@ -123,6 +123,10 @@ public class MainActivity extends PreferenceActivity {
     /** 行点击接线用的标题缓存：布局每帧都会回调，getString 不该每次重做 */
     private String titleMaster, titleApp, titleLive, titleShortcut, titleAuth, titleAbout;
 
+    /** 关于弹窗外链：署名按钮 → elleng.eu.org；信息图标 → 项目仓库 */
+    private static final String ABOUT_CREDIT_URL = "https://elleng.eu.org";
+    private static final String ABOUT_REPO_URL = "https://github.com/gaoyilun/DevSwitch";
+
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
@@ -729,20 +733,27 @@ public class MainActivity extends PreferenceActivity {
                 java.util.Locale.getDefault())
                 .format(new java.util.Date(BuildConfig.BUILD_TIME_MS));
         AuthManager.Mode mode = AuthManager.getMode(this);
-        String modeText = getString(mode == AuthManager.Mode.SHIZUKU
-                ? R.string.auth_mode_shizuku : R.string.auth_mode_root);
 
-        String msg = getString(R.string.app_name) + " " + BuildConfig.VERSION_NAME
-                + "\n" + getString(R.string.about_version_code) + BuildConfig.VERSION_CODE
-                + "\n" + getString(R.string.about_package) + getPackageName()
-                + "\n" + getString(R.string.about_build_time) + buildTime
-                + "\n" + getString(R.string.about_auth_mode) + modeText
-                + (privilegedAvailable ? "" : "（" + getString(R.string.about_not_authorized) + "）")
-                + "\n" + getString(R.string.about_signature) + shortSignature();
+        // 授权模式行与主界面「授权模式」保持一致文案（root/Shizuku模式 · 已授权/未授权）
+        int authStatusRes = (mode == AuthManager.Mode.SHIZUKU
+                ? (privilegedAvailable ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no)
+                : (privilegedAvailable ? R.string.auth_status_root_ok : R.string.auth_status_root_no));
+
+        // 结构化布局（dialog_about.xml）：直接给各 TextView 设文本，不使用带 %1$s/%1$d 占位符的字符串，
+        // 避免占位符未被 String.format 填充而原样显示。
+        android.view.View view = getLayoutInflater().inflate(R.layout.dialog_about, null);
+        ((TextView) view.findViewById(R.id.about_name_version))
+                .setText(getString(R.string.app_name) + " " + BuildConfig.VERSION_NAME);
+        ((TextView) view.findViewById(R.id.about_package)).setText(getPackageName());
+        ((TextView) view.findViewById(R.id.about_build_time))
+                .setText(getString(R.string.about_build_time_label) + buildTime);
+        ((TextView) view.findViewById(R.id.about_auth_mode)).setText(getString(authStatusRes));
+        // 右侧信息图标：跳转项目仓库
+        view.findViewById(R.id.about_info).setOnClickListener(v -> openUrl(ABOUT_REPO_URL));
 
         final AlertDialog dlg = new AlertDialog.Builder(this)
-                .setTitle(R.string.about_title)
-                .setMessage(msg)
+                .setView(view)
+                .setNegativeButton(R.string.about_credit, (d, which) -> openUrl(ABOUT_CREDIT_URL))
                 .setPositiveButton(android.R.string.ok, null)
                 .setNeutralButton(R.string.update_check, null) // 点击逻辑在 onShow 里接管
                 .create();
@@ -755,24 +766,12 @@ public class MainActivity extends PreferenceActivity {
         dlg.show();
     }
 
-    /** 取签名证书的 SHA-256 指纹前 16 位（够用来确认是不是同一个签名，不宜在界面里铺满） */
-    private String shortSignature() {
+    /** 跳转外部链接（关于弹窗的署名按钮与信息图标用）；失败给 Toast 不闪退 */
+    private void openUrl(String url) {
         try {
-            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-            android.content.pm.Signature[] sigs = getPackageManager()
-                    .getPackageInfo(getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES)
-                    .signatures;
-            if (sigs == null || sigs.length == 0) {
-                return "-";
-            }
-            byte[] d = md.digest(sigs[0].toByteArray());
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < 8 && i < d.length; i++) {
-                sb.append(String.format("%02X", d[i]));
-            }
-            return sb.toString();
+            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
         } catch (Throwable t) {
-            return "-";
+            Toast.makeText(this, R.string.about_open_failed, Toast.LENGTH_SHORT).show();
         }
     }
 
