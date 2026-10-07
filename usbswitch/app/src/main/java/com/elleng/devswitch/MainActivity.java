@@ -916,10 +916,8 @@ public class MainActivity extends PreferenceActivity {
             p.setKey(LINKAGE_APP_KEY_PREFIX + pkg);
             p.setLayoutResource(R.layout.pref_row);
             CharSequence label = getApplicationLabel(pkg);
-            // 标题显示应用名；若为默认快捷应用，附加「· 默认快捷」标记
-            String title = (label == null ? pkg : label.toString())
-                    + (pkg.equals(def) ? getString(R.string.linkage_default_mark) : "");
-            p.setTitle(title);
+            // 标题只显示应用名；它是否为「默认快捷应用」由上方「默认快捷应用」行统一体现，这里不再重复标注
+            p.setTitle(label == null ? pkg : label);
             // 摘要改为操作提示，不再显示包名
             p.setSummary(R.string.quick_hint);
             p.setIcon(loadAppDrawable(pkg));

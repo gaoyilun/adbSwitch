@@ -46,7 +46,6 @@
     <!-- 默认快捷应用：开启快捷打开后必须设置，决定「启动本 App 自动打开哪个」 -->
     <string name="linkage_default_title">默认快捷应用</string>
     <string name="linkage_default_none">未设置（开启后需先设置）</string>
-    <string name="linkage_default_mark"> · 默认快捷</string>
     <string name="linkage_no_default">请先设置默认快捷应用</string>
     <string name="linkage_need_default">已开启，请设置默认快捷应用</string>
     <string name="linkage_apps_empty_toast">请先添加快捷应用</string>
