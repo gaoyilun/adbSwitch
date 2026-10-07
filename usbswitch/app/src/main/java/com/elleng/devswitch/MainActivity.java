@@ -41,6 +41,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.elleng.devswitch.util.RootUtil;
+
+import java.util.ArrayList;
+import java.util.List;
 import com.elleng.devswitch.update.UpdateChecker;
 import com.elleng.devswitch.update.UpdateDialog;
 import com.elleng.devswitch.update.UpdateInfo;
@@ -77,7 +80,13 @@ public class MainActivity extends PreferenceActivity {
     private static final String[] OBSERVED_KEYS =
             {DebugController.KEY_USB, DebugController.KEY_WIRELESS};
     private static final String PREF_LINKAGE = "linkage_enabled";
-    private static final String PREF_PKG = "linkage_pkg";
+    /** 动态联动应用行的 key 前缀：完整 key = 前缀 + 包名（wireRowClicks 据此识别并取出包名） */
+    private static final String LINKAGE_APP_KEY_PREFIX = "linkage_app:";
+    /** 默认跳转应用行 / 管理联动应用行的固定 key（动态填充，不在 prefs.xml 写死） */
+    private static final String LINKAGE_KEY_DEFAULT = "linkage_default";
+    private static final String LINKAGE_KEY_MANAGE = "linkage_manage";
+    /** 桌面快捷方式意图里携带「要联动哪个 app」的包名（每个 app 的桌面图标各不相同） */
+    private static final String EXTRA_LINKAGE_PKG = "extra_linkage_pkg";
     /** 「临时关闭时弹通知」开关 */
     private static final String PREF_NOTIFY = "notify_on_close";
     /** 「打开调试前先杀掉联动应用」开关（DebugController 读取同一份 cfg） */
@@ -97,11 +106,9 @@ public class MainActivity extends PreferenceActivity {
     private SwitchPreference swNotifyPref;
     private SwitchPreference swWirelessPref;
     private SwitchPreference swKillPref;
-    private Preference appPref;
     private Preference liveUpdatePref;
     /** 「关于」行：点击弹窗展示版本/构建时间/授权模式（原「构建时间」行） */
     private Preference buildInfoPref;
-    private Preference createShortcutPref;
     private Preference authPref;              // 授权模式（root / Shizuku）与授权状态合并项
 
     private boolean syncing = false;          // 防止 setChecked 触发回环
@@ -121,7 +128,7 @@ public class MainActivity extends PreferenceActivity {
     /** 主线程 Handler：去抖与所有 post 都复用它，否则每次 new 一个 Handler 都拿不到上次的 callback，去抖等于失效 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     /** 行点击接线用的标题缓存：布局每帧都会回调，getString 不该每次重做 */
-    private String titleMaster, titleApp, titleLive, titleShortcut, titleAuth, titleAbout;
+    private String titleMaster, titleLive, titleAuth, titleAbout;
 
     /** 关于弹窗外链：署名按钮 → elleng.eu.org；信息图标 → 项目仓库 */
     private static final String ABOUT_CREDIT_URL = "https://elleng.eu.org";
@@ -174,6 +181,7 @@ public class MainActivity extends PreferenceActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        LinkagePrefs.migrate(this);
         initShizuku();
         if (!handleEntry(getIntent())) {
             showSettings();
@@ -239,9 +247,9 @@ public class MainActivity extends PreferenceActivity {
         // 动态 shortcut「启动联动应用」：直接跳目标应用（不触发关调试/常驻通知等联动动作），
         // 故不依赖联动模式开关，开没开联动都能用。
         if (SC_ID_LAUNCH_APP.equals(in.getAction())) {
-            String pkg = sp.getString(PREF_PKG, "");
+            String pkg = LinkagePrefs.getDefault(this);
             if (pkg.isEmpty()) {
-                Toast.makeText(this, R.string.linkage_no_app, Toast.LENGTH_LONG).show();
+                Toast.makeText(this, R.string.linkage_no_default, Toast.LENGTH_LONG).show();
             } else {
                 launchApp(pkg);
             }
@@ -283,8 +291,8 @@ public class MainActivity extends PreferenceActivity {
         // 这是显式触发（用户点了快捷方式），故不走 PREF_LINKAGE 开关、也不受
         // sLinkageLaunched 守卫限制——每次点都应重新关调试并跳目标应用。
         if (ACTION_DESKTOP_LINKAGE.equals(in.getAction())) {
-            String pkg = sp.getString(PREF_PKG, "");
-            if (pkg.isEmpty()) {
+            String pkg = in.getStringExtra(EXTRA_LINKAGE_PKG);
+            if (pkg == null || pkg.isEmpty()) {
                 Toast.makeText(this, R.string.linkage_no_app, Toast.LENGTH_LONG).show();
                 finish();
                 return true;
@@ -303,9 +311,9 @@ public class MainActivity extends PreferenceActivity {
 
         boolean linkage = sp.getBoolean(PREF_LINKAGE, false);
 
-        // —— 联动模式：从启动器打开时，自动关闭调试并跳转联动应用 ——
+        // —— 联动模式：从启动器打开时，自动关闭调试并跳转「默认跳转应用」 ——
         if (linkage && !openSettings) {
-            String pkg = sp.getString(PREF_PKG, "");
+            String pkg = LinkagePrefs.getDefault(this);
             if (!pkg.isEmpty()) {
                 // Android 13+ 未授予通知权限时，前台服务通知会被系统抑制；
                 // 联动整条流程依赖这条常驻通知，故缺权限时先申请、不跳转，
@@ -319,7 +327,7 @@ public class MainActivity extends PreferenceActivity {
                 }
                 // 已经自动跳转过一次：不再自动跳。
                 // 否则从联动应用返回本 App（或再次点图标）时会被反复弹回去，
-                // 用的人根本来不及用设置页。需要再跳时用「立即执行联动」手动触发。
+                // 用的人根本来不及用设置页。需要再跳时用动态快捷方式手动触发。
                 if (sLinkageLaunched) {
                     Toast.makeText(this, R.string.linkage_skipped, Toast.LENGTH_LONG).show();
                     return false;
@@ -327,8 +335,8 @@ public class MainActivity extends PreferenceActivity {
                 runLinkage(pkg);
                 return true;
             }
-            // 没选联动应用：提示并落到普通界面
-            Toast.makeText(this, R.string.linkage_no_app, Toast.LENGTH_LONG).show();
+            // 开了联动却没设默认跳转应用：提示并落到普通界面
+            Toast.makeText(this, R.string.linkage_no_default, Toast.LENGTH_LONG).show();
         }
         return false;
     }
@@ -353,7 +361,7 @@ public class MainActivity extends PreferenceActivity {
         performAuthCheck();
         refresh(DebugController.read(this));
         applyRootState();
-        updateAppLabel();
+        rebuildLinkageList();
     }
 
     // —— 在线更新 ——
@@ -503,9 +511,7 @@ public class MainActivity extends PreferenceActivity {
     private void initPrefs() {
         // 行点击按标题文本识别，标题每次布局都要比一次 —— 在此取一次缓存起来，别每帧 getString
         titleMaster = getString(R.string.master_title);
-        titleApp = getString(R.string.linkage_app_label);
         titleLive = getString(R.string.live_update_title);
-        titleShortcut = getString(R.string.create_shortcut_title);
         titleAbout = getString(R.string.about_title);
         titleAuth = getString(R.string.auth_mode_title);
 
@@ -515,16 +521,8 @@ public class MainActivity extends PreferenceActivity {
         swNotifyPref = (SwitchPreference) findPreference("swNotify");
         swWirelessPref = (SwitchPreference) findPreference("swWireless");
         swKillPref = (SwitchPreference) findPreference("swKillBeforeOpen");
-        appPref = findPreference("linkageApp");
         liveUpdatePref = findPreference("liveUpdate");
         buildInfoPref = findPreference("buildInfo");
-        createShortcutPref = findPreference("createShortcut");
-        if (createShortcutPref != null) {
-            createShortcutPref.setOnPreferenceClickListener(p -> {
-                createDesktopShortcut();
-                return true;
-            });
-        }
         // 双模式授权：模式选择 + 授权状态已合并为同一项。点击整行 = 打开模式选择对话框
         authPref = findPreference("auth");
         if (authPref != null) {
@@ -590,16 +588,20 @@ public class MainActivity extends PreferenceActivity {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_LINKAGE, on).apply();
             // shortcut 组合随联动开关变化：开→「打开主页」，关→两个子开关
             ToggleShortcuts.publish(this);
-            Toast.makeText(this, on ? R.string.linkage_on : R.string.linkage_off, Toast.LENGTH_SHORT).show();
-            return true;
-        });
-
-        // 「联动应用」行的点击与「打开」按钮都在 bindOpenButton() 里手动接线；
-        // 另外这里也挂 framework 的 click listener 作为第二条路径——
-        // framework Preference 行本身 clickable="false"，谁先谁后不确定，故两条路径都留，
-        // 靠 openAppPicker()/openLiveUpdate() 的防抖保证只弹一次。
-        appPref.setOnPreferenceClickListener(p -> {
-            openAppPicker();
+            if (on) {
+                // 开启自动跳转：必须先有联动应用、且设置默认跳转目标
+                List<String> apps = LinkagePrefs.getApps(this);
+                if (apps.isEmpty()) {
+                    Toast.makeText(this, R.string.linkage_apps_empty_toast, Toast.LENGTH_LONG).show();
+                } else if (LinkagePrefs.getDefault(this).isEmpty()) {
+                    Toast.makeText(this, R.string.linkage_need_default, Toast.LENGTH_LONG).show();
+                    openDefaultPicker();
+                } else {
+                    Toast.makeText(this, R.string.linkage_on, Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                Toast.makeText(this, R.string.linkage_off, Toast.LENGTH_SHORT).show();
+            }
             return true;
         });
 
@@ -775,23 +777,6 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
-    /** 「联动打开」：关掉调试并跳转到已选联动应用。 */
-    private void runLinkageManual() {
-        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String pkg = sp.getString(PREF_PKG, "");
-        if (pkg.isEmpty()) {
-            Toast.makeText(this, R.string.linkage_no_app, Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, R.string.linkage_need_notif, Toast.LENGTH_LONG).show();
-            return;
-        }
-        runLinkage(pkg);
-    }
-
     /**
      * 按完整状态刷新三行开关。
      * 主开关 = 聚合态（任一开着就算开，因为 adbd 在跑）；两个子开关显示各自真值。
@@ -848,16 +833,16 @@ public class MainActivity extends PreferenceActivity {
     private void applyRootState() {
         // 偏好项任一为 null 说明设置页还没建好，直接跳过刷新
         if (swMasterPref == null || swUsbPref == null || swLinkagePref == null
-                || swNotifyPref == null || swWirelessPref == null || appPref == null) {
+                || swNotifyPref == null || swWirelessPref == null) {
             return;
         }
         if (privilegedAvailable) {
             swMasterPref.setEnabled(true);
             swUsbPref.setEnabled(true);
-            swLinkagePref.setEnabled(true);
-            appPref.setEnabled(true);
             swNotifyPref.setEnabled(true);
             swWirelessPref.setEnabled(true);
+            // 联动分类下（开关 + 动态填充的默认/应用/管理行）一并启用
+            setLinkageEnabled(true);
             // 授权恢复：把主开关行从「未授权，无法写入」改回真实状态文案。
             // （refresh 在未授权时不再覆盖文案，故必须在这里补一次，否则会一直停在未授权提示上）
             refresh(DebugController.read(this));
@@ -866,57 +851,93 @@ public class MainActivity extends PreferenceActivity {
             swMasterPref.setIcon(stateIcon(R.color.error));
             swMasterPref.setEnabled(false);
             swUsbPref.setEnabled(false);
-            swLinkagePref.setEnabled(false);
-            appPref.setEnabled(false);
             swNotifyPref.setEnabled(false);
             swWirelessPref.setEnabled(false);
+            // 联动分类下所有项一并禁用（无授权则无法写入调试开关，联动也失去意义）
+            setLinkageEnabled(false);
         }
         // 实时动态项的可用性只跟系统版本有关，不受授权模式影响
         updateLiveUpdateState();
     }
 
-    private void updateAppLabel() {
-        if (appPref == null) {
+    /** 联动分类下所有项（开关 + 动态填充的默认 / 应用 / 管理行）一并启用或禁用 */
+    private void setLinkageEnabled(boolean enabled) {
+        PreferenceCategory cat = (PreferenceCategory) findPreference("catLinkage");
+        if (cat == null) {
             return;
         }
-        String pkg = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_PKG, "");
-        if (pkg.isEmpty()) {
-            appPref.setSummary(R.string.linkage_app_none);
-            appPref.setIcon(null);
-        } else {
-            CharSequence label = getApplicationLabel(pkg);
-            appPref.setSummary(label == null ? pkg : label);
-            // 左侧显示联动应用图标（framework Preference 用 Drawable 版本）
-            appPref.setIcon(loadAppDrawable(pkg));
+        for (int i = 0; i < cat.getPreferenceCount(); i++) {
+            cat.getPreference(i).setEnabled(enabled);
         }
-        bindOpenButton(pkg);
     }
 
     /**
-     * 给「联动应用」行右侧按钮接线：「联动打开」= 关调试并跳转到已选联动应用。
-     * 注意不能直接 launchApp —— 那会绕过关调试这一步，等于什么都没做。
-     * （未选应用时按钮隐藏；整行点击仍是打开应用选择器。）
+     * 按当前联动配置动态重建「联动」分类下的列表：
+     *  1) 默认跳转应用行；2) 每个联动应用一行；3) 管理联动应用行。
+     *  每次配置变化（增删 app、改默认、授权状态变化）都重建，保证 UI 与配置一致。
      */
-    private void bindOpenButton(String pkg) {
-        if (appPref == null) {
+    private void rebuildLinkageList() {
+        PreferenceCategory cat = (PreferenceCategory) findPreference("catLinkage");
+        if (cat == null) {
             return;
         }
-        View openBtn = findViewDeep(R.id.btn_open_app);
-        if (openBtn == null) {
-            return;
-        }
-        if (pkg.isEmpty()) {
-            openBtn.setVisibility(View.GONE);
-            return;
-        }
-        openBtn.setVisibility(View.VISIBLE);
-        openBtn.setOnClickListener(v -> {
-            if (!privilegedAvailable) {
-                Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
-                return;
+        // 先移除上一轮动态项（保留静态的 swLinkage / swKillBeforeOpen）
+        List<Preference> stale = new ArrayList<>();
+        for (int i = 0; i < cat.getPreferenceCount(); i++) {
+            Preference p = cat.getPreference(i);
+            String k = p.getKey();
+            if (k != null && (k.equals(LINKAGE_KEY_DEFAULT)
+                    || k.equals(LINKAGE_KEY_MANAGE)
+                    || k.startsWith(LINKAGE_APP_KEY_PREFIX))) {
+                stale.add(p);
             }
-            runLinkageManual();
-        });
+        }
+        for (Preference p : stale) {
+            cat.removePreference(p);
+        }
+
+        List<String> apps = LinkagePrefs.getApps(this);
+        String def = LinkagePrefs.getDefault(this);
+
+        // 1) 默认跳转应用行：开启自动联动跳转后要跳去的目标
+        Preference defPref = new Preference(this);
+        defPref.setKey(LINKAGE_KEY_DEFAULT);
+        defPref.setTitle(R.string.linkage_default_title);
+        defPref.setLayoutResource(R.layout.pref_row);
+        CharSequence defLabel = def.isEmpty() ? getString(R.string.linkage_default_none) : getApplicationLabel(def);
+        defPref.setSummary(defLabel);
+        defPref.setIcon(def.isEmpty() ? null : loadAppDrawable(def));
+        cat.addPreference(defPref);
+
+        // 2) 每个联动应用一行（点击=联动打开；行内「打开」「快捷」按钮见 wireAppRow）
+        for (String pkg : apps) {
+            Preference p = new Preference(this);
+            p.setKey(LINKAGE_APP_KEY_PREFIX + pkg);
+            p.setLayoutResource(R.layout.pref_row);
+            CharSequence label = getApplicationLabel(pkg);
+            p.setTitle(label == null ? pkg : label);
+            // 摘要显示包名；若它是默认跳转应用，附加标记
+            String summary = pkg + (pkg.equals(def) ? getString(R.string.linkage_default_mark) : "");
+            p.setSummary(summary);
+            p.setIcon(loadAppDrawable(pkg));
+            p.setWidgetLayoutResource(R.layout.pref_widget_app_actions);
+            cat.addPreference(p);
+        }
+
+        // 3) 管理联动应用行（打开多选弹窗，一次性增删多个 app）
+        Preference manage = new Preference(this);
+        manage.setKey(LINKAGE_KEY_MANAGE);
+        manage.setTitle(R.string.linkage_manage_title);
+        manage.setLayoutResource(R.layout.pref_row);
+        manage.setSummary(apps.isEmpty()
+                ? getString(R.string.linkage_apps_empty)
+                : getString(R.string.linkage_manage_sum));
+        cat.addPreference(manage);
+
+        // 联动项跟随授权可用性
+        setLinkageEnabled(privilegedAvailable);
+        // 列表变化后重新接线（布局完成后 wireRowClicks 也会自动跑，这里兜底）
+        scheduleWireRowClicks();
     }
 
     private View findViewDeep(int id) {
@@ -951,13 +972,56 @@ public class MainActivity extends PreferenceActivity {
             return; // 防抖：避免 ListView 行点击与 preference click 同时触发，弹出两个选择器
         }
         lastPickerOpenAt = now;
-        AppListDialog.show(this, pkg -> {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_PKG, pkg).apply();
-            updateAppLabel();
-            // 选完立刻刷新动态快捷方式（含「启动联动应用」的图标与名称）
+        // 多选：预勾已选应用，确认后整组写回（勾上=新增，取消=移除）
+        List<String> current = LinkagePrefs.getApps(this);
+        AppListDialog.showMulti(this, current, chosen -> {
+            LinkagePrefs.setApps(this, chosen);
+            rebuildLinkageList();
+            // 选完立刻刷新动态快捷方式（「启动联动应用」现取默认 app）
             ToggleShortcuts.publish(this);
-            Toast.makeText(this, R.string.linkage_app_set, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.linkage_added, Toast.LENGTH_SHORT).show();
         });
+    }
+
+    /**
+     * 「默认跳转应用」选择：列出当前联动应用，点选即设为默认跳转目标。
+     * 开启「自动联动跳转」后必须设置它（决定启动本 App 时跳去哪个）。
+     * 没添加任何联动应用时提示先去添加。
+     */
+    private void openDefaultPicker() {
+        List<String> apps = LinkagePrefs.getApps(this);
+        if (apps.isEmpty()) {
+            Toast.makeText(this, R.string.linkage_apps_empty_toast, Toast.LENGTH_LONG).show();
+            return;
+        }
+        String cur = LinkagePrefs.getDefault(this);
+        int checked = -1;
+        for (int i = 0; i < apps.size(); i++) {
+            if (apps.get(i).equals(cur)) {
+                checked = i;
+                break;
+            }
+        }
+        CharSequence[] labels = new CharSequence[apps.size()];
+        for (int i = 0; i < apps.size(); i++) {
+            CharSequence l = getApplicationLabel(apps.get(i));
+            labels[i] = (l == null ? apps.get(i) : l);
+        }
+        final int[] pick = {checked};
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.linkage_default_title)
+                .setSingleChoiceItems(labels, checked, (d, which) -> pick[0] = which)
+                .setPositiveButton(android.R.string.ok, (d, which) -> {
+                    if (pick[0] < 0) {
+                        return;
+                    }
+                    LinkagePrefs.setDefault(this, apps.get(pick[0]));
+                    rebuildLinkageList();
+                    ToggleShortcuts.publish(this);
+                    Toast.makeText(this, R.string.linkage_set_default, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /**
@@ -993,12 +1057,30 @@ public class MainActivity extends PreferenceActivity {
         if (list == null) {
             return;
         }
-        String pkg = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_PKG, "");
+        int first = list.getFirstVisiblePosition();
         for (int i = 0; i < list.getChildCount(); i++) {
             View row = list.getChildAt(i);
             if (row == null) {
                 continue;
             }
+            // —— 动态联动项：按所在 Preference 的 key 识别（应用标题可能重复，不能用标题） ——
+            Object item = list.getItemAtPosition(first + i);
+            if (item instanceof Preference) {
+                String key = ((Preference) item).getKey();
+                if (key != null) {
+                    if (key.startsWith(LINKAGE_APP_KEY_PREFIX)) {
+                        wireAppRow(row, key.substring(LINKAGE_APP_KEY_PREFIX.length()));
+                        continue;
+                    } else if (LINKAGE_KEY_MANAGE.equals(key)) {
+                        wireSimpleRow(row, this::openAppPicker);
+                        continue;
+                    } else if (LINKAGE_KEY_DEFAULT.equals(key)) {
+                        wireSimpleRow(row, this::openDefaultPicker);
+                        continue;
+                    }
+                }
+            }
+            // —— 固定行：按标题文本识别（沿用旧机制） ——
             // 按标题文本识别行：原先靠行内的「修改」按钮识别，该按钮已移除；
             // 按 position 映射到 getPreferenceScreen().getPreference() 又受 header/复用影响，故统一用标题。
             TextView tv = row.findViewById(android.R.id.title);
@@ -1039,37 +1121,9 @@ public class MainActivity extends PreferenceActivity {
                     syncing = false;
                 }
                 updateExpandIcon(subSwitchesShown);
-            } else if (titleApp.equals(title)) {
-                if (!wired) {
-                    // 整行触发选择器（「修改」按钮已移除，整行点击即选择应用）
-                    row.setOnClickListener(v -> openAppPicker());
-                }
-                final String curPkg = pkg;
-                View openBtn = row.findViewById(R.id.btn_open_app);
-                if (openBtn != null) {
-                    if (curPkg.isEmpty()) {
-                        openBtn.setVisibility(View.GONE);
-                    } else {
-                        openBtn.setVisibility(View.VISIBLE);
-                        if (!wired) {
-                            openBtn.setOnClickListener(v -> {
-                                if (privilegedAvailable) {
-                                    launchApp(curPkg);
-                                } else {
-                                    Toast.makeText(this, R.string.auth_need_grant,
-                                            Toast.LENGTH_SHORT).show();
-                                }
-                            });
-                        }
-                    }
-                }
             } else if (titleLive.equals(title)) {
                 if (!wired) {
                     row.setOnClickListener(v -> openLiveUpdate());
-                }
-            } else if (titleShortcut.equals(title)) {
-                if (!wired) {
-                    row.setOnClickListener(v -> createDesktopShortcut());
                 }
             } else if (titleAbout.equals(title)) {
                 if (!wired) {
@@ -1081,6 +1135,35 @@ public class MainActivity extends PreferenceActivity {
                     row.setOnClickListener(v -> chooseAuthMode());
                 }
             }
+        }
+    }
+
+    /** 给整行设点击（动态项每次布局都重挂，直接替换监听即可，无需 wired 守卫） */
+    private void wireSimpleRow(View row, Runnable action) {
+        row.setOnClickListener(v -> action.run());
+    }
+
+    /**
+     * 联动应用行接线：
+     *  - 整行点击 = 联动打开（关调试 + 跳到它，即一次完整联动）；
+     *  - 「打开」按钮 = 仅启动该应用（不动调试开关）；
+     *  - 「快捷」按钮 = 在桌面生成该应用的原生快捷方式（点了会关调试并跳到它）。
+     */
+    private void wireAppRow(View row, String pkg) {
+        row.setOnClickListener(v -> {
+            if (!privilegedAvailable) {
+                Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            runLinkage(pkg);
+        });
+        View openBtn = row.findViewById(R.id.btn_app_open);
+        if (openBtn != null) {
+            openBtn.setOnClickListener(v -> launchApp(pkg));
+        }
+        View scBtn = row.findViewById(R.id.btn_app_shortcut);
+        if (scBtn != null) {
+            scBtn.setOnClickListener(v -> createDesktopShortcutFor(pkg));
         }
     }
 
@@ -1137,7 +1220,7 @@ public class MainActivity extends PreferenceActivity {
         }
         // 每次回到前台都回读真值：可能在别处（通知/磁贴/adb）被改过
         refresh(DebugController.read(this));
-        updateAppLabel();
+        rebuildLinkageList();
         updateLiveUpdateState();
         // 防御性重挂行点击：framework 可能在 resume/重绑时重置行状态，导致我们的 OnClickListener 失效；
         // 且滚动后新出现的行也需要重新挂，故每次 resume 都重新挂一遍。
@@ -1395,20 +1478,26 @@ public class MainActivity extends PreferenceActivity {
      *     钉选（同样生成真实桌面图标，且需用户确认）。
      * 二者都会在桌面落下实体图标，区别于其它 agent 误用的「Shortcut」长按菜单项。
      */
-    private void createDesktopShortcut() {
-        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String pkg = sp.getString(PREF_PKG, "");
-        if (pkg.isEmpty()) {
+    /**
+     * 为某个联动应用创建「原生桌面快捷方式」：在桌面（主屏幕）生成一个真实图标，点击直接关调试并联动启动该应用。
+     * 与 ShortcutManager 的「Shortcut」（长按菜单项）不同，这里用的是
+     * Android 自 1.6/2.3 起就有的「添加到主屏幕」机制（见 requestPinShortcut）。
+     *
+     * @param pkg 要创建快捷方式的联动应用包名（每个 app 的桌面图标各不相同，故意图里携带包名）
+     */
+    private void createDesktopShortcutFor(String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
             Toast.makeText(this, R.string.create_shortcut_no_app, Toast.LENGTH_LONG).show();
             return;
         }
         CharSequence label = getApplicationLabel(pkg);
         // 关键：快捷方式必须先打开「本 App」，由 App 关掉调试再联动启动目标应用，
         // 而不是直接拉起目标 app（那样会绕过关调试的联动逻辑，等于什么都不做）。
-        // 用显式 Intent 指向 MainActivity + 自定义 action，图标仍用「目标应用 + 本 App 角标」
-        // 以便一眼认出这是哪个联动应用的快捷方式。
+        // 用显式 Intent 指向 MainActivity + 自定义 action，并把包名带进去，
+        // 图标仍用「目标应用 + 本 App 角标」以便一眼认出这是哪个联动应用的快捷方式。
         Intent launch = new Intent(this, MainActivity.class);
         launch.setAction(ACTION_DESKTOP_LINKAGE);
+        launch.putExtra(EXTRA_LINKAGE_PKG, pkg);
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         Bitmap icon = badgedShortcutIcon(pkg);
 
@@ -1446,7 +1535,7 @@ public class MainActivity extends PreferenceActivity {
         ShortcutInfo.Builder b = new ShortcutInfo.Builder(this,
                 "desktop_linkage_" + System.currentTimeMillis());
         b.setIntent(launch);
-        b.setShortLabel(label != null ? label : getString(R.string.create_shortcut_title));
+        b.setShortLabel(label != null ? label : getString(R.string.app_name));
         if (icon != null) {
             b.setIcon(Icon.createWithBitmap(icon));
         }

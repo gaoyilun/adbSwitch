@@ -9,6 +9,7 @@ import android.provider.Settings;
 
 import com.elleng.devswitch.util.RootUtil;
 
+import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
@@ -50,7 +51,6 @@ public final class DebugController {
     private static final String SAVED_VALID = "saved_valid";
     /** 「打开调试前先杀掉联动应用」开关（与 MainActivity 共用同一份 cfg） */
     private static final String PREF_KILL_BEFORE_OPEN = "kill_before_open";
-    private static final String PREF_PKG = "linkage_pkg";
 
     private DebugController() {
     }
@@ -216,14 +216,17 @@ public final class DebugController {
         if (!sp.getBoolean(PREF_KILL_BEFORE_OPEN, false)) {
             return;
         }
-        String pkg = sp.getString(PREF_PKG, "");
-        if (pkg.isEmpty()) {
+        List<String> apps = LinkagePrefs.getApps(ctx);
+        if (apps.isEmpty()) {
             return;
         }
         // am force-stop 走系统正常的停止流程（比 kill 更干净，不会留下半死的进程状态）。
         // 双模式：按当前授权模式选执行通道（Shizuku 走 shell uid 2000，否则走 su）。
-        android.util.Log.i(TAG, "kill before open: force-stop " + pkg);
-        runPrivileged(ctx, "am force-stop " + pkg);
+        // 多个联动应用：逐一停止，避免任一在调试开启瞬间读到状态翻转。
+        for (String pkg : apps) {
+            android.util.Log.i(TAG, "kill before open: force-stop " + pkg);
+            runPrivileged(ctx, "am force-stop " + pkg);
+        }
     }
 
     // —— 写（底层，仅本类内部调用）——

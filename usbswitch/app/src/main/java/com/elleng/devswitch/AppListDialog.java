@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -23,13 +24,20 @@ import android.widget.Toast;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 联动应用选择 —— 原生 AlertDialog 弹窗。
  * 内含搜索框 + 可滚动列表 + 轻量下拉刷新（无第三方依赖，仅用 framework 控件）。
  * 下拉到顶后继续下拉可重新扫描已安装应用，反映新装/卸载的变化。
+ *
+ * 两种模式：
+ *  - 单选（{@link #show}）：点列表项即选定并关闭（用于一次性选择）；
+ *  - 多选（{@link #showMulti}）：每项带勾选框，预勾已选应用，确认后返回勾选集合，
+ *    用于「管理联动应用」——勾上即加入、取消即移除，一次搞定多个 app 的增删。
  */
 public class AppListDialog {
 
@@ -39,8 +47,14 @@ public class AppListDialog {
     private int headerHeightPx;
 
     private final Context context;
-    private final OnAppChosenListener listener;
+    private final boolean multi;
+    private final List<String> preselected;
+    private final OnAppChosenListener singleListener;
+    private final OnAppsChosenListener multiListener;
     private final PackageManager pm;
+
+    /** 多选模式下被勾选的包名集合（保序：先按列表顺序） */
+    private final Set<String> checked = new LinkedHashSet<>();
 
     private final ArrayList<AppInfo> all = new ArrayList<>();
     private final ArrayList<AppInfo> filtered = new ArrayList<>();
@@ -69,6 +83,11 @@ public class AppListDialog {
         void onAppChosen(String pkg);
     }
 
+    /** 多选模式的回调：返回最终勾选的包名集合（顺序即列表顺序）。 */
+    public interface OnAppsChosenListener {
+        void onAppsChosen(List<String> pkgs);
+    }
+
     private static class AppInfo {
         final String label;
         final String pkg;
@@ -83,18 +102,37 @@ public class AppListDialog {
         }
     }
 
-    private AppListDialog(Context context, OnAppChosenListener listener) {
+    private AppListDialog(Context context, boolean multi, List<String> preselected,
+                          OnAppChosenListener singleListener, OnAppsChosenListener multiListener) {
         this.context = context;
-        this.listener = listener;
+        this.multi = multi;
+        this.preselected = preselected;
+        this.singleListener = singleListener;
+        this.multiListener = multiListener;
         this.pm = context.getPackageManager();
+        if (multi && preselected != null) {
+            checked.addAll(preselected);
+        }
     }
 
+    /** 单选：点列表项即选定并关闭。 */
     public static void show(Context context, OnAppChosenListener listener) {
         try {
-            new AppListDialog(context, listener).build();
+            new AppListDialog(context, false, null, listener, null).build();
         } catch (Throwable t) {
             // 兜底：绝不让选择器静默失败（表现为「点了没反应」）
             android.util.Log.e("AppListDialog", "show failed", t);
+            Toast.makeText(context, R.string.picker_load_fail, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 多选：预勾 {@code preselected} 中的包名，确认后回传勾选集合（用于管理联动应用）。 */
+    public static void showMulti(Context context, List<String> preselected,
+                                 OnAppsChosenListener listener) {
+        try {
+            new AppListDialog(context, true, preselected, null, listener).build();
+        } catch (Throwable t) {
+            android.util.Log.e("AppListDialog", "showMulti failed", t);
             Toast.makeText(context, R.string.picker_load_fail, Toast.LENGTH_LONG).show();
         }
     }
@@ -119,11 +157,21 @@ public class AppListDialog {
 
         listView.setOnItemClickListener((AdapterView<?> parent, View view, int position, long id) -> {
             AppInfo info = filtered.get(position);
-            if (listener != null) {
-                listener.onAppChosen(info.pkg);
-            }
-            if (dialog != null) {
-                dialog.dismiss();
+            if (multi) {
+                // 多选：切换勾选态，刷新该行（整行点击与勾选框同效）
+                if (checked.contains(info.pkg)) {
+                    checked.remove(info.pkg);
+                } else {
+                    checked.add(info.pkg);
+                }
+                updateRowCheckbox(view, info.pkg);
+            } else {
+                if (singleListener != null) {
+                    singleListener.onAppChosen(info.pkg);
+                }
+                if (dialog != null) {
+                    dialog.dismiss();
+                }
             }
         });
 
@@ -144,11 +192,18 @@ public class AppListDialog {
             }
         });
 
-        dialog = new AlertDialog.Builder(context)
-                .setTitle(R.string.picker_title)
+        AlertDialog.Builder b = new AlertDialog.Builder(context)
+                .setTitle(multi ? R.string.picker_title_multi : R.string.picker_title)
                 .setView(root)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
+                .setNegativeButton(android.R.string.cancel, null);
+        if (multi) {
+            b.setPositiveButton(R.string.picker_confirm, (d, which) -> {
+                if (multiListener != null) {
+                    multiListener.onAppsChosen(new ArrayList<>(checked));
+                }
+            });
+        }
+        dialog = b.create();
 
         // 弹窗关闭时释放线程与 dialog 引用，避免 Activity 被 dialog 长期持有
         dialog.setOnDismissListener(d -> release());
@@ -160,6 +215,17 @@ public class AppListDialog {
         dialog.show();
 
         scanAppsAsync(false);
+    }
+
+    /** 仅刷新某一行的勾选框（避免整列表 notify 造成滚动跳动） */
+    private void updateRowCheckbox(View row, String pkg) {
+        if (row == null) {
+            return;
+        }
+        CheckBox cb = row.findViewById(R.id.cbCheck);
+        if (cb != null) {
+            cb.setChecked(checked.contains(pkg));
+        }
     }
 
     private void release() {
@@ -372,6 +438,7 @@ public class AppListDialog {
                 h.label = convertView.findViewById(R.id.tvLabel);
                 h.pkg = convertView.findViewById(R.id.tvPkg);
                 h.icon = convertView.findViewById(R.id.ivIcon);
+                h.check = convertView.findViewById(R.id.cbCheck);
                 convertView.setTag(h);
             } else {
                 h = (ViewHolder) convertView.getTag();
@@ -382,6 +449,15 @@ public class AppListDialog {
             final String key = info.pkg;
             h.icon.setTag(key);
             h.icon.setImageBitmap(info.icon);
+            // 多选模式：显示勾选框并据集合绑定状态
+            if (h.check != null) {
+                if (multi) {
+                    h.check.setVisibility(View.VISIBLE);
+                    h.check.setChecked(checked.contains(key));
+                } else {
+                    h.check.setVisibility(View.GONE);
+                }
+            }
             // 后台解码图标，完成后回主线程填充（Bitmap 不可变，跨线程安全）
             if (info.icon == null && !info.iconLoading) {
                 info.iconLoading = true;
@@ -418,5 +494,6 @@ public class AppListDialog {
         TextView label;
         TextView pkg;
         ImageView icon;
+        CheckBox check;
     }
 }

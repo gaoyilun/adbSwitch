@@ -40,4 +40,14 @@
 
     </LinearLayout>
 
+    <!-- 多选模式（管理联动应用）才显示：用框架 标准 CheckBox，点行或点框都切换勾选 -->
+    <CheckBox
+        android:id="@+id/cbCheck"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:visibility="gone"
+        android:clickable="false"
+        android:focusable="false" />
+
 </LinearLayout>

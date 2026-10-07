@@ -10,6 +10,8 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 
+import com.elleng.devswitch.LinkagePrefs;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -63,7 +65,8 @@ final class ToggleShortcuts {
             DebugController.State s = DebugController.read(ctx);
             SharedPreferences sp = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE);
             boolean linkage = sp.getBoolean("linkage_enabled", false);
-            String pkg = sp.getString("linkage_pkg", "");
+            // 动态「启动联动应用」快捷方式 = 启动「默认跳转应用」（自动跳转也用同一个目标）
+            String pkg = LinkagePrefs.getDefault(ctx);
 
             // 指纹覆盖一切会影响发布结果的因素；进程重启后 lastSignature 归零，必定重发一次
             String sig = (s.usb ? "1" : "0") + (s.wireless ? "1" : "0") + '|' + linkage + '|' + pkg;

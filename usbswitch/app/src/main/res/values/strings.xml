@@ -32,14 +32,29 @@
 
     <string name="card_linkage_title">联动</string>
     <string name="linkage_switch">开启时自动联动跳转</string>
-    <string name="linkage_app_label">联动应用</string>
-    <string name="linkage_app_none">未选择</string>
-    <string name="linkage_sum">打开本 App 时自动关调试并跳转</string>
+    <string name="linkage_sum">打开本 App 时自动关调试并跳转到默认应用</string>
     <string name="linkage_no_app">请先选择联动应用</string>
     <string name="linkage_on">已开启联动</string>
     <string name="linkage_off">已关闭联动</string>
-    <string name="linkage_app_set">已设置联动应用</string>
-    <string name="linkage_open_btn">联动打开</string>
+
+    <!-- 联动应用列表（支持多个）：管理入口 + 每项的「打开 / 快捷」操作 -->
+    <string name="linkage_manage_title">管理联动应用</string>
+    <string name="linkage_manage_sum">勾选要联动的应用（可多选）</string>
+    <string name="linkage_apps_empty">尚未添加任何联动应用</string>
+    <string name="linkage_added">已更新联动应用</string>
+
+    <!-- 默认跳转应用：开启自动联动跳转后必须设置，决定「启动本 App 自动跳去哪个」 -->
+    <string name="linkage_default_title">默认跳转应用</string>
+    <string name="linkage_default_none">未设置（开启自动跳转后必填）</string>
+    <string name="linkage_default_mark"> · 默认跳转</string>
+    <string name="linkage_no_default">请先设置默认跳转应用</string>
+    <string name="linkage_need_default">已开启自动跳转，请设置默认跳转应用</string>
+    <string name="linkage_apps_empty_toast">请先添加联动应用</string>
+    <string name="linkage_set_default">已设置默认跳转应用</string>
+
+    <!-- 联动应用行操作按钮 -->
+    <string name="linkage_btn_open">打开</string>
+    <string name="linkage_btn_shortcut">快捷</string>
 
     <string name="kill_before_open_title">开调试前先停止联动应用</string>
     <string name="kill_before_open_sum">避免联动应用在状态翻转瞬间读到调试</string>
@@ -47,8 +62,6 @@
     <string name="linkage_skipped">已跳过自动跳转，需再跳请点「联动应用」右侧的「联动打开」</string>
     <string name="linkage_need_notif">联动需要通知权限，请先授予</string>
 
-    <string name="create_shortcut_title">创建桌面快捷方式</string>
-    <string name="create_shortcut_sum">在桌面生成联动应用的图标（原生快捷方式）</string>
     <string name="create_shortcut_no_app">请先选择联动应用</string>
     <string name="create_shortcut_done">已请求在桌面创建快捷方式</string>
     <string name="create_shortcut_fail">创建失败，请检查桌面是否被禁用</string>
@@ -101,6 +114,8 @@
     <string name="update_already_latest">已是最新版本</string>
 
     <string name="picker_title">选择联动应用</string>
+    <string name="picker_title_multi">管理联动应用</string>
+    <string name="picker_confirm">确定</string>
     <string name="picker_hint">搜索应用名称 / 包名</string>
     <string name="picker_loading">正在读取已安装应用…</string>
     <string name="picker_load_fail">读取应用列表失败</string>
