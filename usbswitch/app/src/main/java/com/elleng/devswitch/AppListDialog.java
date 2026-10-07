@@ -30,14 +30,14 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 联动应用选择 —— 原生 AlertDialog 弹窗。
+ * 快捷应用选择 —— 原生 AlertDialog 弹窗。
  * 内含搜索框 + 可滚动列表 + 轻量下拉刷新（无第三方依赖，仅用 framework 控件）。
  * 下拉到顶后继续下拉可重新扫描已安装应用，反映新装/卸载的变化。
  *
  * 两种模式：
  *  - 单选（{@link #show}）：点列表项即选定并关闭（用于一次性选择）；
  *  - 多选（{@link #showMulti}）：每项带勾选框，预勾已选应用，确认后返回勾选集合，
- *    用于「管理联动应用」——勾上即加入、取消即移除，一次搞定多个 app 的增删。
+ *    用于「管理快捷应用」——勾上即加入、取消即移除，一次搞定多个 app 的增删。
  */
 public class AppListDialog {
 

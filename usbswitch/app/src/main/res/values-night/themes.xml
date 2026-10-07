@@ -4,6 +4,8 @@
         <item name="android:colorPrimary">@color/colorPrimary</item>
         <item name="android:colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="android:colorAccent">@color/colorAccent</item>
+        <!-- 开关（含快捷打开等）开启态使用应用主题蓝，替代默认青色 -->
+        <item name="android:colorControlActivated">@color/colorPrimary</item>
         <item name="android:statusBarColor">@color/colorPrimaryDark</item>
         <!-- 深色状态栏，图标用浅色 -->
         <item name="android:windowLightStatusBar">false</item>

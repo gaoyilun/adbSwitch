@@ -46,19 +46,19 @@
             android:summary="@string/linkage_sum"
             android:layout="@layout/pref_row" />
 
-        <!-- 打开调试前先杀掉联动应用：避免它在调试开启的瞬间读到状态翻转 -->
+        <!-- 打开调试前先关闭快捷应用：避免它在调试开启的瞬间读到状态翻转 -->
         <SwitchPreference
             android:key="swKillBeforeOpen"
             android:title="@string/kill_before_open_title"
             android:summary="@string/kill_before_open_sum"
             android:layout="@layout/pref_row" />
 
-        <!-- 默认跳转应用行 + 各联动应用行 + 「管理联动应用」行：均由 MainActivity
+        <!-- 默认快捷应用行 + 各快捷应用行 + 「管理快捷应用」行：均由 MainActivity
              按当前配置的列表动态填充（见 rebuildLinkageList），不在 XML 里写死。 -->
 
     </PreferenceCategory>
 
-    <!-- 通知设置：与「调试开关」「联动」并列 -->
+    <!-- 通知设置：与「调试开关」「快捷打开」并列 -->
     <PreferenceCategory android:title="@string/card_notify_title">
 
         <SwitchPreference

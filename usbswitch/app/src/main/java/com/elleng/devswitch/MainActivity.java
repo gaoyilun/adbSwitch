@@ -72,7 +72,7 @@ public class MainActivity extends PreferenceActivity {
      */
     private static final String ACTION_DEBUG_MASTER = "com.elleng.devswitch.action.DEBUG_MASTER";
     private static final String EXTRA_MASTER_ON = "master_on";
-    /** 桌面快捷方式「创建桌面快捷方式」：先打开本 App，关掉调试后联动启动目标应用 */
+    /** 桌面快捷方式「快捷打开」：先打开本 App，关掉调试后启动目标应用 */
     private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.devswitch.action.DESKTOP_LINKAGE";
     private static final String TAG = "UsbSwitch";
     private static final String PREFS = "cfg";
@@ -91,7 +91,7 @@ public class MainActivity extends PreferenceActivity {
     private static final String PREF_NOTIFY = "notify_on_close";
     /** 「打开调试前先杀掉联动应用」开关（DebugController 读取同一份 cfg） */
     private static final String PREF_KILL_BEFORE_OPEN = "kill_before_open";
-    /** 动态 shortcut：启动联动应用 */
+    /** 动态 shortcut：启动快捷应用 */
     private static final String SC_ID_LAUNCH_APP = "launch_linkage_app";
 
     private Preference swMasterPref;      // 主开关：普通 Preference + 自定义 widget（箭头 + Switch）
@@ -244,8 +244,8 @@ public class MainActivity extends PreferenceActivity {
     private boolean handleEntry(Intent in) {
         SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
 
-        // 动态 shortcut「启动联动应用」：直接跳目标应用（不触发关调试/常驻通知等联动动作），
-        // 故不依赖联动模式开关，开没开联动都能用。
+        // 动态 shortcut「启动快捷应用」：直接跳目标应用（不触发关调试/常驻通知等动作），
+        // 故不依赖快捷打开开关，开没开都能用。
         if (SC_ID_LAUNCH_APP.equals(in.getAction())) {
             String pkg = LinkagePrefs.getDefault(this);
             if (pkg.isEmpty()) {
@@ -311,7 +311,7 @@ public class MainActivity extends PreferenceActivity {
 
         boolean linkage = sp.getBoolean(PREF_LINKAGE, false);
 
-        // —— 联动模式：从启动器打开时，自动关闭调试并跳转「默认跳转应用」 ——
+        // —— 快捷打开：从启动器打开时，自动关闭调试并打开「默认快捷应用」 ——
         if (linkage && !openSettings) {
             String pkg = LinkagePrefs.getDefault(this);
             if (!pkg.isEmpty()) {
@@ -707,7 +707,7 @@ public class MainActivity extends PreferenceActivity {
         });
     }
 
-    /** 执行联动：关闭调试 -> 按开关拉起常驻通知 -> 跳转联动应用（写入完成后在回调里依序执行） */
+    /** 执行快捷打开：关闭调试 -> 按开关拉起常驻通知 -> 打开目标应用（写入完成后在回调里依序执行） */
     private void runLinkage(String pkg) {
         sLinkageLaunched = true;
         // 联动走统一入口：一键关闭会记住当前组合并把 USB / 无线都关掉。
@@ -872,8 +872,9 @@ public class MainActivity extends PreferenceActivity {
     }
 
     /**
-     * 按当前联动配置动态重建「联动」分类下的列表：
-     *  1) 默认跳转应用行；2) 每个联动应用一行；3) 管理联动应用行。
+     * 按当前快捷打开配置动态重建「快捷打开」分类下的列表：
+     *  1) 默认快捷应用行（图标在右侧）；2) 每个快捷应用一行（点击=快捷打开 / 长按=创建快捷方式）；
+     *  3) 管理快捷应用行。
      *  每次配置变化（增删 app、改默认、授权状态变化）都重建，保证 UI 与配置一致。
      */
     private void rebuildLinkageList() {
@@ -899,32 +900,33 @@ public class MainActivity extends PreferenceActivity {
         List<String> apps = LinkagePrefs.getApps(this);
         String def = LinkagePrefs.getDefault(this);
 
-        // 1) 默认跳转应用行：开启自动联动跳转后要跳去的目标
+        // 1) 默认快捷应用行：开启快捷打开后要打开的目标；应用图标放在右侧
         Preference defPref = new Preference(this);
         defPref.setKey(LINKAGE_KEY_DEFAULT);
         defPref.setTitle(R.string.linkage_default_title);
-        defPref.setLayoutResource(R.layout.pref_row);
+        defPref.setLayoutResource(R.layout.pref_row_icon_right);
         CharSequence defLabel = def.isEmpty() ? getString(R.string.linkage_default_none) : getApplicationLabel(def);
         defPref.setSummary(defLabel);
         defPref.setIcon(def.isEmpty() ? null : loadAppDrawable(def));
         cat.addPreference(defPref);
 
-        // 2) 每个联动应用一行（点击=联动打开；行内「打开」「快捷」按钮见 wireAppRow）
+        // 2) 每个快捷应用一行：整行点击=快捷打开；长按=创建桌面快捷方式（见 wireAppRow）
         for (String pkg : apps) {
             Preference p = new Preference(this);
             p.setKey(LINKAGE_APP_KEY_PREFIX + pkg);
             p.setLayoutResource(R.layout.pref_row);
             CharSequence label = getApplicationLabel(pkg);
-            p.setTitle(label == null ? pkg : label);
-            // 摘要显示包名；若它是默认跳转应用，附加标记
-            String summary = pkg + (pkg.equals(def) ? getString(R.string.linkage_default_mark) : "");
-            p.setSummary(summary);
+            // 标题显示应用名；若为默认快捷应用，附加「· 默认快捷」标记
+            String title = (label == null ? pkg : label.toString())
+                    + (pkg.equals(def) ? getString(R.string.linkage_default_mark) : "");
+            p.setTitle(title);
+            // 摘要改为操作提示，不再显示包名
+            p.setSummary(R.string.quick_hint);
             p.setIcon(loadAppDrawable(pkg));
-            p.setWidgetLayoutResource(R.layout.pref_widget_app_actions);
             cat.addPreference(p);
         }
 
-        // 3) 管理联动应用行（打开多选弹窗，一次性增删多个 app）
+        // 3) 管理快捷应用行（打开多选弹窗，一次性增删多个 app）
         Preference manage = new Preference(this);
         manage.setKey(LINKAGE_KEY_MANAGE);
         manage.setTitle(R.string.linkage_manage_title);
@@ -1144,10 +1146,9 @@ public class MainActivity extends PreferenceActivity {
     }
 
     /**
-     * 联动应用行接线：
-     *  - 整行点击 = 联动打开（关调试 + 跳到它，即一次完整联动）；
-     *  - 「打开」按钮 = 仅启动该应用（不动调试开关）；
-     *  - 「快捷」按钮 = 在桌面生成该应用的原生快捷方式（点了会关调试并跳到它）。
+     * 快捷应用行接线：
+     *  - 整行点击 = 快捷打开（关调试 + 跳到它）；
+     *  - 长按整行 = 在桌面生成该应用的原生快捷方式（关调试并跳到它）。
      */
     private void wireAppRow(View row, String pkg) {
         row.setOnClickListener(v -> {
@@ -1157,14 +1158,14 @@ public class MainActivity extends PreferenceActivity {
             }
             runLinkage(pkg);
         });
-        View openBtn = row.findViewById(R.id.btn_app_open);
-        if (openBtn != null) {
-            openBtn.setOnClickListener(v -> launchApp(pkg));
-        }
-        View scBtn = row.findViewById(R.id.btn_app_shortcut);
-        if (scBtn != null) {
-            scBtn.setOnClickListener(v -> createDesktopShortcutFor(pkg));
-        }
+        row.setOnLongClickListener(v -> {
+            if (!privilegedAvailable) {
+                Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
+                return true;
+            }
+            createDesktopShortcutFor(pkg);
+            return true;
+        });
     }
 
     /** 打开「实时动态」引导（防抖，避免行点击与 preference click 同时触发） */

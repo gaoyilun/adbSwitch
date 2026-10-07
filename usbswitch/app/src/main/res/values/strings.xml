@@ -4,7 +4,7 @@
 
     <!-- 桌面快捷方式 -->
     <string name="sc_open_home_short">打开主页</string>
-    <string name="sc_open_home_long">直接打开设置主页，不触发联动跳转</string>
+    <string name="sc_open_home_long">直接打开设置主页，不触发快捷打开</string>
     <string name="sc_toggle_short">一键开关</string>
     <string name="sc_toggle_long">一键开关调试（开变关、关变开），不打开界面</string>
     <string name="sc_toggle_usb_short">USB 调试</string>
@@ -30,39 +30,38 @@
     <string name="wireless_on">已开启 · adbd 运行中</string>
     <string name="wireless_off">已关闭</string>
 
-    <string name="card_linkage_title">联动</string>
-    <string name="linkage_switch">开启时自动联动跳转</string>
-    <string name="linkage_sum">打开本 App 时自动关调试并跳转到默认应用</string>
-    <string name="linkage_no_app">请先选择联动应用</string>
-    <string name="linkage_on">已开启联动</string>
-    <string name="linkage_off">已关闭联动</string>
+    <string name="card_linkage_title">快捷打开</string>
+    <string name="linkage_switch">开启时自动打开默认应用</string>
+    <string name="linkage_sum">启动本 App 时自动关闭调试并打开默认应用</string>
+    <string name="linkage_no_app">请先选择快捷应用</string>
+    <string name="linkage_on">已开启快捷打开</string>
+    <string name="linkage_off">已关闭快捷打开</string>
 
-    <!-- 联动应用列表（支持多个）：管理入口 + 每项的「打开 / 快捷」操作 -->
-    <string name="linkage_manage_title">管理联动应用</string>
-    <string name="linkage_manage_sum">勾选要联动的应用（可多选）</string>
-    <string name="linkage_apps_empty">尚未添加任何联动应用</string>
-    <string name="linkage_added">已更新联动应用</string>
+    <!-- 快捷应用列表（支持多个）：管理入口 + 每项的「点击快捷打开 / 长按创建快捷方式」操作 -->
+    <string name="linkage_manage_title">管理快捷应用</string>
+    <string name="linkage_manage_sum">勾选要快捷打开的应用</string>
+    <string name="linkage_apps_empty">尚未添加任何快捷应用</string>
+    <string name="linkage_added">已更新快捷应用</string>
 
-    <!-- 默认跳转应用：开启自动联动跳转后必须设置，决定「启动本 App 自动跳去哪个」 -->
-    <string name="linkage_default_title">默认跳转应用</string>
-    <string name="linkage_default_none">未设置（开启自动跳转后必填）</string>
-    <string name="linkage_default_mark"> · 默认跳转</string>
-    <string name="linkage_no_default">请先设置默认跳转应用</string>
-    <string name="linkage_need_default">已开启自动跳转，请设置默认跳转应用</string>
-    <string name="linkage_apps_empty_toast">请先添加联动应用</string>
-    <string name="linkage_set_default">已设置默认跳转应用</string>
+    <!-- 默认快捷应用：开启快捷打开后必须设置，决定「启动本 App 自动打开哪个」 -->
+    <string name="linkage_default_title">默认快捷应用</string>
+    <string name="linkage_default_none">未设置（开启后需先设置）</string>
+    <string name="linkage_default_mark"> · 默认快捷</string>
+    <string name="linkage_no_default">请先设置默认快捷应用</string>
+    <string name="linkage_need_default">已开启，请设置默认快捷应用</string>
+    <string name="linkage_apps_empty_toast">请先添加快捷应用</string>
+    <string name="linkage_set_default">已设置默认快捷应用</string>
 
-    <!-- 联动应用行操作按钮 -->
-    <string name="linkage_btn_open">打开</string>
-    <string name="linkage_btn_shortcut">快捷</string>
+    <!-- 快捷应用行提示（替代包名显示）：整行点击=快捷打开；长按=创建桌面快捷方式 -->
+    <string name="quick_hint">点击快捷打开，长按创建快捷方式</string>
 
-    <string name="kill_before_open_title">开调试前先停止联动应用</string>
-    <string name="kill_before_open_sum">避免联动应用在状态翻转瞬间读到调试</string>
+    <string name="kill_before_open_title">开启调试自动关闭快捷应用</string>
+    <string name="kill_before_open_sum">避免快捷应用在状态翻转瞬间读到调试</string>
 
-    <string name="linkage_skipped">已跳过自动跳转，需再跳请点「联动应用」右侧的「联动打开」</string>
-    <string name="linkage_need_notif">联动需要通知权限，请先授予</string>
+    <string name="linkage_skipped">已跳过自动打开，需再次打开请直接点对应快捷应用</string>
+    <string name="linkage_need_notif">快捷打开需要通知权限，请先授予</string>
 
-    <string name="create_shortcut_no_app">请先选择联动应用</string>
+    <string name="create_shortcut_no_app">请先选择快捷应用</string>
     <string name="create_shortcut_done">已请求在桌面创建快捷方式</string>
     <string name="create_shortcut_fail">创建失败，请检查桌面是否被禁用</string>
 
@@ -113,8 +112,8 @@
     <string name="update_check_failed">检查更新失败，请稍后再试</string>
     <string name="update_already_latest">已是最新版本</string>
 
-    <string name="picker_title">选择联动应用</string>
-    <string name="picker_title_multi">管理联动应用</string>
+    <string name="picker_title">选择快捷应用</string>
+    <string name="picker_title_multi">管理快捷应用</string>
     <string name="picker_confirm">确定</string>
     <string name="picker_hint">搜索应用名称 / 包名</string>
     <string name="picker_loading">正在读取已安装应用…</string>

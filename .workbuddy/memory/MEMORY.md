@@ -9,11 +9,11 @@
 ## 关键约定
 - 主界面用 framework 原生 `PreferenceActivity`（`usbswitch/app/src/main/res/xml/prefs.xml` + `MainActivity`）。
 - 自定义行布局：`pref_row.xml`（普通行，图标框 40dp）、`pref_row_state.xml`（调试三行，图标框 20dp）。
-- framework Preference 整行不可点；点击靠 `MainActivity.wireRowClicks()` 派发——**动态项（联动 app 行/默认跳转行/管理行）按 Preference key 派发**（`list.getItemAtPosition` 拿 Preference 对象 + key 前缀/精确匹配），**绝不靠标题文本**（列表复用会让标题重复，旧实现因此踩坑）。
-- 联动应用配置集中在 `LinkagePrefs`（`cfg` 表）：`linkage_pkgs`（JSONArray 字符串，保序去重多 app）+ `linkage_default`（默认跳转 app）。旧单 app `linkage_pkg` 由 `migrate()` 首次并入列表并设为默认。
-- 桌面快捷方式相关 action：`TOGGLE_MASTER`（一键开关）、`OPEN_HOME`（打开主页）；
-  动态"启动联动应用"快捷方式用 ShortcutManager `SC_ID_LAUNCH_APP`，跳转目标取 `LinkagePrefs.getDefault()`（非桌面图标）；
-  每个联动 app 的桌面图标走 `ACTION_DESKTOP_LINKAGE`，意图带 `EXTRA_LINKAGE_PKG` 指明具体包名。
+- framework Preference 整行不可点；点击靠 `MainActivity.wireRowClicks()` 派发——**动态项（快捷 app 行/默认快捷行/管理行）按 Preference key 派发**（`list.getItemAtPosition` 拿 Preference 对象 + key 前缀/精确匹配），**绝不靠标题文本**（列表复用会让标题重复，旧实现因此踩坑）。
+- **联动功能 UI 改名「快捷打开」**（2026-10-07）：用户觉得「联动」不贴切，统一改名为「快捷打开」。**仅改面向用户的文案与布局**；内部标识符（`LinkagePrefs`、`linkage_pkgs`/`linkage_default`/`linkage_enabled` 等 cfg 键、`EXTRA_LINKAGE_PKG`、`ACTION_DESKTOP_LINKAGE`、`SC_ID_LAUNCH_APP`=launch_linkage_app、`catLinkage`）**一律保持不变**（避免破坏已落地的桌面快捷方式 intent 契约与旧设置迁移）。
+  - 关键文案：`card_linkage_title`=快捷打开、`linkage_switch`=开启时自动打开默认应用、`linkage_default_title`=默认快捷应用、`linkage_manage_title`=管理快捷应用、`kill_before_open_title`=开启调试自动关闭快捷应用；快捷应用行摘要改 `quick_hint`=「点击快捷打开，长按创建快捷方式」（不再显示包名），去掉了「（可多选）」。
+  - 交互重构：快捷应用行**去掉「打开/快捷」两个按钮** → 整行点击=快捷打开（关调试+启动），**长按整行=创建桌面快捷方式**。默认快捷应用行图标移到**右侧**（`pref_row_icon_right.xml`）。
+  - 开关配色：day/night 主题加 `android:colorControlActivated=@color/colorPrimary`，使开关开启态用应用主题蓝（替代默认青色）。
 - **授权模式 UI**：「调试开关」分类末尾放 `authMode`（点击选 root/Shizuku）+ `authStatus`（右侧「重试」按钮，未授权时显）；每次进页面且当前模式未授权时双检测，底部悬浮通知（绿勾=Shizuku模式已授权 / 黄警=root模式未授权）。
 
 ## 构建环境（2026-10-05 实测可用，勿信「无 SDK」旧记）

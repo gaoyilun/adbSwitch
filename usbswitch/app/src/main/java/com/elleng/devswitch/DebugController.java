@@ -49,7 +49,7 @@ public final class DebugController {
     private static final String SAVED_USB = "saved_usb";
     private static final String SAVED_WIRELESS = "saved_wireless";
     private static final String SAVED_VALID = "saved_valid";
-    /** 「打开调试前先杀掉联动应用」开关（与 MainActivity 共用同一份 cfg） */
+    /** 「开启调试自动关闭快捷应用」开关（与 MainActivity 共用同一份 cfg） */
     private static final String PREF_KILL_BEFORE_OPEN = "kill_before_open";
 
     private DebugController() {
@@ -200,15 +200,15 @@ public final class DebugController {
     }
 
     /**
-     * 「打开调试前先杀掉联动应用」。
+     * 「开启调试自动关闭快捷应用」。
      *
      * 关键在顺序：**先杀 app，再开调试**。
-     * 反过来的话，联动应用在调试刚开启、自身还活着的瞬间就能读到 adb 状态并弹检测提示；
+     * 反过来的话，快捷应用在调试刚开启、自身还活着的瞬间就能读到 adb 状态并弹检测提示；
      * 先 force-stop 掉它，等下次冷启动时调试虽已开启，但少了「运行中感知到状态翻转」这条路径。
      *
      * 只在 opening==true 时执行，关闭调试不需要杀。
      */
-    private static void killLinkageAppIfNeeded(Context ctx, boolean opening) {
+    private static void killQuickAppsIfNeeded(Context ctx, boolean opening) {
         if (!opening) {
             return;
         }
@@ -222,7 +222,7 @@ public final class DebugController {
         }
         // am force-stop 走系统正常的停止流程（比 kill 更干净，不会留下半死的进程状态）。
         // 双模式：按当前授权模式选执行通道（Shizuku 走 shell uid 2000，否则走 su）。
-        // 多个联动应用：逐一停止，避免任一在调试开启瞬间读到状态翻转。
+        // 多个快捷应用：逐一停止，避免任一在调试开启瞬间读到状态翻转。
         for (String pkg : apps) {
             android.util.Log.i(TAG, "kill before open: force-stop " + pkg);
             runPrivileged(ctx, "am force-stop " + pkg);
@@ -274,7 +274,7 @@ public final class DebugController {
             State cur = read(app);
             boolean ok;
             if (on) {
-                killLinkageAppIfNeeded(app, true); // 顺序：先杀联动应用，再开调试
+                killQuickAppsIfNeeded(app, true); // 顺序：先杀联动应用，再开调试
                 State target = loadSaved(app);
                 boolean a = writeUsb(app, target.usb);
                 boolean b = writeWireless(app, target.wireless);
@@ -301,7 +301,7 @@ public final class DebugController {
     public static void setUsb(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
         IO.execute(() -> {
-            killLinkageAppIfNeeded(app, on);
+            killQuickAppsIfNeeded(app, on);
             boolean ok = writeUsb(app, on);
             refreshCacheFromPrivileged(app);
             State after = broadcast(app);
@@ -315,7 +315,7 @@ public final class DebugController {
     public static void setWireless(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
         IO.execute(() -> {
-            killLinkageAppIfNeeded(app, on);
+            killQuickAppsIfNeeded(app, on);
             boolean ok = writeWireless(app, on);
             refreshCacheFromPrivileged(app);
             State after = broadcast(app);
