@@ -9,9 +9,11 @@
 ## 关键约定
 - 主界面用 framework 原生 `PreferenceActivity`（`usbswitch/app/src/main/res/xml/prefs.xml` + `MainActivity`）。
 - 自定义行布局：`pref_row.xml`（普通行，图标框 40dp）、`pref_row_state.xml`（调试三行，图标框 20dp）。
-- framework Preference 整行不可点；点击靠 `MainActivity.wireRowClicks()` 按标题文本给 itemView 挂监听。
+- framework Preference 整行不可点；点击靠 `MainActivity.wireRowClicks()` 派发——**动态项（联动 app 行/默认跳转行/管理行）按 Preference key 派发**（`list.getItemAtPosition` 拿 Preference 对象 + key 前缀/精确匹配），**绝不靠标题文本**（列表复用会让标题重复，旧实现因此踩坑）。
+- 联动应用配置集中在 `LinkagePrefs`（`cfg` 表）：`linkage_pkgs`（JSONArray 字符串，保序去重多 app）+ `linkage_default`（默认跳转 app）。旧单 app `linkage_pkg` 由 `migrate()` 首次并入列表并设为默认。
 - 桌面快捷方式相关 action：`TOGGLE_MASTER`（一键开关）、`OPEN_HOME`（打开主页）；
-  动态"启动联动应用"快捷方式用 ShortcutManager `SC_ID_LAUNCH_APP`（非桌面图标，区别于"创建桌面快捷方式"）。
+  动态"启动联动应用"快捷方式用 ShortcutManager `SC_ID_LAUNCH_APP`，跳转目标取 `LinkagePrefs.getDefault()`（非桌面图标）；
+  每个联动 app 的桌面图标走 `ACTION_DESKTOP_LINKAGE`，意图带 `EXTRA_LINKAGE_PKG` 指明具体包名。
 - **授权模式 UI**：「调试开关」分类末尾放 `authMode`（点击选 root/Shizuku）+ `authStatus`（右侧「重试」按钮，未授权时显）；每次进页面且当前模式未授权时双检测，底部悬浮通知（绿勾=Shizuku模式已授权 / 黄警=root模式未授权）。
 
 ## 构建环境（2026-10-05 实测可用，勿信「无 SDK」旧记）
