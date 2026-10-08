@@ -127,8 +127,6 @@ public class MainActivity extends PreferenceActivity {
     private boolean settingsObserverRegistered = false; // Settings 监听是否已注册（防重复注册/泄漏）
     /** 主线程 Handler：去抖与所有 post 都复用它，否则每次 new 一个 Handler 都拿不到上次的 callback，去抖等于失效 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    /** 行点击接线用的标题缓存：布局每帧都会回调，getString 不该每次重做 */
-    private String titleMaster, titleLive, titleAuth, titleAbout;
 
     /** 关于弹窗外链：署名按钮 → elleng.eu.org；信息图标 → 项目仓库 */
     private static final String ABOUT_CREDIT_URL = "https://elleng.eu.org";
@@ -509,12 +507,6 @@ public class MainActivity extends PreferenceActivity {
     }
 
     private void initPrefs() {
-        // 行点击按标题文本识别，标题每次布局都要比一次 —— 在此取一次缓存起来，别每帧 getString
-        titleMaster = getString(R.string.master_title);
-        titleLive = getString(R.string.live_update_title);
-        titleAbout = getString(R.string.about_title);
-        titleAuth = getString(R.string.auth_mode_title);
-
         swMasterPref = findPreference("swMaster");
         swUsbPref = (SwitchPreference) findPreference("swUsb");
         swLinkagePref = (SwitchPreference) findPreference("swLinkage");
@@ -1039,6 +1031,22 @@ public class MainActivity extends PreferenceActivity {
         }
         rowClicksWired = true;
         root.getViewTreeObserver().addOnGlobalLayoutListener(this::wireRowClicks);
+        // 列表滚动后新进入视野的行也要接线：HyperOS 上 OnGlobalLayoutListener 不随滚动可靠触发，
+        // 仅靠它会导致「关于」等底部行滚动到位后仍点不动。这里挂滚动监听兜底（只注册一次）。
+        android.widget.ListView list = findViewById(android.R.id.list);
+        if (list != null) {
+            list.setOnScrollListener(new android.widget.AbsListView.OnScrollListener() {
+                @Override
+                public void onScrollStateChanged(android.widget.AbsListView view, int scrollState) {
+                    wireRowClicks();
+                }
+                @Override
+                public void onScroll(android.widget.AbsListView view, int firstVisibleItem,
+                                     int visibleItemCount, int totalItemCount) {
+                    wireRowClicks();
+                }
+            });
+        }
     }
 
     /**
@@ -1063,79 +1071,68 @@ public class MainActivity extends PreferenceActivity {
             if (row == null) {
                 continue;
             }
-            // —— 动态联动项：按所在 Preference 的 key 识别（应用标题可能重复，不能用标题） ——
+            // —— 全部按所在 Preference 的 key 派发 ——
+            // 旧实现里固定行（关于/实时动态/授权）靠标题文本识别：列表复用会让标题重复、
+            // 且滚动后新出现的行不会重新接线（HyperOS 上 OnGlobalLayoutListener 不随滚动可靠触发），
+            // 于是「关于」等底部行滚动到位后仍点不动。改用 key 既不怕标题重复，也和动态联动项统一。
             Object item = list.getItemAtPosition(first + i);
-            if (item instanceof Preference) {
-                String key = ((Preference) item).getKey();
-                if (key != null) {
-                    if (key.startsWith(LINKAGE_APP_KEY_PREFIX)) {
-                        wireAppRow(row, key.substring(LINKAGE_APP_KEY_PREFIX.length()));
-                        continue;
-                    } else if (LINKAGE_KEY_MANAGE.equals(key)) {
-                        wireSimpleRow(row, this::openAppPicker);
-                        continue;
-                    } else if (LINKAGE_KEY_DEFAULT.equals(key)) {
-                        wireSimpleRow(row, this::openDefaultPicker);
-                        continue;
-                    }
-                }
-            }
-            // —— 固定行：按标题文本识别（沿用旧机制） ——
-            // 按标题文本识别行：原先靠行内的「修改」按钮识别，该按钮已移除；
-            // 按 position 映射到 getPreferenceScreen().getPreference() 又受 header/复用影响，故统一用标题。
-            TextView tv = row.findViewById(android.R.id.title);
-            CharSequence title = (tv == null) ? null : tv.getText();
-            if (title == null) {
+            if (!(item instanceof Preference)) {
                 continue;
             }
-            // 本回调每次布局都会跑（OnGlobalLayoutListener），行没变就没必要重挂监听。
-            // 用「行上记的已接线标题」判断：ListView 复用后标题变了会重新接线，标题没变则跳过。
-            final boolean wired = title.equals(row.getTag(R.id.tag_row_wired));
-            row.setTag(R.id.tag_row_wired, title);
-            if (titleMaster.equals(title)) {
-                if (!wired) {
-                    // 主开关行：整行切换开关；箭头按钮单独消费点击，用于折叠/展开
-                    row.setOnClickListener(v -> toggleMaster());
-                    View arrow = row.findViewById(R.id.btn_expand);
-                    if (arrow != null) {
-                        arrow.setOnClickListener(v -> toggleExpanded());
-                    }
-                }
-                Switch sw = row.findViewById(R.id.sw_master);
-                if (sw != null) {
-                    if (masterSwitch != sw) {
-                        masterSwitch = sw;
-                        // 用 checked 回调而不是 click：Switch 点击后自身状态已翻转，
-                        // 以回调里给的 isChecked 为目标状态，才不会和真值打架。
-                        sw.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                            if (syncing) {
-                                return;
-                            }
-                            applyMasterState(isChecked);
-                        });
-                    }
-                    // 关键：widget 是布局完成后才拿到的，refresh() 往往跑在它之前而漏掉同步，
-                    // 这里每次布局完都按真值同步一次，避免 Switch 停在 XML 的默认关闭态。
-                    syncing = true;
-                    sw.setChecked(DebugController.read(this).anyOn());
-                    syncing = false;
-                }
-                updateExpandIcon(subSwitchesShown);
-            } else if (titleLive.equals(title)) {
-                if (!wired) {
-                    row.setOnClickListener(v -> openLiveUpdate());
-                }
-            } else if (titleAbout.equals(title)) {
-                if (!wired) {
-                    row.setOnClickListener(v -> showAboutDialog());
-                }
-            } else if (titleAuth.equals(title)) {
-                // 合并项「授权模式」整行点击 = 打开授权模式选择对话框
-                if (!wired) {
-                    row.setOnClickListener(v -> chooseAuthMode());
-                }
+            String key = ((Preference) item).getKey();
+            if (key == null) {
+                continue;
+            }
+            if (key.startsWith(LINKAGE_APP_KEY_PREFIX)) {
+                wireAppRow(row, key.substring(LINKAGE_APP_KEY_PREFIX.length()));
+            } else if (LINKAGE_KEY_MANAGE.equals(key)) {
+                wireSimpleRow(row, this::openAppPicker);
+            } else if (LINKAGE_KEY_DEFAULT.equals(key)) {
+                wireSimpleRow(row, this::openDefaultPicker);
+            } else if ("swMaster".equals(key)) {
+                wireMasterRow(row);
+            } else if ("liveUpdate".equals(key)) {
+                wireSimpleRow(row, this::openLiveUpdate);
+            } else if ("buildInfo".equals(key)) {
+                // 关于：没有 OnPreferenceClickListener（framework 行点击不触发），只能靠整行接线
+                wireSimpleRow(row, this::showAboutDialog);
+            } else if ("auth".equals(key)) {
+                wireSimpleRow(row, this::chooseAuthMode);
             }
         }
+    }
+
+    /**
+     * 主开关行接线：整行点击 = 切换主开关；箭头按钮单独消费点击，用于折叠/展开；
+     * 行内 Switch 每帧按真值同步（widget 在布局完成后才拿得到，refresh 可能漏掉）。
+     */
+    private void wireMasterRow(View row) {
+        // 整行点击切换主开关（箭头按钮单独消费，用于折叠/展开）
+        row.setOnClickListener(v -> toggleMaster());
+        View arrow = row.findViewById(R.id.btn_expand);
+        if (arrow != null) {
+            arrow.setOnClickListener(v -> toggleExpanded());
+        }
+        Switch sw = row.findViewById(R.id.sw_master);
+        if (sw != null) {
+            if (masterSwitch != sw) {
+                masterSwitch = sw;
+                // 用 checked 回调而不是 click：Switch 点击后自身状态已翻转，
+                // 以回调里给的 isChecked 为目标状态，才不会和真值打架。
+                sw.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                    if (syncing) {
+                        return;
+                    }
+                    applyMasterState(isChecked);
+                });
+            }
+            // 关键：widget 是布局完成后才拿到的，refresh() 往往跑在它之前而漏掉同步，
+            // 这里每次布局完都按真值同步一次，避免 Switch 停在 XML 的默认关闭态。
+            syncing = true;
+            sw.setChecked(DebugController.read(this).anyOn());
+            syncing = false;
+        }
+        updateExpandIcon(subSwitchesShown);
     }
 
     /** 给整行设点击（动态项每次布局都重挂，直接替换监听即可，无需 wired 守卫） */
