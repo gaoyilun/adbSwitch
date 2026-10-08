@@ -1,4 +1,4 @@
-package com.elleng.devswitch;
+package com.elleng.adbswitch;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

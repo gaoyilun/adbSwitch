@@ -1,4 +1,4 @@
-package com.elleng.devswitch.update;
+package com.elleng.adbswitch.update;
 
 import android.content.Context;
 import android.util.Log;

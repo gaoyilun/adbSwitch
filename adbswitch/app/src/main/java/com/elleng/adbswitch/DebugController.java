@@ -1,4 +1,4 @@
-package com.elleng.devswitch;
+package com.elleng.adbswitch;
 
 import android.content.Context;
 import android.content.Intent;
@@ -7,7 +7,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 
-import com.elleng.devswitch.util.RootUtil;
+import com.elleng.adbswitch.util.RootUtil;
 
 import java.util.List;
 import java.util.concurrent.Executor;
@@ -35,7 +35,7 @@ public final class DebugController {
     private static final String TAG = "DebugController";
 
     /** 状态变化广播（setPackage 限定本应用） */
-    public static final String ACTION_STATE = "com.elleng.devswitch.ACTION_STATE";
+    public static final String ACTION_STATE = "com.elleng.adbswitch.ACTION_STATE";
     public static final String EXTRA_USB = "extra_usb";
     public static final String EXTRA_WIRELESS = "extra_wireless";
     /** 聚合状态：usb || wireless，即 adbd 是否在跑 */

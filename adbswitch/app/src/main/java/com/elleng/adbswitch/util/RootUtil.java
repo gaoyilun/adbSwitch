@@ -1,4 +1,4 @@
-package com.elleng.devswitch.util;
+package com.elleng.adbswitch.util;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

@@ -8,7 +8,7 @@ plugins {
 val buildTimeMs = System.currentTimeMillis()
 
 android {
-    namespace = "com.elleng.devswitch"
+    namespace = "com.elleng.adbswitch"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
 
@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.elleng.devswitch"
+        applicationId = "com.elleng.adbswitch"
         minSdk = 27
         targetSdk = 36
         versionCode = 1

@@ -1,7 +1,7 @@
 # DevOptsHider 项目记忆
 
 ## 项目定位
-- 当前主方案：**调试开关 (AdbSwitch) App**（`adbswitch/` 模块，包名 **`com.elleng.devswitch`**，中文名对应「调试开关」；2026-10-09 由 usbswitch/UsbSwitch 整体改名为 adbswitch/AdbSwitch，包名故意保留以不破坏已装 App 的更新兼容）。
+- 当前主方案：**调试开关 (AdbSwitch) App**（`adbswitch/` 模块，包名 **`com.elleng.adbswitch`**，中文名对应「调试开关」；2026-10-09 由 usbswitch/UsbSwitch 整体改名为 adbswitch/AdbSwitch，包名随后也由 com.elleng.devswitch 改为 com.elleng.adbswitch）。
 - 用 root（su）或 **Shizuku（shell uid 2000）** 真实改写 `Settings.Global.adb_enabled` / `adb_wifi_enabled`；两个都关掉后让 HSBC 类 RASP 触发的派生属性一次性归零。
 - 双模式（`AuthManager.Mode`：ROOT / SHIZUKU）已落地：写通道由 `DebugController.runPrivileged` 按当前模式选 `ShizukuUtil.run` 或 `RootUtil.su`。
 - 旧 Xposed / Zygisk / 探针 方案**已归档到 `archive/`**，不再主推，也不在常规构建范围内。
@@ -10,7 +10,7 @@
 - 主界面用 framework 原生 `PreferenceActivity`（`adbswitch/app/src/main/res/xml/prefs.xml` + `MainActivity`）。
 - 自定义行布局：`pref_row.xml`（普通行，图标框 40dp）、`pref_row_state.xml`（调试三行，图标框 20dp）。
 - framework Preference 整行不可点；点击靠 `MainActivity.wireRowClicks()` 派发——**动态项（快捷 app 行/默认快捷行/管理行）按 Preference key 派发**（`list.getItemAtPosition` 拿 Preference 对象 + key 前缀/精确匹配），**绝不靠标题文本**（列表复用会让标题重复，旧实现因此踩坑）。
-- **2026-10-09 整体改名（UsbSwitch→AdbSwitch）**：模块文件夹 `usbswitch`→`adbswitch`、Gradle `rootProject.name` `UsbSwitch`→`AdbSwitch`、类 `UsbToggleService`→`AdbToggleService` / `UsbTileService`→`AdbTileService`、日志 TAG `UsbSwitch`→`AdbSwitch`；文档/脚本（README、build-all.sh、archive/README、icon-review）同步。包名 `com.elleng.devswitch` 与通知渠道 id `dev_switch_channel` 故意保留（applicationId / 系统渠道契约）；旧 `usb_switch_channel` 由 `AdbToggleService.ensureChannel` 携一次性删除迁移，避免系统设置里残留孤儿渠道。
+- **2026-10-09 整体改名（UsbSwitch→AdbSwitch）**：模块文件夹 `usbswitch`→`adbswitch`、Gradle `rootProject.name` `UsbSwitch`→`AdbSwitch`、类 `UsbToggleService`→`AdbToggleService` / `UsbTileService`→`AdbTileService`、日志 TAG `UsbSwitch`→`AdbSwitch`、包名 `com.elleng.devswitch`→`com.elleng.adbswitch`、通知渠道 id `usb_switch_channel`/`dev_switch_channel`→`adb_switch_channel`；文档/脚本（README、build-all.sh、archive/README、icon-review）同步。包名变更后旧 App 卸载即带走旧渠道，故不再保留迁移删除代码。
 - **联动功能 UI 改名「快捷打开」**（2026-10-07）：用户觉得「联动」不贴切，统一改名为「快捷打开」。**仅改面向用户的文案与布局**；内部标识符（`LinkagePrefs`、`linkage_pkgs`/`linkage_default`/`linkage_enabled` 等 cfg 键、`EXTRA_LINKAGE_PKG`、`ACTION_DESKTOP_LINKAGE`、`SC_ID_LAUNCH_APP`=launch_linkage_app、`catLinkage`）**一律保持不变**（避免破坏已落地的桌面快捷方式 intent 契约与旧设置迁移）。
   - 关键文案：`card_linkage_title`=快捷打开、`linkage_switch`=开启时自动打开默认应用、`linkage_default_title`=默认快捷应用、`linkage_manage_title`=管理快捷应用、`kill_before_open_title`=开启调试自动关闭快捷应用；快捷应用行摘要改 `quick_hint`=「点击快捷打开，长按创建快捷方式」（不再显示包名），去掉了「（可多选）」。
   - 交互重构：快捷应用行**去掉「打开/快捷」两个按钮** → 整行点击=快捷打开（关调试+启动），**长按整行=创建桌面快捷方式**。默认快捷应用行图标移到**右侧**（`pref_row_icon_right.xml`）。

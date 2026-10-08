@@ -1,4 +1,4 @@
-package com.elleng.devswitch;
+package com.elleng.adbswitch;
 
 import android.Manifest;
 import android.app.ActionBar;
@@ -40,13 +40,13 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.elleng.devswitch.util.RootUtil;
+import com.elleng.adbswitch.util.RootUtil;
 
 import java.util.ArrayList;
 import java.util.List;
-import com.elleng.devswitch.update.UpdateChecker;
-import com.elleng.devswitch.update.UpdateDialog;
-import com.elleng.devswitch.update.UpdateInfo;
+import com.elleng.adbswitch.update.UpdateChecker;
+import com.elleng.adbswitch.update.UpdateDialog;
+import com.elleng.adbswitch.update.UpdateInfo;
 
 import rikka.shizuku.Shizuku;
 
@@ -61,19 +61,19 @@ public class MainActivity extends PreferenceActivity {
 
     public static final String EXTRA_SETTINGS = "extra_settings";
     /** 静态 shortcut「打开主页」的 action：见到它就跳过联动自动跳转 */
-    private static final String ACTION_OPEN_HOME = "com.elleng.devswitch.action.OPEN_HOME";
+    private static final String ACTION_OPEN_HOME = "com.elleng.adbswitch.action.OPEN_HOME";
     /** 调试用 action：直接拉起联动应用选择器（便于 adb 远程验证弹窗是否正常） */
-    private static final String ACTION_DEBUG_PICKER = "com.elleng.devswitch.action.DEBUG_PICKER";
+    private static final String ACTION_DEBUG_PICKER = "com.elleng.adbswitch.action.DEBUG_PICKER";
     /**
      * 调试用 action：从前台 Activity 直接拨主开关，等价于用户手动拨。
      * 存在的理由：adb 连发广播会被 HyperOS 的 Greezer 拦截（"need cached broadcast"），
      * 走 Activity 则不受限，可稳定远程验证一键开关。
-     * 用法：am start -n .../.MainActivity -a com.elleng.devswitch.action.DEBUG_MASTER --ez master_on false
+     * 用法：am start -n .../.MainActivity -a com.elleng.adbswitch.action.DEBUG_MASTER --ez master_on false
      */
-    private static final String ACTION_DEBUG_MASTER = "com.elleng.devswitch.action.DEBUG_MASTER";
+    private static final String ACTION_DEBUG_MASTER = "com.elleng.adbswitch.action.DEBUG_MASTER";
     private static final String EXTRA_MASTER_ON = "master_on";
     /** 桌面快捷方式「快捷打开」：先打开本 App，关掉调试后启动目标应用 */
-    private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.devswitch.action.DESKTOP_LINKAGE";
+    private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.adbswitch.action.DESKTOP_LINKAGE";
     private static final String TAG = "AdbSwitch";
     private static final String PREFS = "cfg";
     /** 需要监听外部改动的 Settings 键（与 DebugController 写入的是同一组） */

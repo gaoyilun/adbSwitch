@@ -1,4 +1,4 @@
-package com.elleng.devswitch;
+package com.elleng.adbswitch;
 
 import android.content.Context;
 import android.content.Intent;
@@ -10,7 +10,7 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 
-import com.elleng.devswitch.LinkagePrefs;
+import com.elleng.adbswitch.LinkagePrefs;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,13 +41,13 @@ import java.util.List;
 final class ToggleShortcuts {
 
     static final String ID = "toggle_master";
-    static final String ACTION_TOGGLE = "com.elleng.devswitch.action.TOGGLE_MASTER";
+    static final String ACTION_TOGGLE = "com.elleng.adbswitch.action.TOGGLE_MASTER";
     static final String ID_USB = "toggle_usb";
-    static final String ACTION_TOGGLE_USB = "com.elleng.devswitch.action.TOGGLE_USB";
+    static final String ACTION_TOGGLE_USB = "com.elleng.adbswitch.action.TOGGLE_USB";
     static final String ID_WIRELESS = "toggle_wireless";
-    static final String ACTION_TOGGLE_WIRELESS = "com.elleng.devswitch.action.TOGGLE_WIRELESS";
+    static final String ACTION_TOGGLE_WIRELESS = "com.elleng.adbswitch.action.TOGGLE_WIRELESS";
     static final String ID_HOME = "open_home";
-    static final String ACTION_OPEN_HOME = "com.elleng.devswitch.action.OPEN_HOME";
+    static final String ACTION_OPEN_HOME = "com.elleng.adbswitch.action.OPEN_HOME";
     static final String ID_LAUNCH = "launch_linkage_app";
 
     private ToggleShortcuts() {

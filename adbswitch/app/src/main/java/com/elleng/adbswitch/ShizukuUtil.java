@@ -1,9 +1,9 @@
-package com.elleng.devswitch;
+package com.elleng.adbswitch;
 
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 
-import com.elleng.devswitch.util.RootUtil;
+import com.elleng.adbswitch.util.RootUtil;
 
 import java.io.FileInputStream;
 import java.io.IOException;

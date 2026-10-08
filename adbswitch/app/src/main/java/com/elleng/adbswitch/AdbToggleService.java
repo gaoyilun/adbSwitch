@@ -1,4 +1,4 @@
-package com.elleng.devswitch;
+package com.elleng.adbswitch;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -25,14 +25,14 @@ public class AdbToggleService extends Service {
 
     private static final String TAG = "AdbToggleService";
 
-    public static final String CHANNEL_ID = "dev_switch_channel";
+    public static final String CHANNEL_ID = "adb_switch_channel";
     public static final int NOTIFY_ID = 1;
 
-    public static final String ACTION_OPEN = "com.elleng.devswitch.ACTION_OPEN";
-    public static final String ACTION_CLOSE = "com.elleng.devswitch.ACTION_CLOSE";
-    public static final String ACTION_SETTINGS = "com.elleng.devswitch.ACTION_SETTINGS";
+    public static final String ACTION_OPEN = "com.elleng.adbswitch.ACTION_OPEN";
+    public static final String ACTION_CLOSE = "com.elleng.adbswitch.ACTION_CLOSE";
+    public static final String ACTION_SETTINGS = "com.elleng.adbswitch.ACTION_SETTINGS";
     /** Live Update「取消置顶」：撤掉常驻通知（不改 adb_enabled 真值） */
-    public static final String ACTION_DISMISS = "com.elleng.devswitch.ACTION_DISMISS";
+    public static final String ACTION_DISMISS = "com.elleng.adbswitch.ACTION_DISMISS";
     /** 启动时由调用方告知「当前应为关闭态」，避免在服务里做阻塞 su 读状态导致通知延迟 */
     public static final String EXTRA_STATE_ON = "state_on";
 
@@ -241,8 +241,6 @@ public class AdbToggleService extends Service {
 
     private static void ensureChannel(Context ctx, NotificationManager nmm) {
         if (Build.VERSION.SDK_INT >= 26) {
-            // 迁移：旧版本渠道 id 为 usb_switch_channel，改名后删掉，避免系统设置里残留孤儿渠道
-            nmm.deleteNotificationChannel("usb_switch_channel");
             // Live Updates 要求重要性高于 MIN；用 DEFAULT 保证可被系统提升为实时动态，
             // 同时仍属低打扰（无音效、collapse 行为由系统控制）。
             NotificationChannel ch = new NotificationChannel(

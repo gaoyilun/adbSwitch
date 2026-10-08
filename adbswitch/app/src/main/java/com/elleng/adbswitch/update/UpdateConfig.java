@@ -1,4 +1,4 @@
-package com.elleng.devswitch.update;
+package com.elleng.adbswitch.update;
 
 /**
  * 在线更新的全部可配置项。

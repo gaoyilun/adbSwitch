@@ -1,4 +1,4 @@
-package com.elleng.devswitch.update;
+package com.elleng.adbswitch.update;
 
 import android.app.AlertDialog;
 import android.content.Context;
@@ -12,7 +12,7 @@ import android.widget.Button;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import com.elleng.devswitch.R;
+import com.elleng.adbswitch.R;
 
 import java.io.File;
 import java.util.Locale;

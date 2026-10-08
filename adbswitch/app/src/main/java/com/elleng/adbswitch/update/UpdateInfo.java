@@ -1,4 +1,4 @@
-package com.elleng.devswitch.update;
+package com.elleng.adbswitch.update;
 
 /**
  * 一次检查的结果。字段与 LivePhoto 项目的 UpdateInfo 保持一致，便于对照维护。
