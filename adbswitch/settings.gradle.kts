@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "UsbSwitch"
+rootProject.name = "AdbSwitch"
 include(":app")

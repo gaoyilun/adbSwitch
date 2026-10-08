@@ -59,9 +59,9 @@ public class ShortcutToggleActivity extends Activity {
                 return;
             }
             if (next) {
-                UsbToggleService.stop(app);
+                AdbToggleService.stop(app);
             } else {
-                UsbToggleService.syncCloseNotification(app);
+                AdbToggleService.syncCloseNotification(app);
             }
             ToggleShortcuts.publish(app);
             Toast.makeText(app, next ? R.string.master_on : R.string.master_off,

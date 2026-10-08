@@ -21,11 +21,11 @@ import android.util.Log;
  * 存续条件只有一个：USB 与无线**两个都关**时才常驻；任一被打开就自动撤掉。
  * 状态一律从 {@link DebugController} 读，本服务不自己判断要不要管无线调试。
  */
-public class UsbToggleService extends Service {
+public class AdbToggleService extends Service {
 
-    private static final String TAG = "UsbToggleService";
+    private static final String TAG = "AdbToggleService";
 
-    public static final String CHANNEL_ID = "usb_switch_channel";
+    public static final String CHANNEL_ID = "dev_switch_channel";
     public static final int NOTIFY_ID = 1;
 
     public static final String ACTION_OPEN = "com.elleng.devswitch.ACTION_OPEN";
@@ -48,7 +48,7 @@ public class UsbToggleService extends Service {
                         i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false));
                 if (s.anyOn()) {
                     // 任一被打开：adbd 又跑起来了，常驻通知没有意义，撤掉
-                    ToggleShortcuts.publish(UsbToggleService.this);
+                    ToggleShortcuts.publish(AdbToggleService.this);
                     stopSelf();
                 } else {
                     // 实时刷新为「已关闭」状态
@@ -75,7 +75,7 @@ public class UsbToggleService extends Service {
                     // 校准完成后会广播，stateReceiver 才是判断「该不该退场」的唯一地方 ——
                     // 在这里同步 read() 拿到的是作废前的旧缓存（服务存续期间必然是「两个都关」），
                     // 判断永远为假，等于白判。
-                    DebugController.invalidateAndRefresh(UsbToggleService.this);
+                    DebugController.invalidateAndRefresh(AdbToggleService.this);
                 }
             };
 
@@ -199,7 +199,7 @@ public class UsbToggleService extends Service {
      * 故这里捕获该异常并降级：不起服务，直接用 NotificationManager 发同一条常驻通知。
      */
     public static void start(Context ctx) {
-        Intent i = new Intent(ctx, UsbToggleService.class);
+        Intent i = new Intent(ctx, AdbToggleService.class);
         i.putExtra(EXTRA_STATE_ON, false);
         try {
             ctx.startForegroundService(i);
@@ -212,7 +212,7 @@ public class UsbToggleService extends Service {
     /** 移除常驻通知（恢复正常时调用）：前台服务与降级直发两种方式都要撤掉 */
     public static void stop(Context ctx) {
         try {
-            ctx.stopService(new Intent(ctx, UsbToggleService.class));
+            ctx.stopService(new Intent(ctx, AdbToggleService.class));
         } catch (Throwable ignored) {
         }
         NotificationManager nmm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -241,6 +241,8 @@ public class UsbToggleService extends Service {
 
     private static void ensureChannel(Context ctx, NotificationManager nmm) {
         if (Build.VERSION.SDK_INT >= 26) {
+            // 迁移：旧版本渠道 id 为 usb_switch_channel，改名后删掉，避免系统设置里残留孤儿渠道
+            nmm.deleteNotificationChannel("usb_switch_channel");
             // Live Updates 要求重要性高于 MIN；用 DEFAULT 保证可被系统提升为实时动态，
             // 同时仍属低打扰（无音效、collapse 行为由系统控制）。
             NotificationChannel ch = new NotificationChannel(

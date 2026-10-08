@@ -61,12 +61,12 @@
 
         <!-- 前台服务：临时关闭 USB 调试后的常驻通知 -->
         <service
-            android:name=".UsbToggleService"
+            android:name=".AdbToggleService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="USB 调试快捷开关的常驻控制通知" />
+                android:value="调试开关的常驻控制通知" />
         </service>
 
         <!-- 通知栏按钮的广播接收器 -->
@@ -105,7 +105,7 @@
 
         <!-- 通知控制中心（下拉快捷磁贴） -->
         <service
-            android:name=".UsbTileService"
+            android:name=".AdbTileService"
             android:exported="true"
             android:icon="@drawable/ic_tile"
             android:label="@string/tile_label"

@@ -74,7 +74,7 @@ public class MainActivity extends PreferenceActivity {
     private static final String EXTRA_MASTER_ON = "master_on";
     /** 桌面快捷方式「快捷打开」：先打开本 App，关掉调试后启动目标应用 */
     private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.devswitch.action.DESKTOP_LINKAGE";
-    private static final String TAG = "UsbSwitch";
+    private static final String TAG = "AdbSwitch";
     private static final String PREFS = "cfg";
     /** 需要监听外部改动的 Settings 键（与 DebugController 写入的是同一组） */
     private static final String[] OBSERVED_KEYS =
@@ -130,7 +130,7 @@ public class MainActivity extends PreferenceActivity {
 
     /** 关于弹窗外链：署名按钮 → elleng.eu.org；信息图标 → 项目仓库 */
     private static final String ABOUT_CREDIT_URL = "https://elleng.eu.org";
-    private static final String ABOUT_REPO_URL = "https://github.com/gaoyilun/DevSwitch";
+    private static final String ABOUT_REPO_URL = "https://github.com/gaoyilun/AdbSwitch";
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -380,7 +380,7 @@ public class MainActivity extends PreferenceActivity {
             try {
                 info = UpdateChecker.check(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME);
             } catch (Throwable t) {
-                android.util.Log.w("UsbSwitch", "update check failed", t);
+                android.util.Log.w("AdbSwitch", "update check failed", t);
             }
             if (info == null) {
                 return; // 所有通道失败：不写节流，下次启动重试
@@ -417,7 +417,7 @@ public class MainActivity extends PreferenceActivity {
             try {
                 info = UpdateChecker.check(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME);
             } catch (Throwable t) {
-                android.util.Log.w("UsbSwitch", "update check failed", t);
+                android.util.Log.w("AdbSwitch", "update check failed", t);
             }
             if (info != null) {
                 UpdateChecker.markChecked(this);
@@ -453,7 +453,7 @@ public class MainActivity extends PreferenceActivity {
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
         } catch (Throwable t) {
-            android.util.Log.w("UsbSwitch", "open url failed: " + url, t);
+            android.util.Log.w("AdbSwitch", "open url failed: " + url, t);
             Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
         }
     }
@@ -609,9 +609,9 @@ public class MainActivity extends PreferenceActivity {
             // 立即同步：若当前已是关闭态，开->弹通知，关->撤通知
             if (DebugController.read(this).allOff()) {
                 if (on) {
-                    UsbToggleService.start(this);
+                    AdbToggleService.start(this);
                 } else {
-                    UsbToggleService.stop(this);
+                    AdbToggleService.stop(this);
                 }
             }
             return true;
@@ -687,10 +687,10 @@ public class MainActivity extends PreferenceActivity {
             if (!ok) {
                 Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
             } else if (on) {
-                UsbToggleService.stop(this);
+                AdbToggleService.stop(this);
             } else {
                 // 按「临时关闭时弹通知」开关决定：开->常驻通知，关->静默
-                UsbToggleService.syncCloseNotification(this);
+                AdbToggleService.syncCloseNotification(this);
             }
             refresh(s);
             if (done != null) {
@@ -708,7 +708,7 @@ public class MainActivity extends PreferenceActivity {
             if (!ok) {
                 Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
             } else {
-                UsbToggleService.syncCloseNotification(this);
+                AdbToggleService.syncCloseNotification(this);
             }
             launchApp(pkg);
             finish();

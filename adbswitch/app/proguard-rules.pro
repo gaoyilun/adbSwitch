@@ -5,15 +5,15 @@
 # 混淆后类名变化会导致系统找不到组件（Unable to instantiate service/activity）。
 # AGP 通常会为 manifest 组件自动生成 keep 规则，这里显式再声明一份作为保险。
 -keep public class com.elleng.devswitch.MainActivity { *; }
--keep public class com.elleng.devswitch.UsbToggleService { *; }
+-keep public class com.elleng.devswitch.AdbToggleService { *; }
 -keep public class com.elleng.devswitch.NotificationReceiver { *; }
--keep public class com.elleng.devswitch.UsbTileService { *; }
+-keep public class com.elleng.devswitch.AdbTileService { *; }
 
 # ── 调试开关的对外 action 常量 ─────────────────────────
 # 桌面快捷方式 / 通知按钮 / 磁贴均通过 action 字符串跨进程触发（见 shortcuts.xml、
-# UsbToggleService.ACTION_*）。这些是 static final String 编译期常量，正常会被内联；
+# AdbToggleService.ACTION_*）。这些是 static final String 编译期常量，正常会被内联；
 # 显式 -keepclassmembers 确保它们在混淆后仍以字面量保留，避免任一处漏改导致入口失效。
--keepclassmembers class com.elleng.devswitch.UsbToggleService {
+-keepclassmembers class com.elleng.devswitch.AdbToggleService {
     public static final java.lang.String *;
 }
 

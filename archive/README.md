@@ -5,7 +5,7 @@
 > （`sys.usb.config`/`sys.usb.state = mtp,adb`、`init.svc.adbd = running`、`persist.sys.usb.config = adb`、
 > `sys.usb.adb.disabled = 0`）——这些只是 `Settings.Global.adb_enabled = 1` 的副产品。
 > **真实把 USB 调试关掉，派生值会一次性自动变干净**，无需逐条伪造，也不会和任何 hook 方案打架。
-> 因此当前主方案改为 root 授权的 USB 调试快捷开关（见仓库根目录 `usbswitch/` 与 `README.md`）。
+> 因此当前主方案改为 root 授权的调试开关（见仓库根目录 `adbswitch/` 与 `README.md`）。
 
 本目录内容：
 

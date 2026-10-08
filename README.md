@@ -1,10 +1,10 @@
-# 调试开关（DevOpts Hider · UsbSwitch）
+# 调试开关（AdbSwitch）
 
-一个 **root 授权的 USB 调试快捷开关 App**：不 hook、不碰任何 App 内部，只用 `su` 真实改写
+一个 **root 授权的调试开关 App**：不 hook、不碰任何 App 内部，只用 `su` 真实改写
 `Settings.Global.adb_enabled`，把 USB 调试**真实地**开 / 关。关掉后，让银行类 App（如香港汇丰 HSBC HK）
 弹「请关闭开发者选项」的那些派生属性会一次性归零。
 
-> 本仓库当前主方案就是 `usbswitch/` 这一个模块。
+> 本仓库当前主方案就是 `adbswitch/` 这一个模块。
 > 早期尝试过的 Xposed（LSPosed）/ Zygisk native hook / 探针 三件套已归档到 `archive/`，
 > 详见 `archive/README.md`，不再主推，也不在本仓库常规构建范围内。
 
@@ -48,7 +48,7 @@
 
 ## 安装与使用
 
-1. 安装 `dist/DevOptsHider-UsbSwitch-v1.0.0.apk`，首次打开**授予 root（超级用户）权限**。
+1. 安装 `dist/AdbSwitch-v1.0.0.apk`，首次打开**授予 root（超级用户）权限**。
 2. 想要磁贴：下拉通知栏 → 编辑快捷开关 → 把「调试开关」拖进快捷区。
 3. 想临时过检：开启「关闭时显示通知」，用完后点通知上的「恢复打开」即可。
 4. 想从桌面直达联动应用：进入「联动」→「创建桌面快捷方式」。
@@ -70,7 +70,7 @@ cd DevOptsHider
 ./build-all.sh
 ```
 
-产物：`dist/DevOptsHider-UsbSwitch-v1.0.0.apk`
+产物：`dist/AdbSwitch-v1.0.0.apk`
 
 - Gradle 8.13 + AGP 8.7.2 + JDK 21（本机已缓存的发行版）
 - 编译 SDK 36，minSdk 27，零三方依赖（只用 framework 自带控件）

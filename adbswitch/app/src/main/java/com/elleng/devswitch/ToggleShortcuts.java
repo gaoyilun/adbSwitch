@@ -94,7 +94,7 @@ final class ToggleShortcuts {
             }
             sm.setDynamicShortcuts(list);
         } catch (Throwable t) {
-            android.util.Log.w("UsbSwitch", "shortcut publish failed", t);
+            android.util.Log.w("AdbSwitch", "shortcut publish failed", t);
         }
     }
 

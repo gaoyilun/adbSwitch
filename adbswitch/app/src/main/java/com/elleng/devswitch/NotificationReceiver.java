@@ -21,30 +21,30 @@ public class NotificationReceiver extends BroadcastReceiver {
     public void onReceive(final Context ctx, Intent intent) {
         final PendingResult pr = goAsync();
         String action = intent.getAction();
-        if (UsbToggleService.ACTION_OPEN.equals(action)) {
+        if (AdbToggleService.ACTION_OPEN.equals(action)) {
             DebugController.setMaster(ctx, true, (ok, s) -> {
                 // 写入失败必须让用户知道：只改通知会留下「点了没反应」的错觉
                 if (!ok) {
                     Toast.makeText(ctx, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
                 } else {
-                    UsbToggleService.stop(ctx);
+                    AdbToggleService.stop(ctx);
                 }
                 ToggleShortcuts.publish(ctx);
                 pr.finish();
             });
-        } else if (UsbToggleService.ACTION_CLOSE.equals(action)) {
+        } else if (AdbToggleService.ACTION_CLOSE.equals(action)) {
             DebugController.setMaster(ctx, false, (ok, s) -> {
                 if (!ok) {
                     Toast.makeText(ctx, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
                 } else {
-                    UsbToggleService.syncCloseNotification(ctx);
+                    AdbToggleService.syncCloseNotification(ctx);
                 }
                 ToggleShortcuts.publish(ctx);
                 pr.finish();
             });
-        } else if (UsbToggleService.ACTION_DISMISS.equals(action)) {
+        } else if (AdbToggleService.ACTION_DISMISS.equals(action)) {
             // 只取消置顶/常驻，不动开关真值
-            UsbToggleService.stop(ctx);
+            AdbToggleService.stop(ctx);
             pr.finish();
         } else {
             pr.finish();

@@ -13,7 +13,7 @@ import android.service.quicksettings.TileService;
  * 关 = 记住组合并把 USB / 无线都关掉，开 = 还原记忆的组合。
  * 状态一律从 {@link DebugController} 读，不自己判断无线调试。
  */
-public class UsbTileService extends TileService {
+public class AdbTileService extends TileService {
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -58,9 +58,9 @@ public class UsbTileService extends TileService {
         DebugController.setMaster(this, next, (ok, s) -> {
             if (ok) {
                 if (s.anyOn()) {
-                    UsbToggleService.stop(this);
+                    AdbToggleService.stop(this);
                 } else {
-                    UsbToggleService.syncCloseNotification(this);
+                    AdbToggleService.syncCloseNotification(this);
                 }
             }
             updateTile(s);
