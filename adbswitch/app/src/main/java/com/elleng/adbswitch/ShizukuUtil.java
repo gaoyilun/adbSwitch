@@ -88,11 +88,39 @@ public final class ShizukuUtil {
             });
             tOut.start();
             tErr.start();
-            res.code = proc.waitFor();
+            // 与 RootUtil 同一条硬规则：等待必须有上限。
+            // DebugController 的 IO 是单线程执行器，一次挂起 = 之后所有开关操作永久排队失效。
+            // Shizuku 的 IRemoteProcess 只暴露了无参 waitFor()，故把它挪到独立线程再 join 限时；
+            // 超时则 destroy 子进程（让它带着退出码返回），IO 线程继续往下走。
+            final int[] code = {RootUtil.CODE_TIMEOUT};
+            Thread tWait = new Thread(() -> {
+                try {
+                    code[0] = p.waitFor();
+                } catch (Throwable ignored) {
+                }
+            });
+            tWait.start();
+            tWait.join(RootUtil.TIMEOUT_MS);
+            boolean timedOut = tWait.isAlive();
+            if (timedOut) {
+                try {
+                    p.destroy();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    tWait.join(500);
+                } catch (Throwable ignored) {
+                }
+            }
+            res.code = code[0];
             tOut.join(2000);
             tErr.join(2000);
             res.out = outB.toString();
             res.err = errB.toString();
+            if (timedOut) {
+                res.err = (res.err == null || res.err.isEmpty() ? "" : res.err + "\n")
+                        + "shizuku 执行超时(" + RootUtil.TIMEOUT_MS + "ms)";
+            }
         } catch (Throwable t) {
             res.code = -1;
             res.err = String.valueOf(t);

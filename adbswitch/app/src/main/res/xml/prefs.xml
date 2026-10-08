@@ -40,18 +40,23 @@
         android:key="catLinkage"
         android:title="@string/card_linkage_title">
 
+        <!-- persistent=false：这三个开关的值只存 cfg（由 MainActivity 显式回填、由 DebugController /
+             AdbToggleService 读取）。让 framework 再自存一份默认 SharedPreferences 就会出现两份状态，
+             界面与实际行为可能对不上。 -->
         <SwitchPreference
             android:key="swLinkage"
             android:title="@string/linkage_switch"
             android:summary="@string/linkage_sum"
-            android:layout="@layout/pref_row" />
+            android:layout="@layout/pref_row"
+            android:persistent="false" />
 
         <!-- 打开调试前先关闭快捷应用：避免它在调试开启的瞬间读到状态翻转 -->
         <SwitchPreference
             android:key="swKillBeforeOpen"
             android:title="@string/kill_before_open_title"
             android:summary="@string/kill_before_open_sum"
-            android:layout="@layout/pref_row" />
+            android:layout="@layout/pref_row"
+            android:persistent="false" />
 
         <!-- 默认快捷应用行 + 各快捷应用行 + 「管理快捷应用」行：均由 MainActivity
              按当前配置的列表动态填充（见 rebuildLinkageList），不在 XML 里写死。 -->
@@ -66,7 +71,7 @@
             android:title="@string/btn_temp_close"
             android:summary="@string/temp_close_sum"
             android:layout="@layout/pref_row"
-            android:defaultValue="true" />
+            android:persistent="false" />
 
         <Preference
             android:key="liveUpdate"

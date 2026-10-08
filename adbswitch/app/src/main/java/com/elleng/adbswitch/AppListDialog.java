@@ -2,8 +2,10 @@ package com.elleng.adbswitch;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
@@ -24,6 +26,7 @@ import android.widget.Toast;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -62,6 +65,7 @@ public class AppListDialog {
     private ListView listView;
     private TextView ptrHeader;
     private TextView loadingView;
+    private EditText searchBox;
     private FrameLayout ptrContainer;
     private AppAdapter adapter;
     private AlertDialog dialog;
@@ -148,6 +152,7 @@ public class AppListDialog {
         loadingView = root.findViewById(R.id.tvLoading);
         listView = root.findViewById(R.id.lvApps);
         EditText et = root.findViewById(R.id.etSearch);
+        searchBox = et;
 
         // 初始：刷新提示隐藏在顶部之上
         ptrHeader.setTranslationY(-headerHeightPx);
@@ -255,7 +260,9 @@ public class AppListDialog {
                 all.clear();
                 all.addAll(data);
                 loadingView.setVisibility(View.GONE);
-                applyFilter("");
+                // 必须用搜索框里的当前文本重新过滤：写死空串会把用户已输入的关键字冲掉，
+                // 表现为「下拉刷新一下，搜索条件莫名失效」。
+                applyFilter(searchBox != null ? searchBox.getText().toString() : "");
                 if (!success) {
                     Toast.makeText(context, R.string.picker_load_fail, Toast.LENGTH_LONG).show();
                 }
@@ -357,17 +364,47 @@ public class AppListDialog {
 
     // —— 应用列表加载 / 过滤 ——
 
-    /** 扫描已安装应用（必须在后台线程调用）；图标懒加载，避免一次性解码几百个图标 */
+    /**
+     * 扫描已安装应用（必须在后台线程调用）；图标懒加载，避免一次性解码几百个图标。
+     *
+     * 性能要点：可启动性的判定原本是逐个 {@code pm.getLaunchIntentForPackage(...)}，
+     * 那是对每个已安装应用各做一次跨进程 resolveActivity —— 装了几百个应用时就是几百次 IPC，
+     * 打开选择器要白屏等好几秒。改成**一次** queryIntentActivities 把「有桌面图标的应用」
+     * 整批取回再做集合判定，IPC 从 N 次降到 1 次。
+     */
     private ArrayList<AppInfo> loadApps() {
         ArrayList<AppInfo> out = new ArrayList<>();
         String self = context.getPackageName();
+
+        Set<String> launchable = new HashSet<>();
+        try {
+            Intent q = new Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> ris = pm.queryIntentActivities(q, 0);
+            if (ris != null) {
+                for (ResolveInfo ri : ris) {
+                    if (ri.activityInfo != null && ri.activityInfo.packageName != null) {
+                        launchable.add(ri.activityInfo.packageName);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("AppListDialog", "queryIntentActivities failed", t);
+        }
+        // 极端情况下（个别 ROM 返回空列表）退回逐个判定，保证列表不会空掉
+        final boolean batchOk = !launchable.isEmpty();
+
         List<ApplicationInfo> apps = pm.getInstalledApplications(0);
         for (ApplicationInfo ai : apps) {
             if (ai.packageName.equals(self)) {
                 continue;
             }
-            if (pm.getLaunchIntentForPackage(ai.packageName) == null) {
-                continue; // 只列可启动的应用
+            if (batchOk) {
+                if (!launchable.contains(ai.packageName)) {
+                    continue; // 只列可启动的应用
+                }
+            } else if (pm.getLaunchIntentForPackage(ai.packageName) == null) {
+                continue;
             }
             CharSequence lbl = ai.loadLabel(pm);
             String label = (lbl == null) ? ai.packageName : lbl.toString();

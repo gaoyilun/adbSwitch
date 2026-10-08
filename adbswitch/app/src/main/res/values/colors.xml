@@ -13,5 +13,6 @@
 
     <color name="stateOn">#2E7D32</color>     <!-- 已开启：绿色 -->
     <color name="stateOff">#EF6C00</color>    <!-- 已关闭：橙色 -->
+    <color name="stateUnknown">#9E9E9E</color> <!-- 状态未确认：中性灰（不暗示安全也不暗示危险） -->
     <color name="error">#D32F2F</color>
 </resources>

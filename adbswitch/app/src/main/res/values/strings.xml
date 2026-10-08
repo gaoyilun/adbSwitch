@@ -21,6 +21,10 @@
     <string name="master_on">已开启 · adbd 运行中</string>
     <string name="master_off">已关闭 · 可通过检测</string>
     <string name="master_partial">部分开启 · adbd 仍在运行</string>
+    <!-- 真值尚未经授权通道确认时的占位结论：此时绝不能显示「已关闭 · 可通过检测」，
+         那会让用户在 adbd 其实还在跑的时候误以为安全（HyperOS 等 ROM 会向 App 隐藏这两个键，
+         ContentResolver 读到的兜底值不可信）。 -->
+    <string name="master_checking">正在确认真实状态…</string>
 
     <string name="usb_title">USB 调试</string>
     <string name="usb_on">已开启</string>

@@ -45,6 +45,10 @@ public final class DebugController {
     public static final String KEY_USB = "adb_enabled";
     public static final String KEY_WIRELESS = "adb_wifi_enabled";
 
+    /** 合并读取时两个键的输出标记（一次 shell 取回两个值，按标记行定位，不靠行号） */
+    private static final String TAG_USB_OUT = "__ASW_USB__";
+    private static final String TAG_WIRELESS_OUT = "__ASW_WIFI__";
+
     private static final String PREFS = "cfg";
     private static final String SAVED_USB = "saved_usb";
     private static final String SAVED_WIRELESS = "saved_wireless";
@@ -160,19 +164,39 @@ public final class DebugController {
         }
     }
 
+    /** 真值是否已由授权通道确认过（即缓存可信）。UI 据此决定能不能给出安全结论。 */
+    public static boolean isCalibrated() {
+        return cachedAt != 0;
+    }
+
     /**
      * 用与写入相同的通道（su / Shizuku shell）读取真值。
      * 阻塞调用，只允许在后台线程使用（写入流程与后台校准都在 IO 线程）。
+     *
+     * 两个键合并成**一条** shell 命令读取：原来要 fork 两次 su，而每次 fork 在 root 模式下
+     * 是 100~500ms 的真实等待，一次开关要读写三回就是 6 次。带标记行输出，即使 ROM 的 shell
+     * 掺入额外噪声行也能准确定位，不靠行号硬取。
+     *
      * @return 读不到有效值时返回 null（调用方保留旧缓存，不覆盖为真假难辨的状态）
      */
     private static State readViaPrivileged(Context app) {
-        RootUtil.Result ru = runPrivileged(app, "settings get global " + KEY_USB);
-        String u = (ru.out == null ? "" : ru.out.trim());
-        RootUtil.Result rw = runPrivileged(app, "settings get global " + KEY_WIRELESS);
-        String w = (rw.out == null ? "" : rw.out.trim());
+        RootUtil.Result r = runPrivileged(app,
+                "echo " + TAG_USB_OUT + "=$(settings get global " + KEY_USB + ");"
+                        + " echo " + TAG_WIRELESS_OUT + "=$(settings get global " + KEY_WIRELESS + ")");
+        String out = (r.out == null ? "" : r.out);
+        String u = null;
+        String w = null;
+        for (String line : out.split("[\\r\\n]+")) {
+            String s = line.trim();
+            if (s.startsWith(TAG_USB_OUT + "=")) {
+                u = s.substring(TAG_USB_OUT.length() + 1).trim();
+            } else if (s.startsWith(TAG_WIRELESS_OUT + "=")) {
+                w = s.substring(TAG_WIRELESS_OUT.length() + 1).trim();
+            }
+        }
         if (!("0".equals(u) || "1".equals(u)) || !("0".equals(w) || "1".equals(w))) {
             android.util.Log.w(TAG, "privileged read got invalid values: usb=[" + u
-                    + "] wireless=[" + w + "] (usb code=" + ru.code + ", wifi code=" + rw.code + ")");
+                    + "] wireless=[" + w + "] (code=" + r.code + ", raw=[" + out.trim() + "])");
             return null;
         }
         return new State("1".equals(u), "1".equals(w));
@@ -223,10 +247,16 @@ public final class DebugController {
         // am force-stop 走系统正常的停止流程（比 kill 更干净，不会留下半死的进程状态）。
         // 双模式：按当前授权模式选执行通道（Shizuku 走 shell uid 2000，否则走 su）。
         // 多个快捷应用：逐一停止，避免任一在调试开启瞬间读到状态翻转。
+        // 但合并成**一条**命令执行 —— 每个 app 单独 fork 一次 su 会让「开启调试」慢上好几倍。
+        StringBuilder cmd = new StringBuilder();
         for (String pkg : apps) {
-            android.util.Log.i(TAG, "kill before open: force-stop " + pkg);
-            runPrivileged(ctx, "am force-stop " + pkg);
+            if (cmd.length() > 0) {
+                cmd.append("; ");
+            }
+            cmd.append("am force-stop ").append(pkg);
         }
+        android.util.Log.i(TAG, "kill before open: " + cmd);
+        runPrivileged(ctx, cmd.toString());
     }
 
     // —— 写（底层，仅本类内部调用）——
@@ -237,6 +267,20 @@ public final class DebugController {
 
     private static boolean writeWireless(Context ctx, boolean on) {
         return runPrivileged(ctx, "settings put global " + KEY_WIRELESS + " " + (on ? "1" : "0")).ok();
+    }
+
+    /**
+     * 一次 shell 同时写两个键（主开关专用）。
+     *
+     * 分开写要 fork 两次 su，而 root 模式下每次 fork 都是 100~500ms 的真实等待；
+     * 一次开关原本要 fork 六次（读2+写2+回读2），合并后降到三次，响应快一倍以上。
+     * 用 ";" 而非 "&&"：即使第一个键写失败也要把第二个写完，最终真值由回读统一确认。
+     */
+    private static boolean writeBoth(Context ctx, boolean usb, boolean wireless) {
+        return runPrivileged(ctx,
+                "settings put global " + KEY_USB + " " + (usb ? "1" : "0")
+                        + "; settings put global " + KEY_WIRELESS + " " + (wireless ? "1" : "0"))
+                .ok();
     }
 
     /** 按当前授权模式选执行通道：Shizuku 走 shell(uid 2000)，否则走 su。
@@ -276,17 +320,13 @@ public final class DebugController {
             if (on) {
                 killQuickAppsIfNeeded(app, true); // 顺序：先杀联动应用，再开调试
                 State target = loadSaved(app);
-                boolean a = writeUsb(app, target.usb);
-                boolean b = writeWireless(app, target.wireless);
-                ok = a && b;
+                ok = writeBoth(app, target.usb, target.wireless);
             } else {
                 // 只在确实开着时记忆：避免把「两个都关」这种无效组合写进 saved
                 if (cur.anyOn()) {
                     save(app, cur);
                 }
-                boolean a = writeUsb(app, false);
-                boolean b = writeWireless(app, false);
-                ok = a && b;
+                ok = writeBoth(app, false, false);
             }
             // 写完后回读真值刷新缓存，保证广播出的就是最新状态
             refreshCacheFromPrivileged(app);

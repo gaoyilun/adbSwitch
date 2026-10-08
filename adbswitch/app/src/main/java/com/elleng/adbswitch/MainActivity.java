@@ -116,6 +116,10 @@ public class MainActivity extends PreferenceActivity {
     private boolean privilegedAvailable = true;
     private boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
     private boolean rowClicksWired = false;   // 行点击的布局监听是否已注册（避免重复注册）
+    /** 上次重建「快捷打开」列表的内容指纹（配置没变就不重建，见 rebuildLinkageList） */
+    private String lastLinkageSignature = null;
+    /** 主开关行的视图引用（由 wireMasterRow 记录）：换箭头图标时直接在行内找，不必遍历整棵树 */
+    private View masterRowView = null;
     /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
     private com.google.android.material.snackbar.Snackbar authSnackbar = null;
     /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
@@ -523,6 +527,15 @@ public class MainActivity extends PreferenceActivity {
                 return true;
             });
         }
+        // 三个自定义开关键统一以 cfg 为唯一数据源：
+        // framework 的 SwitchPreference 默认会把值存进它自己的默认 SharedPreferences，
+        // 而真正读这些值的是 DebugController / AdbToggleService（读 cfg）——两份状态一旦不同步，
+        // 就会出现「界面显示开、实际按关执行」。这里在进入时按 cfg 显式回填，
+        // 并配合 prefs.xml 的 persistent="false" 关掉 framework 自存，杜绝双写。
+        SharedPreferences cfg = getSharedPreferences(PREFS, MODE_PRIVATE);
+        swLinkagePref.setChecked(cfg.getBoolean(PREF_LINKAGE, false));
+        swNotifyPref.setChecked(cfg.getBoolean(PREF_NOTIFY, true));
+
         // 初次进入即用当前模式渲染一次授权状态（精确结果等后台双检测回来再纠正）
         updateAuthStatusUI();
         // 底部「关于」行：点击弹窗展示版本/构建时间等（构建时间不再直接占用行摘要）
@@ -652,16 +665,7 @@ public class MainActivity extends PreferenceActivity {
             }
             subSwitchesShown = want;
         }
-        updateExpandIcon(want);
-    }
-
-    /** 更新主开关行的展开箭头图标 */
-    private void updateExpandIcon(boolean expanded) {
-        View btn = findViewDeep(R.id.btn_expand);
-        if (btn instanceof android.widget.ImageButton) {
-            ((android.widget.ImageButton) btn).setImageResource(
-                    expanded ? R.drawable.ic_collapse : R.drawable.ic_expand);
-        }
+        updateExpandIcon(masterRowView, want);
     }
 
     /** 点箭头：手动切换展开态 */
@@ -778,6 +782,11 @@ public class MainActivity extends PreferenceActivity {
             return;
         }
         boolean anyOn = s.anyOn();
+        // 真值是否已由授权通道确认。未确认时缓存来自 ContentResolver，
+        // 而部分 ROM（HyperOS）会向第三方 App 隐藏这两个键、读到的全是 0 ——
+        // 此时若照常显示「已关闭 · 可通过检测」，就是给用户一个假的安全结论，
+        // 这与本 App 存在的意义（确认真实状态）直接冲突，故必须显示成「正在确认」。
+        final boolean calibrated = DebugController.isCalibrated();
         // 主开关是自定义 widget（箭头 + Switch），手动同步 Switch 勾选
         if (masterSwitch != null) {
             syncing = true;
@@ -789,7 +798,10 @@ public class MainActivity extends PreferenceActivity {
         // 全开或全关显示明确结论；只有一个开着时提示"部分开启"，避免误以为已安全
         int masterSum;
         int masterColor;
-        if (s.allOff()) {
+        if (!calibrated) {
+            masterSum = R.string.master_checking;
+            masterColor = R.color.stateUnknown;
+        } else if (s.allOff()) {
             masterSum = R.string.master_off;
             masterColor = R.color.stateOff;
         } else if (s.usb && s.wireless) {
@@ -874,6 +886,17 @@ public class MainActivity extends PreferenceActivity {
         if (cat == null) {
             return;
         }
+        List<String> apps = LinkagePrefs.getApps(this);
+        String def = LinkagePrefs.getDefault(this);
+        // 内容指纹：配置与授权状态都没变就不重建。
+        // 重建要移除/新建所有 Preference，并在主线程同步 getApplicationIcon（跨进程 + 解码），
+        // 而 onResume 每次都会走到这里 —— 每次回前台都为一份没变的列表重做一遍纯属浪费。
+        String sig = privilegedAvailable + "|" + def + "|" + android.text.TextUtils.join(",", apps);
+        if (sig.equals(lastLinkageSignature)) {
+            return;
+        }
+        lastLinkageSignature = sig;
+
         // 先移除上一轮动态项（保留静态的 swLinkage / swKillBeforeOpen）
         List<Preference> stale = new ArrayList<>();
         for (int i = 0; i < cat.getPreferenceCount(); i++) {
@@ -888,9 +911,6 @@ public class MainActivity extends PreferenceActivity {
         for (Preference p : stale) {
             cat.removePreference(p);
         }
-
-        List<String> apps = LinkagePrefs.getApps(this);
-        String def = LinkagePrefs.getDefault(this);
 
         // 1) 默认快捷应用行：开启快捷打开后要打开的目标；应用图标放在右侧
         Preference defPref = new Preference(this);
@@ -930,29 +950,6 @@ public class MainActivity extends PreferenceActivity {
         setLinkageEnabled(privilegedAvailable);
         // 列表变化后重新接线（布局完成后 wireRowClicks 也会自动跑，这里兜底）
         scheduleWireRowClicks();
-    }
-
-    private View findViewDeep(int id) {
-        return findDeep(getWindow().getDecorView(), id);
-    }
-
-    private View findDeep(View root, int id) {
-        if (root == null) {
-            return null;
-        }
-        if (root.getId() == id) {
-            return root;
-        }
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup vg = (android.view.ViewGroup) root;
-            for (int i = 0; i < vg.getChildCount(); i++) {
-                View found = findDeep(vg.getChildAt(i), id);
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null;
     }
 
     /** 打开联动应用选择器，并在选中后写回配置、刷新行与桌面快捷方式 */
@@ -1107,12 +1104,16 @@ public class MainActivity extends PreferenceActivity {
      * 行内 Switch 每帧按真值同步（widget 在布局完成后才拿得到，refresh 可能漏掉）。
      */
     private void wireMasterRow(View row) {
+        masterRowView = row;
         // 整行点击切换主开关（箭头按钮单独消费，用于折叠/展开）
         row.setOnClickListener(v -> toggleMaster());
         View arrow = row.findViewById(R.id.btn_expand);
         if (arrow != null) {
             arrow.setOnClickListener(v -> toggleExpanded());
         }
+        // 图标只在主开关行内找：原先的 findViewDeep 会遍历整棵 decor 视图树，
+        // 而 wireRowClicks 每帧（布局/滚动）都会跑一次，等于每帧做两遍全树遍历。
+        updateExpandIcon(row, subSwitchesShown);
         Switch sw = row.findViewById(R.id.sw_master);
         if (sw != null) {
             if (masterSwitch != sw) {
@@ -1132,7 +1133,15 @@ public class MainActivity extends PreferenceActivity {
             sw.setChecked(DebugController.read(this).anyOn());
             syncing = false;
         }
-        updateExpandIcon(subSwitchesShown);
+    }
+
+    /** 更新主开关行的展开箭头图标（在行内查找，不做全树遍历） */
+    private void updateExpandIcon(View row, boolean expanded) {
+        View btn = row == null ? null : row.findViewById(R.id.btn_expand);
+        if (btn instanceof android.widget.ImageButton) {
+            ((android.widget.ImageButton) btn).setImageResource(
+                    expanded ? R.drawable.ic_collapse : R.drawable.ic_expand);
+        }
     }
 
     /** 给整行设点击（动态项每次布局都重挂，直接替换监听即可，无需 wired 守卫） */
