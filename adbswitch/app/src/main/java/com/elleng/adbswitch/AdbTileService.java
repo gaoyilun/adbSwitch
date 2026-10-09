@@ -54,8 +54,9 @@ public class AdbTileService extends TileService {
     @Override
     public void onClick() {
         super.onClick();
-        final boolean next = !DebugController.read(this).anyOn();
-        DebugController.setMaster(this, next, (ok, s) -> {
+        // 先经授权通道读真值、再相对真值翻转（DebugController.toggleMaster 内部处理），
+        // 不依赖屏幕显示的缓存（刚展开面板那瞬间缓存可能还没校准）。
+        DebugController.toggleMaster(this, (ok, s) -> {
             if (ok) {
                 if (s.anyOn()) {
                     AdbToggleService.stop(this);

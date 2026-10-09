@@ -14,6 +14,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
+import android.widget.AbsListView;
 import android.widget.BaseAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -78,6 +79,9 @@ public class AppListDialog {
      */
     private final java.util.concurrent.ExecutorService iconLoader =
             java.util.concurrent.Executors.newSingleThreadExecutor();
+    /** 列表是否静止：快速滑动时不解码图标（避免成百个解码任务堆积、可见行图标迟迟不出来），
+     *  停下（SCROLL_STATE_IDLE）时才补解码当前可见行。 */
+    private boolean listIdle = true;
 
     private float startY = -1;
     private boolean pulling = false;
@@ -177,6 +181,30 @@ public class AppListDialog {
                 if (dialog != null) {
                     dialog.dismiss();
                 }
+            }
+        });
+
+        // 滚动状态监听：滑动中标记 listIdle=false（不触发新解码），停下后补解码当前可见行，
+        // 避免快速滑动时成百上千个图标解码任务排队、可见行图标迟迟浮现。
+        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(AbsListView view, int scrollState) {
+                listIdle = (scrollState == AbsListView.OnScrollListener.SCROLL_STATE_IDLE);
+                if (listIdle) {
+                    int first = view.getFirstVisiblePosition();
+                    int last = view.getLastVisiblePosition();
+                    for (int i = first; i <= last && i < filtered.size(); i++) {
+                        AppInfo info = filtered.get(i);
+                        if (info.icon == null && !info.iconLoading) {
+                            submitDecode(info);
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onScroll(AbsListView view, int firstVisibleItem,
+                                 int visibleItemCount, int totalItemCount) {
             }
         });
 
@@ -434,6 +462,34 @@ public class AppListDialog {
         }
     }
 
+    /** 提交一次图标解码：仅在列表静止时调用（getView / 滚动停顿回调），避免任务堆积 */
+    private void submitDecode(AppInfo info) {
+        info.iconLoading = true;
+        final AppInfo target = info;
+        try {
+            iconLoader.execute(() -> {
+                if (iconLoader.isShutdown()) {
+                    return;
+                }
+                Bitmap bmp = decodeIcon(target.ai, iconSizePx);
+                target.icon = bmp;
+                target.iconLoading = false;
+                main.post(() -> {
+                    if (dialog == null || !dialog.isShowing()) {
+                        return;
+                    }
+                    ImageView cur = listView.findViewWithTag(target.pkg);
+                    if (cur != null) {
+                        cur.setImageBitmap(bmp);
+                    }
+                });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // 弹窗已关闭、线程已停：图标不加载也不影响功能
+            target.iconLoading = false;
+        }
+    }
+
     private void applyFilter(String q) {
         q = q.trim().toLowerCase(Locale.getDefault());
         filtered.clear();
@@ -495,32 +551,10 @@ public class AppListDialog {
                     h.check.setVisibility(View.GONE);
                 }
             }
-            // 后台解码图标，完成后回主线程填充（Bitmap 不可变，跨线程安全）
-            if (info.icon == null && !info.iconLoading) {
-                info.iconLoading = true;
-                final AppInfo target = info;
-                try {
-                    iconLoader.execute(() -> {
-                        if (iconLoader.isShutdown()) {
-                            return;
-                        }
-                        Bitmap bmp = decodeIcon(target.ai, iconSizePx);
-                        target.icon = bmp;
-                        target.iconLoading = false;
-                        main.post(() -> {
-                            if (dialog == null || !dialog.isShowing()) {
-                                return;
-                            }
-                            ImageView cur = listView.findViewWithTag(key);
-                            if (cur != null) {
-                                cur.setImageBitmap(bmp);
-                            }
-                        });
-                    });
-                } catch (java.util.concurrent.RejectedExecutionException ignored) {
-                    // 弹窗已关闭、线程已停：图标不加载也不影响功能
-                    target.iconLoading = false;
-                }
+            // 后台解码图标，完成后回主线程填充（Bitmap 不可变，跨线程安全）。
+            // 仅在列表静止时解码：滑动过程中不提交新任务，避免任务堆积。
+            if (info.icon == null && !info.iconLoading && listIdle) {
+                submitDecode(info);
             }
             return convertView;
         }

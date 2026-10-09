@@ -306,11 +306,33 @@ public final class DebugController {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     /**
-     * 一键开关（主开关）。
+     * 一键开关（主开关），按调用方给定目标状态写入。
      *
      * @param on true=打开（还原记忆的组合）；false=关闭（记忆当前组合并把两个都关掉）
      */
     public static void setMaster(Context ctx, final boolean on, final ResultCallback cb) {
+        applyMasterOn(ctx, on, cb);
+    }
+
+    /**
+     * 一键翻转（磁贴 / 主开关整行点击 / 桌面快捷方式用）。
+     *
+     * 一定要在 IO 线程里**先经授权通道读回真值、再决定翻向**，不能依赖 UI 显示的缓存：
+     * 刚启动时缓存来自会被 ROM 隐藏的 ContentResolver，若按它翻转，可能把实际开着的状态
+     * 又「打开」一遍，或把实际关着的状态「关」一遍，用户感知就是「点了没反应 / 点反了」。
+     * 这里在写之前先拿真值，再取反写入，语义才是「相对真实状态一键翻转」。
+     */
+    public static void toggleMaster(Context ctx, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        IO.execute(() -> {
+            refreshCacheFromPrivileged(app);
+            State cur = read(app);
+            applyMasterOn(app, !cur.anyOn(), cb);
+        });
+    }
+
+    /** 主开关写入核心（setMaster / toggleMaster 共用）：写前先取真值用于记忆组合，写后回读校准 */
+    private static void applyMasterOn(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
         IO.execute(() -> {
             // 写入前先取真值：off 分支要用它保存「记忆组合」，缓存若失真会记错
@@ -351,12 +373,42 @@ public final class DebugController {
         });
     }
 
+    /** 单独翻转 USB 调试：同样先读真值再翻，避免按失真缓存翻转 */
+    public static void toggleUsb(Context ctx, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        IO.execute(() -> {
+            refreshCacheFromPrivileged(app);
+            State cur = read(app);
+            boolean ok = writeUsb(app, !cur.usb);
+            refreshCacheFromPrivileged(app);
+            State after = broadcast(app);
+            if (cb != null) {
+                MAIN.post(() -> cb.onResult(ok, after));
+            }
+        });
+    }
+
     /** 单独改无线调试（不动 saved） */
     public static void setWireless(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
         IO.execute(() -> {
             killQuickAppsIfNeeded(app, on);
             boolean ok = writeWireless(app, on);
+            refreshCacheFromPrivileged(app);
+            State after = broadcast(app);
+            if (cb != null) {
+                MAIN.post(() -> cb.onResult(ok, after));
+            }
+        });
+    }
+
+    /** 单独翻转无线调试：同样先读真值再翻 */
+    public static void toggleWireless(Context ctx, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        IO.execute(() -> {
+            refreshCacheFromPrivileged(app);
+            State cur = read(app);
+            boolean ok = writeWireless(app, !cur.wireless);
             refreshCacheFromPrivileged(app);
             State after = broadcast(app);
             if (cb != null) {

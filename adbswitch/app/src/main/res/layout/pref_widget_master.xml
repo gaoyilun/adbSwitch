@@ -10,9 +10,9 @@
 
     <ImageButton
         android:id="@+id/btn_expand"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:padding="6dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:padding="9dp"
         android:scaleType="fitCenter"
         android:src="@drawable/ic_expand"
         android:tint="@color/textSecondary"

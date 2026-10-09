@@ -23,8 +23,9 @@
     <string name="master_partial">部分开启 · adbd 仍在运行</string>
     <!-- 真值尚未经授权通道确认时的占位结论：此时绝不能显示「已关闭 · 可通过检测」，
          那会让用户在 adbd 其实还在跑的时候误以为安全（HyperOS 等 ROM 会向 App 隐藏这两个键，
-         ContentResolver 读到的兜底值不可信）。 -->
-    <string name="master_checking">正在确认真实状态…</string>
+         ContentResolver 读到的兜底值不可信）。同时整行与滑块都置灰、不可操作，
+         避免用户在状态未知时误触。 -->
+    <string name="master_checking">正在读取当前状态…</string>
 
     <string name="usb_title">USB 调试</string>
     <string name="usb_on">已开启</string>
@@ -64,6 +65,10 @@
     <string name="linkage_skipped">已跳过自动打开，需再次打开请直接点对应快捷应用</string>
     <string name="linkage_need_notif">快捷打开需要通知权限，请先授予</string>
 
+    <!-- 开启「快捷打开」后弹窗告知：如何绕过自动跳转、进入应用设置页（均用现有能力，不新增入口） -->
+    <string name="linkage_hint_title">如何进入设置页</string>
+    <string name="linkage_hint_body">开启后，点本应用图标会自动关闭调试并打开目标应用。如需进入设置页，可任选其一：\n\n· 长按本应用图标，在快捷菜单点「打开主页」即可进入设置（不触发快捷打开）\n· 调试关闭后，下拉通知栏点「应用设置」进入\n· 本次应用未划掉后台时，直接点应用图标也会停在设置页</string>
+
     <string name="create_shortcut_no_app">请先选择快捷应用</string>
     <string name="create_shortcut_done">已请求在桌面创建快捷方式</string>
     <string name="create_shortcut_fail">创建失败，请检查桌面是否被禁用</string>
@@ -79,8 +84,8 @@
     <string name="live_update_title">测试灵动焦点通知</string>
     <string name="live_update_sum">检测权限并发送一条测试通知</string>
     <string name="live_update_grant">系统暂未允许显示灵动焦点通知，是否前往授权？</string>
-    <string name="live_update_test_sent">已发送测试通知，请查看状态栏胶囊 / 锁屏</string>
-    <string name="live_update_test_sent_plain">已发送测试通知，但未获授权，仅作普通通知显示</string>
+    <string name="live_update_test_sent">已发送测试通知，状态栏出现胶囊即生效（测试渠道可在系统通知设置中删除）</string>
+    <string name="live_update_test_sent_plain">已发送测试通知，但未获授权，仅作普通通知显示（测试渠道可在系统通知设置中删除）</string>
     <string name="live_update_test_title">灵动焦点通知测试</string>
     <string name="live_update_test_text">状态栏出现胶囊即表示已生效</string>
     <string name="live_update_unsupported">当前系统不支持（需 Android 16+）</string>

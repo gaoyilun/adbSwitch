@@ -15,6 +15,9 @@
   - 关键文案：`card_linkage_title`=快捷打开、`linkage_switch`=开启时自动打开默认应用、`linkage_default_title`=默认快捷应用、`linkage_manage_title`=管理快捷应用、`kill_before_open_title`=开启调试自动关闭快捷应用；快捷应用行摘要改 `quick_hint`=「点击快捷打开，长按创建快捷方式」（不再显示包名），去掉了「（可多选）」。
   - 交互重构：快捷应用行**去掉「打开/快捷」两个按钮** → 整行点击=快捷打开（关调试+启动），**长按整行=创建桌面快捷方式**。默认快捷应用行图标移到**右侧**（`pref_row_icon_right.xml`）。
   - 开关配色：day/night 主题加 `android:colorControlActivated=@color/colorPrimary`，使开关开启态用应用主题蓝（替代默认青色）。
+- **任何在 DebugController 的 IO 线程上执行的阻塞调用都必须有超时上限**（2026-10-09）：该执行器是**单线程**的，一次 su/Shizuku 挂起就会永久占死通道，之后所有开关静默失效且只能杀进程恢复。RootUtil/ShizukuUtil 已统一到 `RootUtil.TIMEOUT_MS`（10s），新增通道照抄。
+- **真值未经授权通道确认前，UI 不得给出「已关闭 · 可通过检测」这类安全结论**（2026-10-09）：用 `DebugController.isCalibrated()` 判断，未确认显示 `master_checking` + 灰点。道理同「读写必须同源」——HyperOS 向 App 隐藏这两个键，ContentResolver 兜底值不可信。
+- **开关类设置项以 cfg 为唯一数据源**：`prefs.xml` 里自定义开关一律 `android:persistent="false"`，进入时按 cfg `setChecked` 回填，杜绝 framework 默认 SharedPreferences 与 cfg 两份状态。
 - **授权模式 UI**：「调试开关」分类末尾放 `authMode`（点击选 root/Shizuku）+ `authStatus`（右侧「重试」按钮，未授权时显）；每次进页面且当前模式未授权时双检测，底部悬浮通知（绿勾=Shizuku模式已授权 / 黄警=root模式未授权）。
 
 ## 构建环境（2026-10-05 实测可用，勿信「无 SDK」旧记）

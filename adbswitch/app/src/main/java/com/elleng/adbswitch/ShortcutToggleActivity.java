@@ -31,40 +31,40 @@ public class ShortcutToggleActivity extends Activity {
         if (ToggleShortcuts.ACTION_TOGGLE_USB.equals(action)
                 || ToggleShortcuts.ACTION_TOGGLE_WIRELESS.equals(action)) {
             final boolean wireless = ToggleShortcuts.ACTION_TOGGLE_WIRELESS.equals(action);
-            final DebugController.State cur = DebugController.read(app);
-            final boolean next = wireless ? !cur.wireless : !cur.usb;
+            // 先读真值再翻转（toggleUsb/toggleWireless 内部处理），不依赖屏幕缓存
             DebugController.ResultCallback cb = (ok, s) -> {
                 if (!ok) {
                     Toast.makeText(app, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
                     return;
                 }
                 ToggleShortcuts.publish(app);
+                boolean on = wireless ? s.wireless : s.usb;
                 Toast.makeText(app,
                         app.getString(wireless ? R.string.wireless_title : R.string.usb_title)
-                                + " " + app.getString(next ? R.string.usb_on : R.string.usb_off),
+                                + " " + app.getString(on ? R.string.usb_on : R.string.usb_off),
                         Toast.LENGTH_SHORT).show();
             };
             if (wireless) {
-                DebugController.setWireless(app, next, cb);
+                DebugController.toggleWireless(app, cb);
             } else {
-                DebugController.setUsb(app, next, cb);
+                DebugController.toggleUsb(app, cb);
             }
             return;
         }
 
-        final boolean next = !DebugController.read(app).anyOn();
-        DebugController.setMaster(app, next, (ok, s) -> {
+        // 一键开关：先读真值再翻转（toggleMaster 内部处理）
+        DebugController.toggleMaster(app, (ok, s) -> {
             if (!ok) {
                 Toast.makeText(app, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
                 return;
             }
-            if (next) {
+            if (s.anyOn()) {
                 AdbToggleService.stop(app);
             } else {
                 AdbToggleService.syncCloseNotification(app);
             }
             ToggleShortcuts.publish(app);
-            Toast.makeText(app, next ? R.string.master_on : R.string.master_off,
+            Toast.makeText(app, s.anyOn() ? R.string.master_on : R.string.master_off,
                     Toast.LENGTH_SHORT).show();
         });
     }

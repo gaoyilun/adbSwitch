@@ -64,7 +64,9 @@
     </PreferenceCategory>
 
     <!-- 通知设置：与「调试开关」「快捷打开」并列 -->
-    <PreferenceCategory android:title="@string/card_notify_title">
+    <PreferenceCategory
+        android:key="catNotify"
+        android:title="@string/card_notify_title">
 
         <SwitchPreference
             android:key="swNotify"

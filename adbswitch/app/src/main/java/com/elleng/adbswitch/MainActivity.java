@@ -120,6 +120,10 @@ public class MainActivity extends PreferenceActivity {
     private String lastLinkageSignature = null;
     /** 主开关行的视图引用（由 wireMasterRow 记录）：换箭头图标时直接在行内找，不必遍历整棵树 */
     private View masterRowView = null;
+    /** 主开关真值是否已由授权通道确认：未确认时整行不可点、滑块置灰，避免状态未知时误操作 */
+    private boolean masterCalibrated = false;
+    /** 本启动周期是否已成功确认过授权：确认过则不再重复检测（切模式 / 执行失败会重置重测） */
+    private boolean authCheckedThisSession = false;
     /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
     private com.google.android.material.snackbar.Snackbar authSnackbar = null;
     /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
@@ -472,6 +476,12 @@ public class MainActivity extends PreferenceActivity {
         if (!prefsLoaded) {
             return;
         }
+        // 本启动周期已成功确认过授权：不重复 fork su / 探测 Shizuku。
+        // 授权一旦拿到不会凭空消失，重复检测纯属浪费（且 root 检测每次都是一次 su 等待）。
+        // 例外：切模式（chooseAuthMode）与执行操作失败时会重置本标志，重新检测。
+        if (authCheckedThisSession) {
+            return;
+        }
         new Thread(() -> {
             final boolean rootOk = RootUtil.hasRoot();
             final boolean shizukuOk = ShizukuUtil.available();
@@ -480,6 +490,10 @@ public class MainActivity extends PreferenceActivity {
             final boolean ok = (mode == AuthManager.Mode.SHIZUKU) ? shizukuOk : rootOk;
             new Handler(Looper.getMainLooper()).post(() -> {
                 privilegedAvailable = ok;
+                // 确认成功才记到本启动周期：失败不缓存，下次仍会重测（授权可能稍后补上）
+                if (ok) {
+                    authCheckedThisSession = true;
+                }
                 applyRootState();
                 updateAuthStatusUI();
                 // Shizuku 模式且服务在跑却没授权：主动弹 Shizuku 授权对话框
@@ -556,6 +570,7 @@ public class MainActivity extends PreferenceActivity {
             final boolean want = (Boolean) v;
             DebugController.setUsb(this, want, (ok, s) -> {
                 if (!ok) {
+                    authCheckedThisSession = false;
                     Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
                 }
                 refresh(s);
@@ -570,6 +585,7 @@ public class MainActivity extends PreferenceActivity {
             final boolean want = (Boolean) v;
             DebugController.setWireless(this, want, (ok, s) -> {
                 if (!ok) {
+                    authCheckedThisSession = false;
                     Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
                 }
                 refresh(s);
@@ -603,6 +619,8 @@ public class MainActivity extends PreferenceActivity {
                     openDefaultPicker();
                 } else {
                     Toast.makeText(this, R.string.linkage_on, Toast.LENGTH_SHORT).show();
+                    // 开启后提醒用户：以后怎么绕过自动跳转、进设置页（均基于现有能力，不新增入口）
+                    showLinkageHintDialog();
                 }
             } else {
                 Toast.makeText(this, R.string.linkage_off, Toast.LENGTH_SHORT).show();
@@ -638,10 +656,27 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
-    /** 切换主开关（行点击与 widget 内 Switch 共用） */
+    /**
+     * 切换主开关（整行点击用）：先经授权通道读回真值、再相对真值翻转。
+     * 不用 UI 显示的缓存来决定翻向——刚启动时缓存可能失真（ROM 隐藏键），
+     * 按它翻会出现「点了没反应 / 点反了」。DebugController.toggleMaster 内部已处理。
+     */
     private void toggleMaster() {
-        boolean next = !DebugController.read(this).anyOn();
-        applyMasterState(next);
+        DebugController.toggleMaster(this, (ok, s) -> {
+            if (ok) {
+                if (s.anyOn()) {
+                    AdbToggleService.stop(MainActivity.this);
+                } else {
+                    AdbToggleService.syncCloseNotification(MainActivity.this);
+                }
+            } else {
+                // 写入失败：授权大概率已失效（su 超时 / Shizuku 被撤销）。立即刷新授权状态，
+                // 让主开关与联动项灰掉并显示「未授权」，而不是停在旧的「已授权」假象。
+                privilegedAvailable = false;
+                applyRootState();
+            }
+            refresh(s);
+        });
     }
 
     /**
@@ -688,13 +723,21 @@ public class MainActivity extends PreferenceActivity {
 
     private void applyMasterState(boolean on, final Runnable done) {
         DebugController.setMaster(this, on, (ok, s) -> {
-            if (!ok) {
-                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
-            } else if (on) {
-                AdbToggleService.stop(this);
+            if (ok) {
+                if (on) {
+                    AdbToggleService.stop(this);
+                } else {
+                    // 按「临时关闭时弹通知」开关决定：开->常驻通知，关->静默
+                    AdbToggleService.syncCloseNotification(this);
+                }
             } else {
-                // 按「临时关闭时弹通知」开关决定：开->常驻通知，关->静默
-                AdbToggleService.syncCloseNotification(this);
+                // 写入失败：授权大概率已失效，立即刷新授权状态（主开关/联动灰掉 + 显示未授权），
+                // 而不是停在旧的「已授权」假象，让用户误以为操作成功了。
+                // 同时清掉本周期的授权缓存，下次操作前重新检测（权限可能稍后恢复）。
+                privilegedAvailable = false;
+                authCheckedThisSession = false;
+                applyRootState();
+                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
             }
             refresh(s);
             if (done != null) {
@@ -710,6 +753,7 @@ public class MainActivity extends PreferenceActivity {
         // 常驻通知在 su 写完之后才拉起，天然比旧版的固定 250ms 延时更稳。
         DebugController.setMaster(this, false, (ok, s) -> {
             if (!ok) {
+                authCheckedThisSession = false;
                 Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
             } else {
                 AdbToggleService.syncCloseNotification(this);
@@ -790,9 +834,12 @@ public class MainActivity extends PreferenceActivity {
         // 主开关是自定义 widget（箭头 + Switch），手动同步 Switch 勾选
         if (masterSwitch != null) {
             syncing = true;
+            // 未校准时滑块置灰、不可拖动：状态未知，滑块位置本身也可能是错的
+            masterSwitch.setEnabled(calibrated);
             masterSwitch.setChecked(anyOn);
             syncing = false;
         }
+        masterCalibrated = calibrated;
         // 展开态跟随主开关：开→展开，关→折叠
         applyMasterExpanded(anyOn);
         // 全开或全关显示明确结论；只有一个开着时提示"部分开启"，避免误以为已安全
@@ -831,6 +878,13 @@ public class MainActivity extends PreferenceActivity {
 
         // 长按快捷方式的状态灯与界面同步
         ToggleShortcuts.publish(this);
+
+        // 校准状态变化（首次校准完成 / 缓存失效清空）时，重挂整行点击：
+        // 未校准 → 整行不可点（避免状态未知时误操作）；校准完成 → 恢复点击。
+        if (masterRowView != null) {
+            masterRowView.setOnClickListener(
+                    masterCalibrated ? (v) -> toggleMaster() : null);
+        }
     }
 
     /** 根据当前授权模式是否可用刷新控件与提示：未授权时禁用并提示，授权后及时恢复 */
@@ -1105,8 +1159,9 @@ public class MainActivity extends PreferenceActivity {
      */
     private void wireMasterRow(View row) {
         masterRowView = row;
-        // 整行点击切换主开关（箭头按钮单独消费，用于折叠/展开）
-        row.setOnClickListener(v -> toggleMaster());
+        // 整行点击切换主开关（箭头按钮单独消费，用于折叠/展开）。
+        // 未校准时整行不可点：状态未知，点了也没意义，校准完成后 refresh 会重新挂上点击。
+        row.setOnClickListener(masterCalibrated ? (v) -> toggleMaster() : null);
         View arrow = row.findViewById(R.id.btn_expand);
         if (arrow != null) {
             arrow.setOnClickListener(v -> toggleExpanded());
@@ -1173,6 +1228,7 @@ public class MainActivity extends PreferenceActivity {
     }
 
     /** 打开「实时动态」引导（防抖，避免行点击与 preference click 同时触发） */
+    /** 打开「实时动态」引导（防抖，避免行点击与 preference click 同时触发） */
     private void openLiveUpdate() {
         long now = android.os.SystemClock.uptimeMillis();
         if (now - lastLiveOpenAt < 500) {
@@ -1180,6 +1236,15 @@ public class MainActivity extends PreferenceActivity {
         }
         lastLiveOpenAt = now;
         checkAndPromptLiveUpdate();
+    }
+
+    /** 开启「快捷打开」后弹窗：告知如何绕过自动跳转、进入设置页（均为现有入口，不新增功能） */
+    private void showLinkageHintDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.linkage_hint_title)
+                .setMessage(R.string.linkage_hint_body)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
     private CharSequence getApplicationLabel(String pkg) {
@@ -1277,11 +1342,16 @@ public class MainActivity extends PreferenceActivity {
         if (liveUpdatePref == null) {
             return;
         }
+        // 低于 Android 16：本功能完全用不了，直接从通知分类里移除这一行，
+        // 比「变灰 + 提示不支持」更干净（框架 Preference 没有 setVisible，只能摘掉）。
         if (Build.VERSION.SDK_INT < 36) {
-            liveUpdatePref.setEnabled(false);
-            liveUpdatePref.setSummary(R.string.live_update_unsupported);
+            PreferenceCategory cat = (PreferenceCategory) findPreference("catNotify");
+            if (cat != null) {
+                cat.removePreference(liveUpdatePref);
+            }
         } else {
             liveUpdatePref.setEnabled(true);
+            liveUpdatePref.setSummary(R.string.live_update_sum);
         }
     }
 
@@ -1301,6 +1371,8 @@ public class MainActivity extends PreferenceActivity {
                             AuthManager.Mode mode = (which == 1)
                                     ? AuthManager.Mode.SHIZUKU : AuthManager.Mode.ROOT;
                             AuthManager.setMode(MainActivity.this, mode);
+                            // 切换模式后授权状态必变，重置缓存、强制重新检测
+                            authCheckedThisSession = false;
                             d.dismiss();
                             updateAuthStatusUI();
                             // 切到新模式下立刻双检测：root 模式 fork su；
@@ -1651,20 +1723,25 @@ public class MainActivity extends PreferenceActivity {
         Toast.makeText(this, R.string.live_update_test_sent_plain, Toast.LENGTH_LONG).show();
     }
 
+    /** 测试通知用的固定渠道：只创建一次（幂等），不每次点测试都新建一条 */
+    private static final String LIVE_UPDATE_CHANNEL_ID = "live_update_test";
+    private static boolean liveChannelEnsured = false;
+
     /** 发一条测试用的实时动态通知（与常驻通知同一套提升方式） */
     private void sendLiveUpdateTest() {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm == null) {
             return;
         }
-        if (Build.VERSION.SDK_INT >= 26) {
+        if (Build.VERSION.SDK_INT >= 26 && !liveChannelEnsured) {
             NotificationChannel ch = new NotificationChannel(
-                    "live_update_test", "实时动态测试", NotificationManager.IMPORTANCE_DEFAULT);
+                    LIVE_UPDATE_CHANNEL_ID, "实时动态测试", NotificationManager.IMPORTANCE_DEFAULT);
             ch.setShowBadge(false);
             nm.createNotificationChannel(ch);
+            liveChannelEnsured = true;
         }
         Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
-                ? new Notification.Builder(this, "live_update_test")
+                ? new Notification.Builder(this, LIVE_UPDATE_CHANNEL_ID)
                 : new Notification.Builder(this);
         b.setSmallIcon(R.drawable.ic_tile)
                 .setOngoing(true)
