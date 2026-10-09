@@ -19,6 +19,7 @@
 - **真值未经授权通道确认前，UI 不得给出「已关闭 · 可通过检测」这类安全结论**（2026-10-09）：用 `DebugController.isCalibrated()` 判断，未确认显示 `master_checking` + 灰点。道理同「读写必须同源」——HyperOS 向 App 隐藏这两个键，ContentResolver 兜底值不可信。
 - **开关类设置项以 cfg 为唯一数据源**：`prefs.xml` 里自定义开关一律 `android:persistent="false"`，进入时按 cfg `setChecked` 回填，杜绝 framework 默认 SharedPreferences 与 cfg 两份状态。
 - **授权模式 UI**：「调试开关」分类末尾放 `authMode`（点击选 root/Shizuku）+ `authStatus`（右侧「重试」按钮，未授权时显）；每次进页面且当前模式未授权时双检测，底部悬浮通知（绿勾=Shizuku模式已授权 / 黄警=root模式未授权）。
+- **自动更新弱提示策略（2026-10-09 定调）**：本 App 非高频更新、强弹窗不友好，故启动自动检查**节流 3 天** + **主线程空闲才跑（MessageQueue.IdleHandler）** + **磁贴/shortcut 开关不触发**；发现新版本**只一次性 Toast（按版本号去重）+ 主页「关于」行显示「可更新」**，**绝不自动弹 UpdateDialog**。远端最新版本持久化在 `update_prefs`（`UpdateChecker.saveLatestKnown/hasKnownUpdate/markToasted`），关于行 `refreshAboutSummary()` 默认显示 `VERSION_NAME`、有已知可更新时改 `about_summary_update`=`%1$s 可更新%2$s`（离线也可见）。强制更新 `mandatory` 字段预留但非极端不使用；in-app 下载器(`UpdateDialog`/`UpdateDownloader`)仅给「关于」弹窗的手动「检查更新」。`UpdateConfig.ENABLED` 仍 false、URL 留空（休眠待激活）。
 
 ## 构建环境（2026-10-05 实测可用，勿信「无 SDK」旧记）
 - **本机有 Android SDK**：`/Users/ellen/Library/Android/sdk`（platforms 34~37、build-tools 34/35/36），`local.properties` 已指向它；`ANDROID_HOME` 虽空但无关。

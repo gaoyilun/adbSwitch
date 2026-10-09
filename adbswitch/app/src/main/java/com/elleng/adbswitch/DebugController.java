@@ -173,7 +173,7 @@ public final class DebugController {
      * 用与写入相同的通道（su / Shizuku shell）读取真值。
      * 阻塞调用，只允许在后台线程使用（写入流程与后台校准都在 IO 线程）。
      *
-     * 两个键合并成**一条** shell 命令读取：原来要 fork 两次 su，而每次 fork 在 root 模式下
+     * 两个键合并成**一条** shell 命令读取：若分开 fork su 读取，root 模式下每次 fork
      * 是 100~500ms 的真实等待，一次开关要读写三回就是 6 次。带标记行输出，即使 ROM 的 shell
      * 掺入额外噪声行也能准确定位，不靠行号硬取。
      *

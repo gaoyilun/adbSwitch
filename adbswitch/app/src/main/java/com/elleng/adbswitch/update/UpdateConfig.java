@@ -45,6 +45,6 @@ public final class UpdateConfig {
     // 预期形如：https://www.pgyer.com/<AppName>
     public static final String PGYER_PAGE_URL = "";
 
-    /** 检查节流：24 小时内最多检查一次，避免频繁网络请求。 */
-    public static final long CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000;
+    /** 检查节流：3 天内最多检查一次，本 App 非高频更新，弱提示即可，避免无谓网络请求。 */
+    public static final long CHECK_INTERVAL_MS = 3L * 24 * 60 * 60 * 1000;
 }

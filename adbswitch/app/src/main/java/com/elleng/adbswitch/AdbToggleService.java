@@ -263,9 +263,8 @@ public class AdbToggleService extends Service {
                 ? new Notification.Builder(ctx, CHANNEL_ID)
                 : new Notification.Builder(ctx);
         // 必须设 ongoing：Android 16 的 Live Update 提升（setRequestPromotedOngoing）以
-        // 「ongoing 通知」为前提——前台服务用的是 specialUse 类型不被提升，所以原先这里
-        // 没设 ongoing 时，实际常驻通知只显示为普通通知（不进状态栏胶囊/锁屏），
-        // 只有「实时动态测试」那条设了 ongoing 才提升成功。现已与测试通知对齐。
+        // 「ongoing 通知」为前提——前台服务用的是 specialUse 类型不被提升，所以不设 ongoing 时
+        // 实际常驻通知只显示为普通通知（不进状态栏胶囊/锁屏）。
         b.setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(ctx.getString(on ? R.string.notify_title_on : R.string.notify_title_off))
                 .setContentText(describeSubStates(ctx, s))

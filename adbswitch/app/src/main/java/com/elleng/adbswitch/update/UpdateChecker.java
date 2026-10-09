@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
  * 移植自 LivePhoto 项目的同名实现（Kotlin），按本工程实际情况做了三处调整：
  *  1. Kotlin 协程 → 同步方法（调用方放在后台线程，本工程的 su/Shizuku 通道也是同一套后台线程模型）；
  *  2. 补上「已忽略版本」的持久化（见下方 ignoredVersion）——原实现点「忽略」只关弹窗，
- *     24 小时节流一过同一个版本会再弹一次，用户无法真正忽略；
+ *     3 天节流一过同一个版本会再弹一次，用户无法真正忽略；
  *  3. 把版本比较抽成纯函数 isNewer()，便于单测与复用。
  *
  * 通道编排（与原实现一致，这里写清理由）：
@@ -27,7 +27,7 @@ import java.nio.charset.StandardCharsets;
  *   GitHub 无更新但不失败 → **继续**查蒲公英。否则「蒲公英有新包、GitHub 没有」时永远弹不出窗；
  *   GitHub 失败 → 降级到蒲公英；
  *   两个通道都成功且无更新 → 返回 hasUpdate=false，调用方写入节流时间戳；
- *   两个通道都失败 → 抛异常，调用方**不写**节流，下次启动重试（弱网用户不该被节流 24 小时）。
+ *   两个通道都失败 → 抛异常，调用方**不写**节流，下次启动重试（弱网用户不该被节流 3 天）。
  *
  * 当前 {@link UpdateConfig#ENABLED} 为 false，本类一次网络请求都不会发。
  */
@@ -37,6 +37,11 @@ public final class UpdateChecker {
     private static final String PREFS = "update_prefs";
     private static final String KEY_LAST_CHECK = "last_check";
     private static final String KEY_IGNORED = "ignored_version_code";
+    // 已知远端最新版本（供「关于」行离线显示「可更新」）
+    private static final String KEY_LATEST_CODE = "latest_version_code";
+    private static final String KEY_LATEST_NAME = "latest_version_name";
+    // 自动检查「一次性 toast」去重：记下已提示过的版本号，避免每次启动都弹
+    private static final String KEY_TOASTED_CODE = "toasted_version_code";
 
     private static final int CONNECT_TIMEOUT = 5000;
     private static final int READ_TIMEOUT = 8000;
@@ -70,7 +75,7 @@ public final class UpdateChecker {
         return System.currentTimeMillis() - last >= UpdateConfig.CHECK_INTERVAL_MS;
     }
 
-    /** 只在「成功拿到结果」时调用；网络失败不写，否则弱网用户 24 小时内收不到更新。 */
+    /** 只在「成功拿到结果」时调用；网络失败不写，否则弱网用户 3 天内收不到更新。 */
     public static void markChecked(Context ctx) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply();
@@ -85,6 +90,51 @@ public final class UpdateChecker {
     public static int ignoredVersion(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getInt(KEY_IGNORED, 0);
+    }
+
+    // —— 已知远端版本（关于行「可更新」提示，离线也可见）——
+    // 即使当前未激活（ENABLED=false），这些键也可能残留上次配置后写入的值，
+    // 故「关于」行读取后应再按 ignoredVersion 过滤，避免显示已忽略的版本。
+
+    /** 自动/手动检查发现新版本后记录远端版本号，使关于行离线也能显示「可更新」。 */
+    public static void saveLatestKnown(Context ctx, int versionCode, String versionName) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putInt(KEY_LATEST_CODE, versionCode)
+                .putString(KEY_LATEST_NAME, versionName == null ? "" : versionName)
+                .apply();
+    }
+
+    /** 已知远端最新 versionCode（0 表示从未检查到更新）。 */
+    public static int getLatestVersionCode(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_LATEST_CODE, 0);
+    }
+
+    public static String getLatestVersionName(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_LATEST_NAME, "");
+    }
+
+    /** 是否存在「已知且未忽略」的新版本（供关于行显示「可更新」）。 */
+    public static boolean hasKnownUpdate(Context ctx, int currentCode) {
+        int latest = getLatestVersionCode(ctx);
+        if (latest <= currentCode) {
+            return false;
+        }
+        return latest != ignoredVersion(ctx);
+    }
+
+    // —— 自动检查的一次性 toast 去重 ——
+
+    /** 记录已弹过 toast 的版本号，避免每个启动周期都重复提示。 */
+    public static void markToasted(Context ctx, int versionCode) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putInt(KEY_TOASTED_CODE, versionCode).apply();
+    }
+
+    public static int toastedVersion(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_TOASTED_CODE, 0);
     }
 
     // —— 检查入口（阻塞，必须在后台线程调用）——

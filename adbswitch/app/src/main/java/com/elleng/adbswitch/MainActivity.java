@@ -27,6 +27,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.MessageQueue;
 import android.preference.Preference;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
@@ -373,16 +374,34 @@ public class MainActivity extends PreferenceActivity {
     // —— 在线更新 ——
 
     /**
-     * 启动后自动检测更新（24h 节流）。
+     * 启动后自动检测更新（3 天节流，最低优先级）。
+     *
+     * 触发时机：主线程空闲时（{@link MessageQueue#IdleHandler}）才真正发起，不阻塞启动与主要功能；
+     * 磁贴 / 桌面快捷方式开关走独立路径、不打开本 Activity，因此天然不会触发本检查。
+     *
+     * 弱提示策略（对开关类 App 不友好的是强弹窗，这里改成）：
+     *   发现新版本 → 仅一次性 Toast（按版本号去重，不重复打扰）+ 把远端版本记下来，
+     *   主页「关于」行随即显示「可更新」；绝不强弹 UpdateDialog。
+     * 真正的新版下载入口只在「关于」弹窗的手动「检查更新」里。
      *
      * 当前 {@link UpdateConfig#ENABLED} 为 false，本方法第一行就返回，一次网络请求都不会发。
-     * 启用后的行为与 LivePhoto 一致：成功拿到结果才写节流时间戳，网络失败不写，
-     * 避免弱网用户被节流 24 小时。
+     * 启用后的行为：成功拿到结果才写节流时间戳，网络失败不写，避免弱网用户被节流 3 天。
      */
     private void checkUpdateOnStart() {
         if (!UpdateChecker.isActive() || !UpdateChecker.shouldCheck(this)) {
             return;
         }
+        // 主线程空闲后再跑：不抢启动与主要功能，符合「优先级最低」的设定
+        Looper.getMainLooper().getQueue().addIdleHandler(new MessageQueue.IdleHandler() {
+            @Override
+            public boolean queueIdle() {
+                runAutoCheck();
+                return false; // 一次性，不常驻
+            }
+        });
+    }
+
+    private void runAutoCheck() {
         new Thread(() -> {
             UpdateInfo info = null;
             try {
@@ -394,23 +413,40 @@ public class MainActivity extends PreferenceActivity {
                 return; // 所有通道失败：不写节流，下次启动重试
             }
             UpdateChecker.markChecked(this);
-            if (!info.hasUpdate || info.versionCode <= UpdateChecker.ignoredVersion(this)) {
-                return;
+            if (info.hasUpdate && info.versionCode > UpdateChecker.ignoredVersion(this)) {
+                // 记下远端版本，关于行离线也能显示「可更新」
+                UpdateChecker.saveLatestKnown(this, info.versionCode, info.versionName);
+                // 仅对「未提示过的新版本」弹一次 Toast，不弹窗、不打扰
+                if (info.versionCode != UpdateChecker.toastedVersion(this)) {
+                    final String name = info.versionName;
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            getString(R.string.update_toast_new, name), Toast.LENGTH_LONG).show());
+                    UpdateChecker.markToasted(this, info.versionCode);
+                }
             }
-            final UpdateInfo found = info;
-            runOnUiThread(() -> UpdateDialog.show(this, found, new UpdateDialog.Listener() {
-                @Override
-                public void onOpenUrl(String url) {
-                    openExternalUrl(url);
-                }
-
-                @Override
-                public void onIgnored(UpdateInfo ignored) {
-                    // 记住该版本，之后不再弹（仅靠 24h 节流的话同版本一过节流就会再来一次）
-                    UpdateChecker.ignoreVersion(MainActivity.this, ignored.versionCode);
-                }
-            }));
+            // 无论是否有更新，都刷新关于行（可能刚记下了可更新版本）
+            runOnUiThread(MainActivity.this::refreshAboutSummary);
         }, "update-check").start();
+    }
+
+    /**
+     * 刷新主页「关于」行的摘要：默认显示当前版本号（如 1.0.0）；
+     * 存在已知且未忽略的新版本时改为「1.0.0 可更新1.0.1」，离线也可见。
+     */
+    private void refreshAboutSummary() {
+        if (buildInfoPref == null) {
+            return;
+        }
+        String cur = BuildConfig.VERSION_NAME;
+        if (UpdateChecker.hasKnownUpdate(this, BuildConfig.VERSION_CODE)) {
+            String latest = UpdateChecker.getLatestVersionName(this);
+            if (latest == null || latest.trim().isEmpty()) {
+                latest = String.valueOf(UpdateChecker.getLatestVersionCode(this));
+            }
+            buildInfoPref.setSummary(getString(R.string.about_summary_update, cur, latest));
+        } else {
+            buildInfoPref.setSummary(cur);
+        }
     }
 
     /** 「关于」弹窗里的手动检查入口（功能未激活时按钮仍可见，点按提示尚未配置）。 */
@@ -429,6 +465,10 @@ public class MainActivity extends PreferenceActivity {
             }
             if (info != null) {
                 UpdateChecker.markChecked(this);
+                if (info.hasUpdate && info.versionCode > UpdateChecker.ignoredVersion(this)) {
+                    // 记下远端版本，关于行同步显示「可更新」
+                    UpdateChecker.saveLatestKnown(this, info.versionCode, info.versionName);
+                }
             }
             final UpdateInfo result = info;
             runOnUiThread(() -> {
@@ -447,6 +487,8 @@ public class MainActivity extends PreferenceActivity {
                         @Override
                         public void onIgnored(UpdateInfo ignored) {
                             UpdateChecker.ignoreVersion(MainActivity.this, ignored.versionCode);
+                            // 已忽略的版本不再在关于行显示「可更新」
+                            refreshAboutSummary();
                         }
                     });
                 }
@@ -533,6 +575,8 @@ public class MainActivity extends PreferenceActivity {
         swKillPref = (SwitchPreference) findPreference("swKillBeforeOpen");
         liveUpdatePref = findPreference("liveUpdate");
         buildInfoPref = findPreference("buildInfo");
+        // 关于行默认显示当前版本号（有已知可更新版本时改成「版本 可更新最新版」）
+        refreshAboutSummary();
         // 双模式授权：模式选择 + 授权状态已合并为同一项。点击整行 = 打开模式选择对话框
         authPref = findPreference("auth");
         if (authPref != null) {
@@ -1292,6 +1336,8 @@ public class MainActivity extends PreferenceActivity {
         refresh(DebugController.read(this));
         rebuildLinkageList();
         updateLiveUpdateState();
+        // 关于行可能已在后台自动检查后更新（可更新提示），回到前台即时同步
+        refreshAboutSummary();
         // 防御性重挂行点击：framework 可能在 resume/重绑时重置行状态，导致我们的 OnClickListener 失效；
         // 且滚动后新出现的行也需要重新挂，故每次 resume 都重新挂一遍。
         if (prefsLoaded) {

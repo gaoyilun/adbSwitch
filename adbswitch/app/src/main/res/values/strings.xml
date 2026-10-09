@@ -94,7 +94,10 @@
 
     <!-- 关于 -->
     <string name="about_title">关于</string>
-    <string name="about_summary">版本、构建时间与授权状态</string>
+    <!-- 关于行默认摘要（运行时会被 refreshAboutSummary 覆盖为当前版本号）。 -->
+    <string name="about_summary">版本信息</string>
+    <!-- 关于行发现可更新时的摘要：如「1.0.0 可更新1.0.1」。 -->
+    <string name="about_summary_update">%1$s 可更新%2$s</string>
     <!-- 关于弹窗构建时间行的标签（弹窗改用结构化布局 dialog_about.xml，直接给 TextView 设文本，
          不再使用带 %1$s/%1$d 占位符的字符串，避免占位符未被 String.format 填充而原样显示） -->
     <string name="about_build_time_label">构建时间：</string>
@@ -120,6 +123,8 @@
     <string name="update_check_failed">检查更新失败，请稍后再试</string>
     <string name="update_not_configured">更新检查尚未配置（待激活）</string>
     <string name="update_already_latest">已是最新版本</string>
+    <!-- 启动自动检查发现新版本时的弱提示（一次性 Toast，按版本号去重，不弹窗）。 -->
+    <string name="update_toast_new">发现新版本 %1$s</string>
 
     <string name="picker_title">选择快捷应用</string>
     <string name="picker_title_multi">管理快捷应用</string>

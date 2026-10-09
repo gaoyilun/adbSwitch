@@ -241,9 +241,8 @@ public class AppListDialog {
         // 弹窗关闭时释放线程与 dialog 引用，避免 Activity 被 dialog 长期持有
         dialog.setOnDismissListener(d -> release());
 
-        // 先把弹窗显示出来，再去后台扫描应用。
-        // 之前 loadApps() 在主线程同步跑（几百个 loadIcon），而 dialog.show() 写在它后面，
-        // 导致点击后界面长时间无反应（Android 17 上尤其明显）。
+        // 先显示弹窗，再后台扫描应用：扫描几百个图标耗时较长，若等扫完才 show，
+        // 点击后界面会长时间无响应。
         loadingView.setVisibility(View.VISIBLE);
         dialog.show();
 
