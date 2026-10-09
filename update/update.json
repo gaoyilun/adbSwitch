@@ -1,0 +1,9 @@
+{
+  "versionCode": 2,
+  "versionName": "1.0.1",
+  "notes": "新增内置更新检查：蒲公英 + GitHub 双通道，发现新版本可在「关于→检查更新」查看。",
+  "mandatory": false,
+  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.0.1/com.elleng.adbswitch-1.0.1-universal-release.apk",
+  "fallbackUrl": "https://github.com/gaoyilun/adbSwitch/releases",
+  "sha256": "5e15a80f9473c1ebac17b4e1b90b98e798d24a6e86cd4a51ff817770cd2d1f17"
+}
