@@ -23,7 +23,9 @@
 ## 构建环境（2026-10-05 实测可用，勿信「无 SDK」旧记）
 - **本机有 Android SDK**：`/Users/ellen/Library/Android/sdk`（platforms 34~37、build-tools 34/35/36），`local.properties` 已指向它；`ANDROID_HOME` 虽空但无关。
 - Gradle 8.13 已缓存在 `~/.gradle/wrapper/dists/gradle-8.13-bin/`。AGP 8.7.2、JDK 21 均可用。
-- 离线构建：`gradle-8.13/bin/gradle --offline assembleRelease`（产物 `app/build/outputs/apk/release/app-release.apk`，固定 keystore `../../keystore/devhider.jks`）。
+- **离线构建命令**：本 shell 里 `gradle` 不在 PATH、项目也无 `gradlew`，必须用完整路径 + JAVA_HOME：
+  `export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.0.12.jdk/Contents/Home && /Users/ellen/.gradle/wrapper/dists/gradle-8.13-bin/*/gradle-8.13/bin/gradle --offline assembleRelease`（hash 段随缓存变，用通配定位；产物 `app/build/outputs/apk/release/app-release.apk`，固定 keystore `../../keystore/devhider.jks`）。
+- **框架 `android.preference.Preference` 没有 `setVisible(boolean)`**（那是 androidx 的方法）。要隐藏框架偏好只能从父 `PreferenceCategory`/`PreferenceGroup` `removePreference`；给分类加 `android:key` 便于 `findPreference` 拿到父节点。
 - **Shizuku 依赖**：api/provider/aidl 13.1.5 + `androidx.annotation:1.3.0` 全部已缓存，可离线。
 - **ProGuard 坑**：Shizuku 的 api aar 自带 `proguard.txt` 为空，必须在本工程 `app/proguard-rules.pro` 显式 `-keep class rikka.shizuku.**` 与 `-keep class moe.shizuku.**`，否则仅靠引用保留、重构后易误删导致切 Shizuku 模式 NoClassDefFound。
 

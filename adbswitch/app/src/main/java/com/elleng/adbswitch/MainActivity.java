@@ -413,10 +413,10 @@ public class MainActivity extends PreferenceActivity {
         }, "update-check").start();
     }
 
-    /** 「关于」弹窗里的手动检查入口（总开关关闭时按钮不出现）。 */
+    /** 「关于」弹窗里的手动检查入口（功能未激活时按钮仍可见，点按提示尚未配置）。 */
     private void manualCheckUpdate() {
         if (!UpdateChecker.isActive()) {
-            Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.update_not_configured, Toast.LENGTH_SHORT).show();
             return;
         }
         Toast.makeText(this, R.string.update_checking, Toast.LENGTH_SHORT).show();
@@ -801,8 +801,8 @@ public class MainActivity extends PreferenceActivity {
                 .create();
         dlg.setOnShowListener(d -> {
             Button neutral = dlg.getButton(AlertDialog.BUTTON_NEUTRAL);
-            // 功能未上线时隐藏该入口：出现一个必然失败的按钮比不出现更糟
-            neutral.setVisibility(UpdateChecker.isActive() ? View.VISIBLE : View.GONE);
+            // 「检查更新」常驻可见（待激活）：功能未配置时仍可点，提示尚未配置；
+            // 比「未上线就藏起来」更符合预期——关于页一眼能看到有此功能，配置好后即生效。
             neutral.setOnClickListener(v -> manualCheckUpdate());
         });
         dlg.show();
