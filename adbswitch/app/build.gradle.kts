@@ -57,6 +57,19 @@ android {
         checkReleaseBuilds = false
         abortOnError = false
     }
+
+    // 统一产物命名：包名-版本名-架构-构建类型（如 com.elleng.adbswitch-1.0.0-universal-release.apk）。
+    // 架构段固定为 universal（本工程单包）；末段构建类型（release/debug）由 variant.name 决定，不写死。
+    applicationVariants.all {
+        val pkg = applicationId
+        val ver = versionName
+        val type = name
+        outputs.all {
+            if (this is com.android.build.gradle.internal.api.ApkVariantOutputImpl) {
+                outputFileName = "${pkg}-${ver}-universal-${type}.apk"
+            }
+        }
+    }
 }
 
 // 主开关的真实写入走双后端：root（su）或 Shizuku（shell uid 2000）。
