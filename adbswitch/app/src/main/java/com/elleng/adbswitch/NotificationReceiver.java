@@ -33,10 +33,11 @@ public class NotificationReceiver extends BroadcastReceiver {
         MAIN.postDelayed(forceFinish, FINISH_TIMEOUT_MS);
         String action = intent.getAction();
         if (AdbToggleService.ACTION_OPEN.equals(action)) {
-            DebugController.setMaster(ctx, true, (ok, s) -> {
+            DebugController.setMaster(ctx, true, (ok, s, reason) -> {
                 // 写入失败必须让用户知道：只改通知会留下「点了没反应」的错觉
                 if (!ok) {
-                    Toast.makeText(ctx, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(ctx, DebugController.failureMessage(ctx, reason),
+                            Toast.LENGTH_SHORT).show();
                 } else {
                     AdbToggleService.stop(ctx);
                 }
@@ -45,9 +46,10 @@ public class NotificationReceiver extends BroadcastReceiver {
                 finishQuietly(pr);
             });
         } else if (AdbToggleService.ACTION_CLOSE.equals(action)) {
-            DebugController.setMaster(ctx, false, (ok, s) -> {
+            DebugController.setMaster(ctx, false, (ok, s, reason) -> {
                 if (!ok) {
-                    Toast.makeText(ctx, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(ctx, DebugController.failureMessage(ctx, reason),
+                            Toast.LENGTH_SHORT).show();
                 } else {
                     AdbToggleService.syncCloseNotification(ctx);
                 }

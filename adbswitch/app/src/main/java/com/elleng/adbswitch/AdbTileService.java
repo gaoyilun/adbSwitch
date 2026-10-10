@@ -45,7 +45,7 @@ public class AdbTileService extends TileService {
         super.onClick();
         // 先经授权通道读真值、再相对真值翻转（DebugController.toggleMaster 内部处理），
         // 不依赖屏幕显示的缓存（刚展开面板那瞬间缓存可能还没校准）。
-        DebugController.toggleMaster(this, (ok, s) -> {
+        DebugController.toggleMaster(this, (ok, s, reason) -> {
             if (ok) {
                 if (s.anyOn()) {
                     AdbToggleService.stop(this);
@@ -53,9 +53,11 @@ public class AdbTileService extends TileService {
                     AdbToggleService.syncCloseNotification(this);
                 }
             } else {
-                // 读不到真值 / 写失败：明确提示，别让磁贴「点了没反应」；
-                // 用户可重试，或到主界面按提示重试/切换授权模式。
-                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                // 读不到真值 / 写失败：明确提示，别让磁贴「点了没反应」。
+                // 文案按原因细分（Shizuku 没启动 / 没授权 / root 没授权 / 超时…），
+                // 用户才知道下一步该做什么，而不是只看到一句笼统的「执行失败」。
+                Toast.makeText(this, DebugController.failureMessage(this, reason),
+                        Toast.LENGTH_SHORT).show();
             }
             updateTile(s);
         });

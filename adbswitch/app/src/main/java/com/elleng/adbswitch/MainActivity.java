@@ -124,6 +124,16 @@ public class MainActivity extends AppCompatActivity {
     private com.google.android.material.snackbar.Snackbar authSnackbar = null;
     /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
     private long lastShizukuRequestAt = 0;
+    /**
+     * 上次跑授权探测的时间戳。
+     *
+     * 为什么要节流：root 探测是一次真实的 su fork，未授权时最坏要等满 10s 超时。
+     * 旧实现「只有成功才缓存」，失败就每次进页面重跑一遍——在一个没 root 的设备上，
+     * 来回切页面等于反复 fork su 干等。失败也记时间戳，30s 内不重跑；
+     * 用户主动动作（切模式 / 点重试 / 授权结果回调）走 force 绕开节流。
+     */
+    private long lastAuthProbeAt = 0;
+    private static final long AUTH_PROBE_MIN_INTERVAL_MS = 30_000;
     /** 进程级：本次进程内是否已自动跳转过联动应用（static 保证 Activity 重建后仍记得） */
     private static boolean sLinkageLaunched = false;
     /** 上一次跳转是否为「启动自动跳转」：决定回到设置页时提示什么（手动跳转不该说「启动时已自动跳转」） */
@@ -207,17 +217,43 @@ public class MainActivity extends AppCompatActivity {
     /** Shizuku 监听器持有引用，onDestroy 成对移除：Shizuku 的监听表是静态的，不移除会一直持有旧 Activity */
     private Shizuku.OnBinderReceivedListener shizukuBinderListener;
     private Shizuku.OnRequestPermissionResultListener shizukuPermListener;
+    private Shizuku.OnBinderDeadListener shizukuDeadListener;
 
     /**
      * 注册 Shizuku 桥接监听：
      *  - OnBinderReceivedListener（sticky）：Shizuku 服务就绪后立刻重新检测授权，
      *    若当前是 Shizuku 模式且尚未授权，则主动弹授权请求；
+     *  - OnBinderDeadListener：服务没了立刻让授权状态失效（见下）；
      *  - OnRequestPermissionResultListener：用户点完 Shizuku 授权弹窗后回写状态并重测。
-     * 这些监听与「未授权时每次进页面双检测」互补：即使页面没重建（例如 Shizuku 在后台启动），
+     * 这些监听与「未授权时每次进页面检测」互补：即使页面没重建（例如 Shizuku 在后台启动/被杀），
      * 也能即时感知并刷新授权状态。
+     *
+     * OnBinderDeadListener 是官方建议成对使用的两个 binder 生命周期监听之一
+     * （Shizuku-API README：`addBinderReceivedListener()` 与 `addBinderDeadListener()`）。
+     * 缺它的话，无线调试断开 / Shizuku 被杀 / 一次性授权到期之后，
+     * 界面会一直停在「已授权」的假象上，用户点开关只会一次次失败、却找不到原因。
      */
     private void initShizuku() {
         try {
+            shizukuDeadListener = new Shizuku.OnBinderDeadListener() {
+                @Override
+                public void onBinderDead() {
+                    android.util.Log.i(TAG, "Shizuku binder dead");
+                    runOnUiThread(() -> {
+                        if (isDestroyed() || isFinishing()) {
+                            return;
+                        }
+                        // 服务没了：本周期的「已确认」结论必须作废，否则下次进页面不再重测
+                        authCheckedThisSession = false;
+                        if (AuthManager.getMode(MainActivity.this) == AuthManager.Mode.SHIZUKU) {
+                            privilegedAvailable = false;
+                            applyRootState();
+                            updateAuthStatusUI();
+                        }
+                    });
+                }
+            };
+            Shizuku.addBinderDeadListener(shizukuDeadListener);
             shizukuBinderListener = new Shizuku.OnBinderReceivedListener() {
                 @Override
                 public void onBinderReceived() {
@@ -234,7 +270,8 @@ public class MainActivity extends AppCompatActivity {
                 public void onRequestPermissionResult(int requestCode, int grantResult) {
                     if (requestCode == AuthManager.SHIZUKU_PERM_REQUEST) {
                         android.util.Log.i(TAG, "Shizuku permission result=" + grantResult);
-                        performAuthCheck();
+                        // force：用户刚刚在弹窗里做了选择，必须立刻重测，不能被节流挡住
+                        performAuthCheck(true);
                     }
                 }
             };
@@ -492,26 +529,46 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 双模式授权检测（替换原 probeRoot）：
-     * 后台同时探测 root 与 Shizuku 两个后端是否可用（root 要 fork su，较慢；Shizuku 是 binder 调用，很快），
-     * 回主线程后据「当前选中的模式」决定 privilegedAvailable（控件是否可写），
-     * 刷新授权状态行与重试按钮，并在当前模式未授权时弹出底部悬浮通知。
+     * 双模式授权检测（替换原 probeRoot）。
+     *
+     * 与旧实现的三点差异：
+     *  1. **只探测当前模式对应的后端**。Shizuku 模式下不再 fork su —— 用户根本没打算用 root
+     *     时，那次 su 可能弹出 Magisk 授权弹窗、最坏还要等满 10s 超时；
+     *     Shizuku 侧是纯 binder 调用（微秒级），两种模式都可以顺带探。
+     *  2. **失败也节流**（见 {@link #lastAuthProbeAt}）：旧实现只有成功才缓存，
+     *     失败就每次进页面重跑一遍 su。
+     *  3. 探测结论区分「没有 su」与「有 su 未授权」（RootUtil.probe），文案据此分流。
+     *
+     * @param force true=忽略「本周期已确认」与节流，立即重测（切模式 / 点重试 / 授权结果回调）
      */
     private void performAuthCheck() {
+        performAuthCheck(false);
+    }
+
+    private void performAuthCheck(boolean force) {
         if (!prefsLoaded) {
             return;
         }
-        // 本启动周期已成功确认过授权：不重复 fork su / 探测 Shizuku。
-        // 授权一旦拿到不会凭空消失，重复检测纯属浪费（且 root 检测每次都是一次 su 等待）。
-        // 例外：切模式（chooseAuthMode）与执行操作失败时会重置本标志，重新检测。
-        if (authCheckedThisSession) {
+        // 本启动周期已成功确认过授权：不重复 fork su。
+        // 授权一旦拿到不会凭空消失，重复检测纯属浪费（root 检测每次都是一次 su 等待）。
+        // 例外：切模式（chooseAuthMode）、执行失败、binder 死亡时会重置本标志，重新检测；
+        // 用户主动动作（force）一律重测。
+        if (authCheckedThisSession && !force) {
             return;
         }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (!force && now - lastAuthProbeAt < AUTH_PROBE_MIN_INTERVAL_MS) {
+            return; // 节流：失败也不反复 fork su 干等
+        }
+        lastAuthProbeAt = now;
         new Thread(() -> {
-            final boolean rootOk = RootUtil.hasRoot();
-            final boolean shizukuOk = ShizukuUtil.available();
-            final boolean shizukuRunning = ShizukuUtil.running();
             final AuthManager.Mode mode = AuthManager.getMode(MainActivity.this);
+            // Shizuku 模式不 fork su（代价高且会惊动 Magisk），root 模式才探
+            final RootUtil.RootStatus rootStatus = mode == AuthManager.Mode.ROOT
+                    ? RootUtil.probe() : RootUtil.RootStatus.DENIED;
+            final boolean rootOk = rootStatus == RootUtil.RootStatus.GRANTED;
+            final boolean shizukuRunning = ShizukuUtil.running();
+            final boolean shizukuOk = shizukuRunning && ShizukuUtil.permissionGranted();
             final boolean ok = (mode == AuthManager.Mode.SHIZUKU) ? shizukuOk : rootOk;
             new Handler(Looper.getMainLooper()).post(() -> {
                 if (isDestroyed() || isFinishing()) {
@@ -529,7 +586,7 @@ public class MainActivity extends AppCompatActivity {
                     maybeRequestShizukuPermission(false);
                 }
                 if (!ok) {
-                    showAuthNotice(mode, shizukuRunning);
+                    showAuthNotice(mode, shizukuRunning, rootStatus);
                 }
             });
         }, "auth-probe").start();
@@ -829,10 +886,12 @@ public class MainActivity extends AppCompatActivity {
                 return false; // 未确认：吞掉拨动，开关弹回
             }
             final boolean want = (Boolean) v;
-            writer.write(want, (ok, s) -> {
+            writer.write(want, (ok, s, reason) -> {
                 if (!ok) {
                     authCheckedThisSession = false;
-                    Toast.makeText(MainActivity.this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this,
+                            DebugController.failureMessage(MainActivity.this, reason),
+                            Toast.LENGTH_SHORT).show();
                 } else if (s == null || field.get(s) != want) {
                     // 命令退出码 0 却没写进去（个别 ROM 会屏蔽该键）：界面只会无声弹回，必须明确告知
                     Toast.makeText(MainActivity.this, notEffectiveRes, Toast.LENGTH_SHORT).show();
@@ -852,7 +911,7 @@ public class MainActivity extends AppCompatActivity {
      * 按它翻会出现「点了没反应 / 点反了」。DebugController.toggleMaster 内部已处理。
      */
     private void toggleMaster() {
-        DebugController.toggleMaster(this, (ok, s) -> {
+        DebugController.toggleMaster(this, (ok, s, reason) -> {
             if (ok) {
                 if (s.anyOn()) {
                     AdbToggleService.stop(MainActivity.this);
@@ -866,7 +925,8 @@ public class MainActivity extends AppCompatActivity {
                 privilegedAvailable = false;
                 authCheckedThisSession = false;
                 applyRootState();
-                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, DebugController.failureMessage(this, reason),
+                        Toast.LENGTH_SHORT).show();
             }
             refresh(s);
         });
@@ -916,7 +976,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyMasterState(boolean on, final Runnable done) {
-        DebugController.setMaster(this, on, (ok, s) -> {
+        DebugController.setMaster(this, on, (ok, s, reason) -> {
             if (ok) {
                 if (s.anyOn() != on) {
                     // 退出码 0 但真值没跟上（ROM 拦截该键）：明确提示写入未生效，别让用户以为成功
@@ -935,7 +995,8 @@ public class MainActivity extends AppCompatActivity {
                 privilegedAvailable = false;
                 authCheckedThisSession = false;
                 applyRootState();
-                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, DebugController.failureMessage(this, reason),
+                        Toast.LENGTH_SHORT).show();
             }
             refresh(s);
             if (done != null) {
@@ -956,13 +1017,14 @@ public class MainActivity extends AppCompatActivity {
         }
         // 联动走统一入口：一键关闭会记住当前组合并把 USB / 无线都关掉。
         // 常驻通知在 su 写完之后才拉起，天然比旧版的固定 250ms 延时更稳。
-        DebugController.setMaster(this, false, (ok, s) -> {
+        DebugController.setMaster(this, false, (ok, s, reason) -> {
             if (!ok) {
                 // 与 toggleMaster / applyMasterState 同规则：写入失败大概率授权失效，立即置灰并重测
                 privilegedAvailable = false;
                 authCheckedThisSession = false;
                 applyRootState();
-                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, DebugController.failureMessage(this, reason),
+                        Toast.LENGTH_SHORT).show();
             } else {
                 AdbToggleService.syncCloseNotification(this);
             }
@@ -1540,7 +1602,8 @@ public class MainActivity extends AppCompatActivity {
                             // 切到新模式下立刻双检测：root 模式 fork su；
                             // Shizuku 模式先主动请求授权（force，用户是刚明确切过来的）
                             maybeRequestShizukuPermission(true);
-                            performAuthCheck();
+                            // force：用户刚切了模式，旧探测结论作废，必须立刻按新通道重测
+                            performAuthCheck(true);
                         })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
@@ -1603,6 +1666,29 @@ public class MainActivity extends AppCompatActivity {
         if (ShizukuUtil.permissionGranted()) {
             return;
         }
+        // 官方权限三分支里的第三支（Shizuku-API README 示例用 shouldShowRequestPermissionRationale
+        // 区分「还能请求」与「用户选过拒绝且不再询问」）。
+        //
+        // ⚠️ 这个标志的语义两侧并不一致：官方 README 示例把它注成
+        // "Users choose 'Deny and don't ask again'"，而 Android 原生同名 API 的语义是
+        // 「应该向用户解释、但仍可再次请求」。服务端到底按哪种填无法从客户端确认，
+        // 因此这里**不据此阻断请求** —— 阻断的风险是：若实际是原生语义，
+        // 用户只是拒绝过一次，就会被永久挡在授权弹窗之外，点「重试」毫无反应。
+        // 折中做法：请求照发（永久拒绝时它自然不会弹窗），另外给用户一条自救指引，
+        // 且只在用户主动动作（force）时提示，避免每次进页面都弹 Toast 扰民。
+        boolean deniedBefore = false;
+        try {
+            deniedBefore = Shizuku.shouldShowRequestPermissionRationale();
+        } catch (Throwable t) {
+            // 老版本 Shizuku 没有这个查询：按「可再次请求」处理，退回原逻辑
+            android.util.Log.w(TAG, "shouldShowRequestPermissionRationale unavailable", t);
+        }
+        if (deniedBefore) {
+            android.util.Log.i(TAG, "Shizuku permission rationale set, showing manual guide");
+            if (force) {
+                Toast.makeText(this, R.string.toast_shizuku_denied_forever, Toast.LENGTH_LONG).show();
+            }
+        }
         long now = android.os.SystemClock.uptimeMillis();
         if (!force && now - lastShizukuRequestAt < 5000) {
             return;
@@ -1630,7 +1716,9 @@ public class MainActivity extends AppCompatActivity {
                 return; // 结果由 OnRequestPermissionResultListener 收后再重测
             }
         }
-        performAuthCheck();
+        // force=true：重试是明确的用户动作，不能被「本周期已确认」或 30s 节流挡住
+        // （旧实现走无参版本，一旦 authCheckedThisSession 还是 true 就会静默 return，点了没反应）
+        performAuthCheck(true);
     }
 
     /**
@@ -1639,12 +1727,17 @@ public class MainActivity extends AppCompatActivity {
      * 文案严格绑定当前授权模式 —— 底部提示与「授权模式」那一行是同一件事的两种呈现，
      * 不能出现「选了 root 模式却提示 Shizuku 已授权」这种错位引导（旧实现的 bug：
      * 它按双检测结果挑「哪个后端可用」来提示，跟用户选的模式无关）。
-     * Shizuku 模式下再细分「服务没启动」与「已启动但没授权」，否则只说"未授权"用户无从下手。
+     * Shizuku 模式下再细分「服务没启动」与「已启动但没授权」，否则只说"未授权"用户无从下手；
+     * root 模式下细分「根本没有 su」与「有 su 但未授权」——前者换模式才有意义，
+     * 后者才该去 Magisk 点允许。
      */
-    private void showAuthNotice(AuthManager.Mode mode, boolean shizukuRunning) {
+    private void showAuthNotice(AuthManager.Mode mode, boolean shizukuRunning,
+                                RootUtil.RootStatus rootStatus) {
         final int textRes;
         if (mode == AuthManager.Mode.SHIZUKU) {
             textRes = shizukuRunning ? R.string.auth_toast_shizuku_no : R.string.auth_need_start;
+        } else if (rootStatus == RootUtil.RootStatus.NO_SU) {
+            textRes = R.string.toast_no_su;
         } else {
             textRes = R.string.auth_toast_root_no;
         }
@@ -1842,6 +1935,10 @@ public class MainActivity extends AppCompatActivity {
             if (shizukuBinderListener != null) {
                 Shizuku.removeBinderReceivedListener(shizukuBinderListener);
                 shizukuBinderListener = null;
+            }
+            if (shizukuDeadListener != null) {
+                Shizuku.removeBinderDeadListener(shizukuDeadListener);
+                shizukuDeadListener = null;
             }
             if (shizukuPermListener != null) {
                 Shizuku.removeRequestPermissionResultListener(shizukuPermListener);

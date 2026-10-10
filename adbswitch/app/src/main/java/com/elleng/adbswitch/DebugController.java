@@ -339,22 +339,66 @@ public final class DebugController {
 
     // —— 写（底层，仅本类内部调用）——
 
+    /**
+     * 最近一次经授权通道执行的失败原因（RootUtil.REASON_*，成功时为 REASON_NONE）。
+     *
+     * 只在单线程 IO 执行器里写、在紧随其后的回调里读，因此不需要额外同步：
+     * 写路径是「runPrivileged → 解析 → 回调」一条直线，中间不会再跑别的通道调用。
+     * 用途是把「没装 su / root 未授权 / Shizuku 没启动 / Shizuku 没授权 / 超时 / 命令失败」
+     * 区分开传给 UI，而不是让所有失败都显示同一句「执行失败」。
+     */
+    private static volatile int lastFailReason = RootUtil.REASON_NONE;
+
+    /** 最近一次执行失败的原因（供 UI 在 ok=false 时选文案） */
+    public static int lastFailReason() {
+        return lastFailReason;
+    }
+
+    /**
+     * 按失败原因给出可执行的引导文案（主界面 / 磁贴 / 桌面快捷方式共用一份）。
+     * 兜底仍用原来的「执行失败，请检查授权模式」。
+     */
+    public static String failureMessage(Context ctx, int reason) {
+        switch (reason) {
+            case RootUtil.REASON_NO_SU:
+                return ctx.getString(R.string.toast_no_su);
+            case RootUtil.REASON_DENIED:
+                return ctx.getString(R.string.toast_root_denied);
+            case RootUtil.REASON_NO_BINDER:
+                return ctx.getString(R.string.toast_shizuku_not_running);
+            case RootUtil.REASON_NO_PERMISSION:
+                return ctx.getString(R.string.toast_shizuku_no_perm);
+            case RootUtil.REASON_TIMEOUT:
+                return ctx.getString(R.string.toast_auth_timeout);
+            default:
+                return ctx.getString(R.string.toast_root_fail);
+        }
+    }
+
     /** 按当前授权模式选执行通道：Shizuku 走 shell(uid 2000)，否则走 su。 */
     private static RootUtil.Result runPrivileged(Context ctx, String cmd) {
         boolean shizuku = AuthManager.getMode(ctx) == AuthManager.Mode.SHIZUKU;
         RootUtil.Result r = shizuku ? ShizukuUtil.run(cmd) : RootUtil.su(cmd);
+        lastFailReason = r.ok() ? RootUtil.REASON_NONE : r.reason;
         // Log.d：release 默认不可见；排查授权/写入问题时 adb setprop log.tag.DebugController DEBUG 可开
         android.util.Log.d(TAG, "exec via " + (shizuku ? "shizuku" : "su")
-                + " => code=" + r.code + " ok=" + r.ok());
+                + " => code=" + r.code + " ok=" + r.ok() + " reason=" + r.reason);
         return r;
     }
 
     // —— 对外写入口（全部异步：su 可能阻塞数百毫秒甚至因授权弹窗挂住，禁止在主线程执行）——
 
     public interface ResultCallback {
-        /** ok=写入是否全部成功；state=写入后回读到的最新真实状态（主线程回调）。
-         *  注意 state 来自授权通道回读，不会因为「命令退出码 0 但被 ROM 屏蔽」而失真。 */
-        void onResult(boolean ok, State state);
+        /**
+         * @param ok 写入是否全部成功
+         * @param state 写入后回读到的最新真实状态（主线程回调）。
+         *              来自授权通道回读，不会因为「命令退出码 0 但被 ROM 屏蔽」而失真。
+         * @param reason 失败原因（RootUtil.REASON_*）：成功时为 REASON_NONE。
+         *               必须带出来 —— 「没有 su」「root 未授权」「Shizuku 没启动」
+         *               「Shizuku 没授权」「超时」五种情况用户要做的事完全不同，
+         *               笼统一句「执行失败」等于让用户自己猜。
+         */
+        void onResult(boolean ok, State state, int reason);
     }
 
     private static final Executor IO = Executors.newSingleThreadExecutor();
@@ -459,7 +503,8 @@ public final class DebugController {
                     + " (write failed or readback invalid)");
             broadcast(app); // 让各消费者按未污染状态回弹
             if (cb != null) {
-                MAIN.post(() -> cb.onResult(false, last));
+                final int reason = lastFailReason;
+                MAIN.post(() -> cb.onResult(false, last, reason));
             }
             return;
         }
@@ -469,7 +514,8 @@ public final class DebugController {
         }
         State s = commitAfter(app, m.after);
         if (cb != null) {
-            MAIN.post(() -> cb.onResult(m.wrote, s));
+            final int reason = lastFailReason;
+            MAIN.post(() -> cb.onResult(m.wrote, s, reason));
         }
     }
 
@@ -567,7 +613,8 @@ public final class DebugController {
         State last = read(app);
         android.util.Log.w(TAG, "privileged read failed, refuse to act (auth lost or channel hung)");
         if (cb != null) {
-            MAIN.post(() -> cb.onResult(false, last));
+            final int reason = lastFailReason;
+            MAIN.post(() -> cb.onResult(false, last, reason));
         }
     }
 
@@ -581,13 +628,15 @@ public final class DebugController {
             android.util.Log.w(TAG, "sub write refused to commit (write failed or readback invalid)");
             broadcast(app);
             if (cb != null) {
-                MAIN.post(() -> cb.onResult(false, last));
+                final int reason = lastFailReason;
+                MAIN.post(() -> cb.onResult(false, last, reason));
             }
             return;
         }
         State s = commitAfter(app, w.after);
         if (cb != null) {
-            MAIN.post(() -> cb.onResult(w.ok, s));
+            final int reason = lastFailReason;
+            MAIN.post(() -> cb.onResult(w.ok, s, reason));
         }
     }
 

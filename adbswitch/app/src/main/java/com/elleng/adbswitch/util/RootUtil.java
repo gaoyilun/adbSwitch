@@ -25,14 +25,48 @@ public final class RootUtil {
     /** 超时专属退出码：与真实的 shell 退出码区分开，便于定位 */
     public static final int CODE_TIMEOUT = -2;
 
+    /**
+     * 失败原因（ShizukuUtil 复同一套取值，便于 UI 一条链路选文案）。
+     *
+     * 为什么需要：之前所有失败都归成一句「执行失败，请检查授权模式」，
+     * 而「设备根本没有 su」「root 授权被拒」「su 挂住超时」「Shizuku 没启动」「Shizuku 没授权」
+     * 五种情况的处理方式完全不同（换模式 / 去 Magisk 授权 / 手动确认 / 去启动 Shizuku / 在管理器里授权），
+     * 一句笼统文案等于让用户自己猜。
+     */
+    public static final int REASON_NONE = 0;
+    /** 通道可用，但命令本身返回非 0（被 ROM 拦截、命令不存在等） */
+    public static final int REASON_EXEC = 1;
+    /** 等子进程等到超时（授权弹窗没人点、系统卡住） */
+    public static final int REASON_TIMEOUT = 2;
+    /** 设备上没有可用的 su 二进制（等于没有 root 方案） */
+    public static final int REASON_NO_SU = 3;
+    /** su 存在但没拿到 root（授权被拒 / 未授权） */
+    public static final int REASON_DENIED = 4;
+    /** Shizuku 服务没在跑（binder 拿不到） */
+    public static final int REASON_NO_BINDER = 5;
+    /** Shizuku 在跑，但本应用没被授权 */
+    public static final int REASON_NO_PERMISSION = 6;
+
     public static class Result {
         public int code;
         public String out = "";
         public String err = "";
+        /** 失败原因，见 REASON_*；成功时为 REASON_NONE */
+        public int reason = REASON_NONE;
 
         public boolean ok() {
             return code == 0;
         }
+    }
+
+    /** root 探测结论：给 UI 区分「没有 root 方案」与「有 su 但没授权」 */
+    public enum RootStatus {
+        /** su 后拿到 uid 0 */
+        GRANTED,
+        /** 设备里根本没有可用的 su（未 root / su 被隐藏） */
+        NO_SU,
+        /** su 存在但没拿到 root（未授权、被拒、超时） */
+        DENIED
     }
 
     private RootUtil() {
@@ -40,8 +74,27 @@ public final class RootUtil {
 
     /** 是否拥有 root（su 后能拿到 uid 0） */
     public static boolean hasRoot() {
+        return probe() == RootStatus.GRANTED;
+    }
+
+    /**
+     * 探测 root 的实际状态。
+     *
+     * 与旧实现（只看 `id -u` 的输出）的两点差异：
+     *  1. 同时校验退出码：su 存在但被拒时，某些 su 实现仍会往 stdout 吐东西，
+     *     只看输出会把「明明没授权」误判成已授权 —— 退出码是唯一可信的判据。
+     *  2. 区分「没有 su」与「有 su 没授权」：前者换 root 模式没意义（该去装 root 或换 Shizuku），
+     *     后者才该去 Magisk 里点允许。UI 靠这个结论给不同的引导文案。
+     */
+    public static RootStatus probe() {
         Result r = su("id -u");
-        return r.out.trim().equals("0");
+        if (r.ok() && "0".equals(r.out.trim())) {
+            return RootStatus.GRANTED;
+        }
+        if (r.reason == REASON_NO_SU) {
+            return RootStatus.NO_SU;
+        }
+        return RootStatus.DENIED;
     }
 
     /** 通过 su 执行一条 shell 命令 */
@@ -64,10 +117,15 @@ public final class RootUtil {
             boolean timedOut = false;
             if (proc.waitFor(TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                 res.code = proc.exitValue();
+                // 退出码非 0：su 起来了但没给权限（授权被拒 / Magisk 拒绝 / 命令失败）
+                if (res.code != 0) {
+                    res.reason = REASON_DENIED;
+                }
             } else {
                 // 超时：先杀进程再收尾，绝不让 IO 线程卡在这里
                 timedOut = true;
                 res.code = CODE_TIMEOUT;
+                res.reason = REASON_TIMEOUT;
                 try {
                     proc.destroy();
                 } catch (Throwable ignored) {
@@ -84,6 +142,9 @@ public final class RootUtil {
         } catch (Throwable t) {
             res.code = -1;
             res.err = String.valueOf(t);
+            // exec 直接失败 = 系统里找不到 su（未 root / Magisk 对本站隐藏了 su），
+            // 与「su 存在但被拒绝」是两回事，UI 要分别引导。
+            res.reason = isSuMissing(t) ? REASON_NO_SU : REASON_EXEC;
         } finally {
             if (p != null) {
                 try {
@@ -93,6 +154,16 @@ public final class RootUtil {
             }
         }
         return res;
+    }
+
+    /** exec 抛错是否代表「没有 su」：只看异常文本，不额外 fork 进程去 which su */
+    private static boolean isSuMissing(Throwable t) {
+        if (t == null) {
+            return false;
+        }
+        String m = String.valueOf(t.getMessage()).toLowerCase(java.util.Locale.ROOT);
+        return m.contains("no such file or directory") || m.contains("not found")
+                || m.contains("permission denied") && m.contains("su");
     }
 
     private static String drain(java.io.InputStream is) {

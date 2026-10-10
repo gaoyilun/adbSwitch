@@ -180,4 +180,14 @@
     <string name="auth_need_start">请先在 Shizuku 应用中启动服务</string>
     <string name="auth_no_priv">未授权，无法写入调试开关</string>
     <string name="auth_need_grant">请先完成授权（root 或 Shizuku）</string>
+    <!-- 按失败原因细分的提示：五种原因对应五种不同的处理动作，
+         笼统一句「执行失败」等于让用户自己猜该做什么。 -->
+    <string name="toast_no_su">未检测到 root（su 不可用），建议改用 Shizuku 模式</string>
+    <string name="toast_root_denied">root 未授权，请在 Magisk 中允许本应用后重试</string>
+    <string name="toast_shizuku_not_running">Shizuku 服务未启动，请先启动再重试</string>
+    <string name="toast_shizuku_no_perm">Shizuku 未授权本应用，请在 Shizuku 中授权</string>
+    <string name="toast_auth_timeout">授权通道超时，请确认授权弹窗后重试</string>
+    <!-- Shizuku 侧授权弹不出来时的自救指引（shouldShowRequestPermissionRationale 置位时给出）。
+         措辞用条件句：该标志的语义两侧不一致，不能断言用户一定选了「不再询问」。 -->
+    <string name="toast_shizuku_denied_forever">若 Shizuku 未弹出授权框，请在 Shizuku 的「已授权应用」中手动允许本应用</string>
 </resources>

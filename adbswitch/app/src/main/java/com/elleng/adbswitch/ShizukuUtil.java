@@ -20,8 +20,27 @@ import rikka.shizuku.Shizuku;
  * 与 RootUtil 不同，这里走 Shizuku 服务器暴露的 IShizukuService.newProcess：
  * 由 Shizuku 进程（已获 shell 权限）代 fork 子进程执行命令，再把输出流与退出码回传。
  * 返回结构与 RootUtil.su 完全一致，便于 DebugController 直接复用。
+ *
+ * ⚠️ 官方已预告移除本通道（Shizuku-API 13.1.1 changelog 原文）：
+ *   "Prepare to remove `Shizuku#newProcess`, developers should have to use UserService instead"
+ * 即 Shizuku 官方建议改用 UserService（在 root/shell 进程里跑自己的代码），
+ * newProcess 属于「文本通信、无 tty、不可靠」的旧通道。迁移需新增 AIDL + UserService 类，
+ * 且 UserService 进程里 Context#getContentResolver 不可用（官方明示），仍只能 exec settings。
+ * 目前 newProcess 仍可用，故保留；动手迁移前请先确认 Shizuku 当前版本是否仍提供它。
  */
 public final class ShizukuUtil {
+
+    /**
+     * 无 binder 时的就绪等待上限。
+     *
+     * 为什么需要：ShizukuProvider 取 binder 是**异步**的（ContentProvider 握手），而磁贴
+     * （AdbTileService）、桌面快捷方式（ShortcutToggleActivity）这类入口不经过 Activity，
+     * 冷启动时可能 binder 还没到就直接 newProcess，白失败一次。
+     * 等待必须有界：DebugController 的 IO 是单线程执行器，只有这一条通道，
+     * 卡住一次后面所有操作都排队失效（这条硬规则同 RootUtil.TIMEOUT_MS）。
+     * 2s 足够覆盖 provider 的握手，不会让「压根没装 Shizuku」的用户等太久。
+     */
+    public static final long READY_WAIT_MS = 2000;
 
     private ShizukuUtil() {
     }
@@ -50,11 +69,64 @@ public final class ShizukuUtil {
         return running() && permissionGranted();
     }
 
+    /**
+     * 等到 Shizuku 的 binder 到达（或超时）。**只能在后台线程调用**——它会阻塞当前线程，
+     * 主线程调用等于 ANR。已就绪时立即返回，不做任何等待。
+     *
+     * 用 sticky 监听：binder 已经在了会立刻回调一次，不会漏掉「等待开始前就就绪」的情况。
+     *
+     * @return 等待结束时 binder 是否可用
+     */
+    public static boolean awaitBinder(long timeoutMs) {
+        if (running()) {
+            return true;
+        }
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        Shizuku.OnBinderReceivedListener l = new Shizuku.OnBinderReceivedListener() {
+            @Override
+            public void onBinderReceived() {
+                latch.countDown();
+            }
+        };
+        try {
+            Shizuku.addBinderReceivedListenerSticky(l);
+            latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            android.util.Log.w("AdbSwitch", "await Shizuku binder failed", t);
+        } finally {
+            try {
+                Shizuku.removeBinderReceivedListener(l);
+            } catch (Throwable ignored) {
+                // 移除失败不影响结果：监听表里残留一个一次性 lambda 的代价可接受，
+                // 但正常路径必须移除，否则每次执行都泄漏一个监听（静态表持有引用）。
+            }
+        }
+        return running();
+    }
+
     /** 以 shell 身份执行一条命令，返回与 RootUtil.su 同构的结果 */
     public static RootUtil.Result run(String cmd) {
         RootUtil.Result res = new RootUtil.Result();
         IRemoteProcess proc = null;
         try {
+            // 前置校验：把「服务没启动」「没授权」与「命令执行失败」分开。
+            // 旧实现三者都落进同一个 catch，UI 只能给一句笼统的「执行失败」，
+            // 用户无从判断该去启动 Shizuku、还是去管理器里授权、还是换 root 模式。
+            if (!running()) {
+                awaitBinder(READY_WAIT_MS);
+                if (!running()) {
+                    res.code = -1;
+                    res.reason = RootUtil.REASON_NO_BINDER;
+                    res.err = "shizuku 服务未启动";
+                    return res;
+                }
+            }
+            if (!permissionGranted()) {
+                res.code = -1;
+                res.reason = RootUtil.REASON_NO_PERMISSION;
+                res.err = "shizuku 未授权本应用";
+                return res;
+            }
             IBinder binder = Shizuku.getBinder();
             if (binder == null) {
                 res.code = -1;
@@ -118,12 +190,16 @@ public final class ShizukuUtil {
             res.out = outB.toString();
             res.err = errB.toString();
             if (timedOut) {
+                res.reason = RootUtil.REASON_TIMEOUT;
                 res.err = (res.err == null || res.err.isEmpty() ? "" : res.err + "\n")
                         + "shizuku 执行超时(" + RootUtil.TIMEOUT_MS + "ms)";
+            } else if (res.code != 0) {
+                res.reason = RootUtil.REASON_EXEC;
             }
         } catch (Throwable t) {
             res.code = -1;
             res.err = String.valueOf(t);
+            res.reason = RootUtil.REASON_EXEC;
         } finally {
             if (proc != null) {
                 try {
