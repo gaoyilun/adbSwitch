@@ -108,6 +108,10 @@ dependencies {
     implementation("dev.rikka.shizuku:aidl:13.1.5")
     // 原生底部提示控件 Snackbar（替代手写的悬浮卡片）
     implementation("com.google.android.material:material:1.12.0")
+    // M3 架构三件套：AppCompatActivity（壳）+ PreferenceFragmentCompat（设置列表）
+    // + Material 组件（MaterialToolbar / MaterialSwitch / MaterialAlertDialog / Snackbar）
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.preference:preference:1.2.1")
     // 标准下拉刷新控件（替代自研的下拉刷新轮子）；1.1.0 已在本机 Gradle 缓存，可离线构建
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 }

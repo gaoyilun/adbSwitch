@@ -1,16 +1,10 @@
 <resources>
-    <!-- 深色模式：继承 framework 原生深色 Material 主题（自带 ActionBar） -->
-    <style name="AppTheme" parent="@android:style/Theme.Material">
-        <item name="android:colorPrimary">@color/colorPrimary</item>
-        <item name="android:colorPrimaryDark">@color/colorPrimaryDark</item>
-        <item name="android:colorAccent">@color/colorAccent</item>
-        <!-- 开关（含快捷打开等）开启态使用应用主题蓝，替代默认青色 -->
-        <item name="android:colorControlActivated">@color/colorPrimary</item>
-        <item name="android:statusBarColor">@color/colorPrimaryDark</item>
-        <!-- 深色状态栏，图标用浅色 -->
+    <!-- 夜间：继承同一 M3 动态主题，颜色角色经 Dynamic 主题按壁纸派生（暗色档）。
+         此处仅把状态栏图标切为浅色（日间覆盖里设了 true）。
+         必须声明与日间相同的 parent，否则夜间会丢失 M3 动态主题继承。 -->
+    <style name="AppTheme" parent="Theme.Material3.DynamicColors.DayNight.NoActionBar">
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:windowBackground">?attr/colorSurface</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowBackground">@color/background</item>
-        <!-- 顶栏沿用蓝底 + 白色标题/副标题（AppActionBar 在默认配置中已定义，跨夜间复用） -->
-        <item name="android:actionBarStyle">@style/AppActionBar</item>
     </style>
 </resources>

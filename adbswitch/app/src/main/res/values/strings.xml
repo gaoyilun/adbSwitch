@@ -79,9 +79,6 @@
     <!-- 旧广播路径（launcher 不支持钉选时的回退）拿不到结果，只能提示已发起 -->
     <string name="create_shortcut_done">已创建，如未成功请确认是否授权</string>
 
-    <!-- 下拉刷新由标准控件 SwipeRefreshLayout 提供进度动画，只保留完成提示 -->
-    <string name="ptr_done">已刷新应用列表</string>
-
     <string name="card_notify_title">通知</string>
     <string name="btn_temp_close">关闭时显示通知</string>
     <string name="temp_close_sum">关闭调试时显示可一键恢复的常驻通知</string>

@@ -1,18 +1,9 @@
 <resources>
-    <!-- 深色模式配色：深色背景 / 浅色文字，主色仍用蓝色以呼应顶栏 -->
-    <color name="colorPrimary">#1E88E5</color>
-    <color name="colorPrimaryDark">#0D47A1</color>
-    <color name="colorAccent">#42A5F5</color>
-    <color name="colorOnPrimary">#FFFFFF</color>
-
-    <color name="surface">#1E1E1E</color>
-    <color name="background">#121212</color>
-
-    <color name="textPrimary">#E8EAED</color>
-    <color name="textSecondary">#9AA0A6</color>
-
-    <color name="stateOn">#66BB6A</color>     <!-- 已开启：绿色 -->
-    <color name="stateOff">#FFA726</color>    <!-- 已关闭：橙色 -->
-    <color name="stateUnknown">#B0BEC5</color> <!-- 状态未确认：中性灰 -->
-    <color name="error">#EF5350</color>
+    <!-- 暗色档：仅语义色（动态 M3 角色由 Dynamic 主题按壁纸派生） -->
+    <color name="stateOn">#66BB6A</color>
+    <color name="stateOff">#FFA726</color>
+    <color name="stateUnknown">#B0BEC5</color>
+    <color name="error">#FFB4AB</color>
+    <!-- 深色模式下 Snackbar 是浅底条 → 警示红用深红（M3 light error tone40） -->
+    <color name="errorInverse">#BA1A1A</color>
 </resources>

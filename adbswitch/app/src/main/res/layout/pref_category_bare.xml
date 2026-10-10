@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 无标题分组头（零高度占位）：catDebug 分组不显示「调试开关」标题（顶栏已是同名标题，
+     再显示一遍重复），分组内的行照常平铺显示。
+     androidx.preference 的 onBindViewHolder 对 title/summary/icon 均判空后才绑定，
+     因此缺这些 id 的布局是安全的。其他分组（catLinkage/catNotify）仍用 pref_category.xml。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="0dp" />

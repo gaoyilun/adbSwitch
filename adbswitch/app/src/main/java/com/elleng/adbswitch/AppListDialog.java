@@ -1,6 +1,8 @@
 package com.elleng.adbswitch;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -148,14 +150,14 @@ public class AppListDialog {
                 errorView.setVisibility(View.GONE);
                 swipeRefresh.setVisibility(View.VISIBLE);
                 loadingView.setVisibility(View.VISIBLE);
-                scanAppsAsync(false);
+                scanAppsAsync();
             });
         }
         EditText et = root.findViewById(R.id.etSearch);
         searchBox = et;
 
         // 下拉刷新走标准控件回调，手势/进度圈由 SwipeRefreshLayout 自己管
-        swipeRefresh.setOnRefreshListener(() -> scanAppsAsync(true));
+        swipeRefresh.setOnRefreshListener(this::scanAppsAsync);
 
         adapter = new AppAdapter();
         listView.setAdapter(adapter);
@@ -201,7 +203,7 @@ public class AppListDialog {
                 ? context.getString(R.string.picker_title_multi_count,
                         preselected == null ? 0 : preselected.size())
                 : context.getString(R.string.picker_title);
-        AlertDialog.Builder b = new AlertDialog.Builder(context)
+        AlertDialog.Builder b = new MaterialAlertDialogBuilder(context)
                 .setTitle(title)
                 .setView(root)
                 .setNegativeButton(android.R.string.cancel, null);
@@ -222,7 +224,7 @@ public class AppListDialog {
         loadingView.setVisibility(View.VISIBLE);
         dialog.show();
 
-        scanAppsAsync(false);
+        scanAppsAsync();
     }
 
     /** 多选模式：标题数量随勾选实时更新（如「管理快捷应用（2个）」） */
@@ -250,19 +252,15 @@ public class AppListDialog {
     }
 
     /** 后台扫描已安装应用，完成后回主线程刷新列表 */
-    private void scanAppsAsync(boolean pullRefresh) {
+    private void scanAppsAsync() {
         new Thread(() -> {
             ArrayList<AppInfo> result;
-            boolean ok;
             try {
                 result = loadApps();
-                ok = true;
             } catch (Throwable t) {
                 android.util.Log.e("AppListDialog", "loadApps failed", t);
                 result = new ArrayList<>();
-                ok = false;
             }
-            final boolean success = ok;
             final ArrayList<AppInfo> data = result;
             main.post(() -> {
                 if (dialog == null || !dialog.isShowing()) {
@@ -288,11 +286,8 @@ public class AppListDialog {
                 // 必须用搜索框里的当前文本重新过滤：写死空串会把用户已输入的关键字冲掉，
                 // 表现为「下拉刷新一下，搜索条件莫名失效」。
                 applyFilter(searchBox != null ? searchBox.getText().toString() : "");
-                // 收掉标准控件的刷新进度圈
+                // 收掉标准控件的刷新进度圈（不再弹「已刷新应用列表」Toast：进度圈本身就是反馈）
                 swipeRefresh.setRefreshing(false);
-                if (pullRefresh && success && !empty) {
-                    Toast.makeText(context, R.string.ptr_done, Toast.LENGTH_SHORT).show();
-                }
             });
         }, "app-picker-scan").start();
     }

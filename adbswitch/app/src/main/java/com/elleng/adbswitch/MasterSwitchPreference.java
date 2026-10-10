@@ -1,25 +1,34 @@
 package com.elleng.adbswitch;
 
 import android.content.Context;
-import android.preference.Preference;
 import android.util.AttributeSet;
 import android.view.View;
-import android.widget.Switch;
+import android.widget.ImageButton;
+
+import androidx.preference.Preference;
+import androidx.preference.PreferenceViewHolder;
+
+import com.google.android.material.materialswitch.MaterialSwitch;
 
 /**
- * 主开关行：普通 Preference + 自定义 widget（折叠箭头 + Switch）。
- * 不用 SwitchPreference 是因为行内还有折叠箭头，箭头点击与开关拨动必须分开处理。
+ * 主开关行：普通 Preference + 自定义 widget（折叠箭头 + MaterialSwitch）。
+ * 不用 SwitchPreferenceCompat 是因为行内还有折叠箭头，箭头点击与开关拨动必须分开处理。
  *
- * 为什么必须子类化并覆写 {@link #onBindView}：
+ * 为什么必须子类化并覆写 {@link #onBindViewHolder}：
  * 主开关的勾选态要在**行绑定时**（绘制之前）就摆好。若等布局完成后再手动 setChecked，
  * 行绑定到绘制之间的窗口期里 Switch 停在 XML 默认的关闭态 —— 冷启动就会看到
- * 「先显示关闭、随后跳成开启」的闪变（HyperOS 上全局布局回调还不可靠，窗口更长）。
+ * 「先显示关闭、随后跳成开启」的闪变（全局布局回调还不可靠，窗口更长）。
  *
  * 显示规则（与 MainActivity.refresh 一致）：
  *  - 有「上次确认状态」：直接显示它，**不置灰**（每次启动都置灰会有卡顿感），
  *    真值与它不一致时校准回来再修正一次（少数场景，可接受）；
  *  - 首次使用（无上次状态）：关 + 置灰，直到真值读回；
  *  - 「打开到真值读回」这个窗口期里发生点击：直接屏蔽（弹回显示值、不执行）。
+ *
+ * androidx 版差异（相对旧 framework 实现）：
+ *  - 整行点击由 androidx 原生机制触发 OnPreferenceClickListener，不再需要给 itemView 手动挂监听；
+ *  - 折叠箭头的接线收进 onBindViewHolder（RecyclerView 行复用时每次绑定都重挂，无需全局布局回调）；
+ *  - Switch 换成 M3 MaterialSwitch（观感与其它 SwitchPreferenceCompat 行统一）。
  */
 public class MasterSwitchPreference extends Preference {
 
@@ -28,13 +37,23 @@ public class MasterSwitchPreference extends Preference {
         void onToggle(boolean on);
     }
 
+    /** 折叠箭头点击回调；由 MainActivity 注入展开/折叠逻辑 */
+    public interface OnExpandListener {
+        void onExpandClicked();
+    }
+
     private OnToggleListener toggleListener;
+    private OnExpandListener expandListener;
     /** 当前绑定行里的 Switch（行未绑定时为 null） */
-    private Switch boundSwitch;
+    private MaterialSwitch boundSwitch;
+    /** 当前绑定行视图（更新箭头图标时直接在行内找，不做全树遍历） */
+    private View boundRow;
     /** 当前显示的开关状态：窗口期点击被屏蔽时弹回它 */
     private boolean lastShownOn = false;
     /** 防止 setChecked 回灌触发 onCheckedChanged */
     private boolean syncing = false;
+    /** 折叠箭头当前指向（true=已展开）；绑定与外部刷新共用 */
+    private boolean expandedState = true;
 
     public MasterSwitchPreference(Context context) {
         super(context);
@@ -52,9 +71,13 @@ public class MasterSwitchPreference extends Preference {
         toggleListener = l;
     }
 
+    public void setOnExpandListener(OnExpandListener l) {
+        expandListener = l;
+    }
+
     /**
      * 真值刷新后由 MainActivity 调用，立即同步已绑定行里的 Switch；
-     * 行尚未绑定时不做任何事（绑定时 {@link #onBindView} 会按同一规则摆好）。
+     * 行尚未绑定时不做任何事（绑定时 {@link #onBindViewHolder} 会按同一规则摆好）。
      */
     public void applyState(boolean on, boolean enabled) {
         if (boundSwitch == null) {
@@ -67,10 +90,31 @@ public class MasterSwitchPreference extends Preference {
         syncing = false;
     }
 
+    /** 更新折叠箭头指向（MainActivity 折叠/展开两个子开关行后调用）；已绑定行立即生效 */
+    public void setExpandedState(boolean expanded) {
+        expandedState = expanded;
+        ImageButton arrow = boundRow == null ? null : boundRow.findViewById(R.id.btn_expand);
+        if (arrow != null) {
+            arrow.setImageResource(expanded ? R.drawable.ic_collapse : R.drawable.ic_expand);
+        }
+    }
+
     @Override
-    protected void onBindView(View view) {
-        super.onBindView(view);
-        Switch sw = view.findViewById(R.id.sw_master);
+    public void onBindViewHolder(PreferenceViewHolder holder) {
+        super.onBindViewHolder(holder);
+        View view = holder.itemView;
+        boundRow = view;
+        ImageButton arrow = view.findViewById(R.id.btn_expand);
+        if (arrow != null) {
+            // 箭头单独消费点击（整行点击仍走 OnPreferenceClickListener 触发主开关切换）
+            arrow.setOnClickListener(v -> {
+                if (expandListener != null) {
+                    expandListener.onExpandClicked();
+                }
+            });
+            arrow.setImageResource(expandedState ? R.drawable.ic_collapse : R.drawable.ic_expand);
+        }
+        MaterialSwitch sw = view.findViewById(R.id.sw_master);
         boundSwitch = sw;
         if (sw == null) {
             return;

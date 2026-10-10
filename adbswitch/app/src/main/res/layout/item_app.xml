@@ -28,7 +28,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textSize="16sp"
-            android:textColor="@color/textPrimary" />
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@+id/tvPkg"
@@ -36,7 +36,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:textSize="12sp"
-            android:textColor="@color/textSecondary" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
     </LinearLayout>
 

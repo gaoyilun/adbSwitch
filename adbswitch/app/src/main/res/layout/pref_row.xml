@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 自定义设置行：只收紧行本身的内边距，图标尺寸与字号沿用系统默认档位。
-     注意：
-     - 图标区必须给足宽度，否则联动应用这类大图标会被压小；
-       这里用 40dp（系统默认约 48dp），既能显示图标又比默认紧凑。
-     - 字号用 textAppearanceListItem / ListItemSecondary（即系统设置项的字号），
-       不要用 textAppearanceMedium/Small，那会让标题看起来比系统设置更大。 -->
+     文字色取 ?attr/colorOnSurface / colorOnSurfaceVariant（动态，随壁纸）。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -46,7 +42,7 @@
             android:ellipsize="marquee"
             android:singleLine="true"
             android:textAppearance="?android:attr/textAppearanceListItem"
-            android:textColor="?android:attr/textColorPrimary" />
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@android:id/summary"
@@ -56,7 +52,7 @@
             android:ellipsize="end"
             android:maxLines="3"
             android:textAppearance="?android:attr/textAppearanceListItemSecondary"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
     </LinearLayout>
 

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PreferenceCategory 标题（androidx 默认布局是居中的，与整体左对齐设计冲突）：
+     左对齐、主色小号加粗，起点与无图标行文字列（paddingStart 12dp + marginStart 10dp）对齐。
+     文字色取 ?attr/colorPrimary（动态主色，随壁纸变化）。 -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/title"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="22dp"
+    android:paddingTop="18dp"
+    android:paddingBottom="8dp"
+    android:paddingEnd="12dp"
+    android:textSize="14sp"
+    android:textStyle="bold"
+    android:textColor="?attr/colorPrimary" />

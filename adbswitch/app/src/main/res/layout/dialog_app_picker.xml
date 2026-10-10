@@ -16,7 +16,7 @@
         android:hint="@string/picker_hint"
         android:inputType="text"
         android:textSize="15sp"
-        android:backgroundTint="@color/colorAccent"
+        android:backgroundTint="?attr/colorPrimary"
         android:padding="10dp" />
 
     <!-- 加载提示：后台线程扫描应用列表期间显示 -->
@@ -28,7 +28,7 @@
         android:paddingTop="24dp"
         android:paddingBottom="24dp"
         android:textSize="14sp"
-        android:textColor="@color/textSecondary"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:text="@string/picker_loading"
         android:visibility="gone" />
 
@@ -51,7 +51,7 @@
             android:paddingStart="16dp"
             android:paddingEnd="16dp"
             android:text="@string/picker_need_permission"
-            android:textColor="@color/textSecondary"
+            android:textColor="?attr/colorOnSurfaceVariant"
             android:textSize="14sp" />
 
         <Button
@@ -63,19 +63,20 @@
 
     </LinearLayout>
 
-    <!-- 下拉刷新：原生 SwipeRefreshLayout 标准控件（替代自研的下拉刷新实现） -->
+    <!-- 下拉刷新：原生 SwipeRefreshLayout 标准控件（替代自研的下拉刷新实现）。
+         背景保持透明：列表继承 MaterialAlertDialog 自身的抬升表面
+         （colorSurfaceContainerHigh），不再强制 colorSurface ——
+         否则弹窗内会出现一块比弹窗底更白的矩形，破坏 M3 表面层级。 -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
         android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
-        android:layout_height="500dp"
-        android:background="@color/background">
+        android:layout_height="500dp">
 
         <ListView
             android:id="@+id/lvApps"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@color/surface"
-            android:divider="#E3E6EA"
+            android:divider="?attr/colorOutlineVariant"
             android:dividerHeight="1dp"
             android:paddingStart="8dp"
             android:paddingEnd="8dp"

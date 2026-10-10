@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 默认快捷应用行：应用图标放在右侧（区别于其它行的左侧图标）。
      仅收紧内边距，图标尺寸与字号沿用系统默认档位（同 pref_row）。
-     文字列 marginStart=10dp：与其它行对齐的关键 —— pref_row 无图标时左侧图标框被收起，
-     文字起点 = 行内边距 12dp + 文字间距 10dp；这里没有左侧图标，故只需补 10dp，
-     既不是 0（会比别的行凸出 10dp），也不能按有图标行算（会缩进 50dp）。 -->
+     文字色取 ?attr/colorOnSurface / colorOnSurfaceVariant（动态，随壁纸）。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -31,7 +29,7 @@
             android:ellipsize="marquee"
             android:singleLine="true"
             android:textAppearance="?android:attr/textAppearanceListItem"
-            android:textColor="?android:attr/textColorPrimary" />
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@android:id/summary"
@@ -41,7 +39,7 @@
             android:ellipsize="end"
             android:maxLines="3"
             android:textAppearance="?android:attr/textAppearanceListItemSecondary"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
     </LinearLayout>
 
