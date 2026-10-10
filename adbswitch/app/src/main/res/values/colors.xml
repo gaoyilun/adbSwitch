@@ -1,0 +1,18 @@
+<resources>
+    <!-- Material 原生配色（Blue 800/700 系列） -->
+    <color name="colorPrimary">#1565C0</color>
+    <color name="colorPrimaryDark">#0D47A1</color>
+    <color name="colorAccent">#1976D2</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+
+    <color name="surface">#FFFFFF</color>
+    <color name="background">#F2F4F7</color>
+
+    <color name="textPrimary">#212121</color>
+    <color name="textSecondary">#6B7280</color>
+
+    <color name="stateOn">#2E7D32</color>     <!-- 已开启：绿色 -->
+    <color name="stateOff">#EF6C00</color>    <!-- 已关闭：橙色 -->
+    <color name="stateUnknown">#9E9E9E</color> <!-- 状态未确认：中性灰（不暗示安全也不暗示危险） -->
+    <color name="error">#D32F2F</color>
+</resources>

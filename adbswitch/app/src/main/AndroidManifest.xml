@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 在线更新检测（当前 ENABLED=false，实际不会发请求；启用前保留） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 安装下载下来的更新 APK 需要「安装未知应用」授权（API 26+） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 原生「添加到主屏幕」快捷方式（Android 2.3 起）：发 INSTALL_SHORTCUT 广播所需权限 -->
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
+    <!-- Android 16 Live Updates：常驻通知可被系统「提升」为实时动态（状态栏胶囊/锁屏/AOD） -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- Shizuku：用 shell(uid 2000) 权限真实改写 Settings，无需 root -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <!-- Android 11+ 包可见性：声明本应用需要「能看到并查询所有可启动（有桌面图标）的应用」，
+         否则 getInstalledApplications / getLaunchIntentForPackage 只能返回少量系统应用。
+         注意这不是运行时权限，无法在系统设置里授权，必须在 manifest 里声明 <queries>。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <!-- singleTask：任务已存在时，桌面 shortcut / 通知栏点击会回调 onNewIntent，
+             否则只会把任务带到前台（既不重建 Activity 也不回调），
+             导致「打开主页」shortcut 在后台状态下点了没反应。 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 长按菜单快捷方式全部改为动态发布（ToggleShortcuts.publish）：
+                 静态项顺序与图标都无法随状态控制，见该类注释 -->
+        </activity>
+
+        <!-- shortcut「一键开关」中转页：无界面（NoDisplay）完成切换后立即结束，
+             不再闪现主设置页。声明必须挂在 application 直下、exported 供 launcher 拉起。
+             taskAffinity="" 强制自建临时任务：若与主界面同任务，主界面在后台时
+             启动本页会把整个任务带到前台，切换结束就露出 MainActivity。 -->
+        <activity
+            android:name=".ShortcutToggleActivity"
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+
+        <!-- 前台服务：临时关闭 USB 调试后的常驻通知 -->
+        <service
+            android:name=".AdbToggleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="调试开关的常驻控制通知" />
+        </service>
+
+        <!-- 通知栏按钮的广播接收器 -->
+        <receiver
+            android:name=".NotificationReceiver"
+            android:exported="false" />
+
+        <!-- 桌面快捷方式钉选结果回调（requestPinShortcut 的 resultIntent，只有真正钉上才回调）；
+             显式 Intent 指向本类，不受隐式广播限制 -->
+        <receiver
+            android:name=".PinShortcutReceiver"
+            android:exported="false" />
+
+        <!-- Shizuku 桥接：本 App 通过它拿到 shell 权限的 Binder（跨 UID 回传入口）。
+             注意：provider 必须 android:exported="true" —— 它是跨 UID（Shizuku 管理器）回调传递
+             Binder 的入口，targetSdk>=31 时若设为 false，系统会抛
+             "IllegalStateException: android:exported must be true" 导致一启动即闪退。
+             ⚠️ provider 的 android:permission 必须是 INTERACT_ACROSS_USERS_FULL（Shizuku 官方模板）：
+             它是 Shizuku 服务器（adb 模式下为 shell uid 2000）回传 Binder 时持有的权限。
+             若误写成 moe.shizuku.manager.permission.API_V23（管理器签名权限），
+             adb 模式下的 shell 服务器没有该签名权限 → 系统拦下回传 → getBinder 为 null →
+             pingBinder 返回 false → 显示「未授权」；root 模式(uid 0)绕过权限检查故正常。
+             这正是「root 能用、adb 提示未授权」的根因。运行时权限 API_V23 仍由 <uses-permission> 声明。 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- 在线更新：把下载到应用专属目录的 APK 以 content:// 交给系统安装器。
+             exported 必须为 false（仅本应用与被授权的系统安装器使用）。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- 通知控制中心（下拉快捷磁贴） -->
+        <service
+            android:name=".AdbTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>
