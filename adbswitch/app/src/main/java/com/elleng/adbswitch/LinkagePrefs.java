@@ -74,6 +74,10 @@ final class LinkagePrefs {
         if (!def.isEmpty() && !set.contains(def)) {
             setDefault(c, "");
         }
+        // 只剩一个快捷应用时自动选它为默认：没有第二个可选，默认就是唯一解
+        if (set.size() == 1) {
+            setDefault(c, set.iterator().next());
+        }
     }
 
     /** 追加若干应用（去重，保留已有顺序在前）。 */

@@ -37,7 +37,6 @@ import android.provider.Settings;
 import android.view.View;
 import android.preference.PreferenceCategory;
 import android.widget.Button;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -77,9 +76,14 @@ public class MainActivity extends PreferenceActivity {
     private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.adbswitch.action.DESKTOP_LINKAGE";
     private static final String TAG = "AdbSwitch";
     private static final String PREFS = "cfg";
-    /** 需要监听外部改动的 Settings 键（与 DebugController 写入的是同一组） */
-    private static final String[] OBSERVED_KEYS =
-            {DebugController.KEY_USB, DebugController.KEY_WIRELESS};
+    /**
+     * 需要监听外部改动的 Settings 键（与 DebugController 写入的是同一组，三个都不能少）。
+     * 少一个就会出现「那一行不随外部改动刷新」——例如开发者选项被别处恢复后，
+     * UI 还停在旧值，与相邻两行显示不一致。invalidateAndRefresh 会一次重读三个键，
+     * 多监听一个键的代价只是多一次 URI 回调，不会多 fork 通道。
+     */
+    private static final String[] OBSERVED_KEYS = {DebugController.KEY_USB, DebugController.KEY_WIRELESS,
+            DebugController.KEY_DEV};
     private static final String PREF_LINKAGE = "linkage_enabled";
     /** 动态联动应用行的 key 前缀：完整 key = 前缀 + 包名（wireRowClicks 据此识别并取出包名） */
     private static final String LINKAGE_APP_KEY_PREFIX = "linkage_app:";
@@ -95,8 +99,7 @@ public class MainActivity extends PreferenceActivity {
     /** 动态 shortcut：启动快捷应用 */
     private static final String SC_ID_LAUNCH_APP = "launch_linkage_app";
 
-    private Preference swMasterPref;      // 主开关：普通 Preference + 自定义 widget（箭头 + Switch）
-    private Switch masterSwitch;          // 主开关行内的 Switch 控件
+    private MasterSwitchPreference swMasterPref; // 主开关：自定义 Preference，绑定时即同步 Switch 状态
     private Boolean masterManualExpanded; // 用户手动覆盖的展开态；null=跟随开关状态
     // 两个子开关当前是否已加入 category。
     // 必须初始化为 true：prefs.xml 里它们本来就写在 catDebug 内，
@@ -106,7 +109,11 @@ public class MainActivity extends PreferenceActivity {
     private SwitchPreference swLinkagePref;
     private SwitchPreference swNotifyPref;
     private SwitchPreference swWirelessPref;
+    /** 开发者选项入口开关：独立开关，不与主开关联动、不参与折叠（始终挂在 catDebug 里） */
+    private SwitchPreference swDevOptsPref;
     private SwitchPreference swKillPref;
+    /** 「测试灵动焦点通知」行当前是否挂在分类里（显隐联动见 updateLiveUpdateState） */
+    private boolean liveUpdateShown = true;
     private Preference liveUpdatePref;
     /** 「关于」行：点击弹窗展示版本/构建时间/授权模式（原「构建时间」行） */
     private Preference buildInfoPref;
@@ -121,8 +128,6 @@ public class MainActivity extends PreferenceActivity {
     private String lastLinkageSignature = null;
     /** 主开关行的视图引用（由 wireMasterRow 记录）：换箭头图标时直接在行内找，不必遍历整棵树 */
     private View masterRowView = null;
-    /** 主开关真值是否已由授权通道确认：未确认时整行不可点、滑块置灰，避免状态未知时误操作 */
-    private boolean masterCalibrated = false;
     /** 本启动周期是否已成功确认过授权：确认过则不再重复检测（切模式 / 执行失败会重置重测） */
     private boolean authCheckedThisSession = false;
     /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
@@ -131,6 +136,10 @@ public class MainActivity extends PreferenceActivity {
     private long lastShizukuRequestAt = 0;
     /** 进程级：本次进程内是否已自动跳转过联动应用（static 保证 Activity 重建后仍记得） */
     private static boolean sLinkageLaunched = false;
+    /** 上一次跳转是否为「启动自动跳转」：决定回到设置页时提示什么（手动跳转不该说「启动时已自动跳转」） */
+    private static boolean sAutoJumped = false;
+    /** 「开了快捷打开但没设默认」的提示每进程只弹一次 */
+    private static boolean sNoDefaultToasted = false;
     private long lastPickerOpenAt = 0;        // 打开选择器防抖：行点击与 preference click 可能同时触发
     private long lastLiveOpenAt = 0;          // 同上，实时动态弹窗防抖
     private boolean settingsObserverRegistered = false; // Settings 监听是否已注册（防重复注册/泄漏）
@@ -147,7 +156,8 @@ public class MainActivity extends PreferenceActivity {
             if (DebugController.ACTION_STATE.equals(i.getAction())) {
                 refresh(new DebugController.State(
                         i.getBooleanExtra(DebugController.EXTRA_USB, false),
-                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false)));
+                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false),
+                        i.getBooleanExtra(DebugController.EXTRA_DEV, false)));
             }
         }
     };
@@ -195,6 +205,10 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
+    /** Shizuku 监听器持有引用，onDestroy 成对移除：Shizuku 的监听表是静态的，不移除会一直持有旧 Activity */
+    private Shizuku.OnBinderReceivedListener shizukuBinderListener;
+    private Shizuku.OnRequestPermissionResultListener shizukuPermListener;
+
     /**
      * 注册 Shizuku 桥接监听：
      *  - OnBinderReceivedListener（sticky）：Shizuku 服务就绪后立刻重新检测授权，
@@ -205,7 +219,7 @@ public class MainActivity extends PreferenceActivity {
      */
     private void initShizuku() {
         try {
-            Shizuku.addBinderReceivedListenerSticky(new Shizuku.OnBinderReceivedListener() {
+            shizukuBinderListener = new Shizuku.OnBinderReceivedListener() {
                 @Override
                 public void onBinderReceived() {
                     android.util.Log.i(TAG, "Shizuku binder received");
@@ -214,8 +228,9 @@ public class MainActivity extends PreferenceActivity {
                     // 无论是否已授权都重测一次，刷新授权状态行与控件可用性
                     performAuthCheck();
                 }
-            });
-            Shizuku.addRequestPermissionResultListener(new Shizuku.OnRequestPermissionResultListener() {
+            };
+            Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener);
+            shizukuPermListener = new Shizuku.OnRequestPermissionResultListener() {
                 @Override
                 public void onRequestPermissionResult(int requestCode, int grantResult) {
                     if (requestCode == AuthManager.SHIZUKU_PERM_REQUEST) {
@@ -223,7 +238,8 @@ public class MainActivity extends PreferenceActivity {
                         performAuthCheck();
                     }
                 }
-            });
+            };
+            Shizuku.addRequestPermissionResultListener(shizukuPermListener);
         } catch (Throwable t) {
             android.util.Log.w(TAG, "initShizuku failed", t);
         }
@@ -257,8 +273,13 @@ public class MainActivity extends PreferenceActivity {
             String pkg = LinkagePrefs.getDefault(this);
             if (pkg.isEmpty()) {
                 Toast.makeText(this, R.string.linkage_no_default, Toast.LENGTH_LONG).show();
-            } else {
-                launchApp(pkg);
+                finish();
+                return true;
+            }
+            if (!launchApp(pkg)) {
+                // 默认目标已失效：提示并落到设置页（已卸载的顺手清掉），不再静默闪回桌面
+                handleLinkageTargetGone(pkg);
+                return false;
             }
             finish();
             return true;
@@ -299,10 +320,10 @@ public class MainActivity extends PreferenceActivity {
         // sLinkageLaunched 守卫限制——每次点都应重新关调试并跳目标应用。
         if (ACTION_DESKTOP_LINKAGE.equals(in.getAction())) {
             String pkg = in.getStringExtra(EXTRA_LINKAGE_PKG);
+            // 桌面快捷方式始终带包名（见 createDesktopShortcutFor），缺包名的场景已废弃；
+            // 真缺了就当普通入口落到设置页，不再单独提示。
             if (pkg == null || pkg.isEmpty()) {
-                Toast.makeText(this, R.string.linkage_no_app, Toast.LENGTH_LONG).show();
-                finish();
-                return true;
+                return false;
             }
             // Android 13+ 缺通知权限时，常驻通知会被系统抑制，联动流程依赖它，
             // 故先提示并落到设置页（showSettings 会补发权限申请），不跳转。
@@ -312,7 +333,7 @@ public class MainActivity extends PreferenceActivity {
                 Toast.makeText(this, R.string.linkage_need_notif, Toast.LENGTH_LONG).show();
                 return false;
             }
-            runLinkage(pkg);
+            runLinkage(pkg, false);
             return true;
         }
 
@@ -332,18 +353,27 @@ public class MainActivity extends PreferenceActivity {
                             Toast.LENGTH_LONG).show();
                     return false;
                 }
-                // 已经自动跳转过一次：不再自动跳。
+                // 已经跳过一次：不再自动跳。
                 // 否则从联动应用返回本 App（或再次点图标）时会被反复弹回去，
                 // 用的人根本来不及用设置页。需要再跳时用动态快捷方式手动触发。
+                // 只在上一次是「启动自动跳转」时提示，且只提示一次（手动跳转回来不必说
+                // 「启动时已自动跳转」，反复打开也不该反复弹）。
                 if (sLinkageLaunched) {
-                    Toast.makeText(this, R.string.linkage_skipped, Toast.LENGTH_LONG).show();
+                    if (sAutoJumped) {
+                        sAutoJumped = false;
+                        Toast.makeText(this, R.string.linkage_skipped, Toast.LENGTH_LONG).show();
+                    }
                     return false;
                 }
-                runLinkage(pkg);
+                runLinkage(pkg, true);
                 return true;
             }
-            // 开了联动却没设默认跳转应用：提示并落到普通界面
-            Toast.makeText(this, R.string.linkage_no_default, Toast.LENGTH_LONG).show();
+            // 开了联动却没设默认跳转应用：提示并落到普通界面。
+            // 每个进程只提示一次：配置没修好前每次打开都会走到这里，反复弹纯属打扰。
+            if (!sNoDefaultToasted) {
+                sNoDefaultToasted = true;
+                Toast.makeText(this, R.string.linkage_no_default, Toast.LENGTH_LONG).show();
+            }
         }
         return false;
     }
@@ -413,7 +443,7 @@ public class MainActivity extends PreferenceActivity {
                 return; // 所有通道失败：不写节流，下次启动重试
             }
             UpdateChecker.markChecked(this);
-            if (info.hasUpdate && info.versionCode > UpdateChecker.ignoredVersion(this)) {
+            if (info.hasUpdate) {
                 // 记下远端版本，关于行离线也能显示「可更新」
                 UpdateChecker.saveLatestKnown(this, info.versionCode, info.versionName);
                 // 仅对「未提示过的新版本」弹一次 Toast，不弹窗、不打扰
@@ -431,7 +461,7 @@ public class MainActivity extends PreferenceActivity {
 
     /**
      * 刷新主页「关于」行的摘要：默认显示当前版本号（如 1.0.0）；
-     * 存在已知且未忽略的新版本时改为「1.0.0 可更新1.0.1」，离线也可见。
+     * 存在已知新版本时改为「1.0.0 可更新1.0.1」，离线也可见。
      */
     private void refreshAboutSummary() {
         if (buildInfoPref == null) {
@@ -465,7 +495,7 @@ public class MainActivity extends PreferenceActivity {
             }
             if (info != null) {
                 UpdateChecker.markChecked(this);
-                if (info.hasUpdate && info.versionCode > UpdateChecker.ignoredVersion(this)) {
+                if (info.hasUpdate) {
                     // 记下远端版本，关于行同步显示「可更新」
                     UpdateChecker.saveLatestKnown(this, info.versionCode, info.versionName);
                 }
@@ -474,21 +504,13 @@ public class MainActivity extends PreferenceActivity {
             runOnUiThread(() -> {
                 if (result == null) {
                     Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
-                } else if (!result.hasUpdate
-                        || result.versionCode <= UpdateChecker.ignoredVersion(this)) {
+                } else if (!result.hasUpdate) {
                     Toast.makeText(this, R.string.update_already_latest, Toast.LENGTH_SHORT).show();
                 } else {
                     UpdateDialog.show(this, result, new UpdateDialog.Listener() {
                         @Override
                         public void onOpenUrl(String url) {
                             openExternalUrl(url);
-                        }
-
-                        @Override
-                        public void onIgnored(UpdateInfo ignored) {
-                            UpdateChecker.ignoreVersion(MainActivity.this, ignored.versionCode);
-                            // 已忽略的版本不再在关于行显示「可更新」
-                            refreshAboutSummary();
                         }
                     });
                 }
@@ -567,12 +589,22 @@ public class MainActivity extends PreferenceActivity {
     }
 
     private void initPrefs() {
-        swMasterPref = findPreference("swMaster");
+        swMasterPref = (MasterSwitchPreference) findPreference("swMaster");
+        // 开关拨动真正要做的事（写调试开关）注入给自定义 Preference
+        swMasterPref.setOnToggleListener(this::applyMasterState);
         swUsbPref = (SwitchPreference) findPreference("swUsb");
         swLinkagePref = (SwitchPreference) findPreference("swLinkage");
         swNotifyPref = (SwitchPreference) findPreference("swNotify");
         swWirelessPref = (SwitchPreference) findPreference("swWireless");
+        swDevOptsPref = (SwitchPreference) findPreference("swDevOpts");
         swKillPref = (SwitchPreference) findPreference("swKillBeforeOpen");
+        // 分类内按 android:order 排序，而不是按添加顺序：
+        // 折叠再展开时 usb / wireless 是 addPreference 回来的，按添加顺序会排到末尾
+        //（跑到开发者选项行之后）。固定 order 才能保证任何时候顺序都是「主 > USB > 无线 > 开发者选项」。
+        PreferenceCategory catDebug = (PreferenceCategory) findPreference("catDebug");
+        if (catDebug != null) {
+            catDebug.setOrderingAsAdded(false);
+        }
         liveUpdatePref = findPreference("liveUpdate");
         buildInfoPref = findPreference("buildInfo");
         // 关于行默认显示当前版本号（有已知可更新版本时改成「版本 可更新最新版」）
@@ -599,8 +631,7 @@ public class MainActivity extends PreferenceActivity {
         // 底部「关于」行：点击弹窗展示版本/构建时间等（构建时间不再直接占用行摘要）
 
         // 主开关：一键开/关。关闭时记住两个子开关的组合，打开时原样还原。
-        // 注意它是普通 Preference：整行点击与行内 Switch 都在 wireRowClicks() 里接线，
-        // 因为 widget 里的 Switch 要等布局完成后才拿得到。
+        // 行内 Switch 由 MasterSwitchPreference 绑定时接线；整行点击仍走 wireRowClicks()。
         swMasterPref.setOnPreferenceClickListener(p -> {
             toggleMaster();
             return true;
@@ -611,11 +642,19 @@ public class MainActivity extends PreferenceActivity {
             if (syncing) {
                 return true;
             }
+            // 启动窗口期（真值尚未读回）屏蔽操作：不置灰但点了不执行
+            if (!DebugController.confirmedThisSession()) {
+                return false;
+            }
             final boolean want = (Boolean) v;
             DebugController.setUsb(this, want, (ok, s) -> {
                 if (!ok) {
                     authCheckedThisSession = false;
                     Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                } else if (s == null || s.usb != want) {
+                    // 命令退出码 0 却没写进去（个别 ROM 会屏蔽该键）：界面只会无声弹回，
+                    // 必须明确告知，否则用户只覺得「点了没反应」。
+                    Toast.makeText(this, R.string.toast_write_not_effective, Toast.LENGTH_SHORT).show();
                 }
                 refresh(s);
             });
@@ -626,21 +665,57 @@ public class MainActivity extends PreferenceActivity {
             if (syncing) {
                 return true;
             }
+            // 启动窗口期（真值尚未读回）屏蔽操作：不置灰但点了不执行
+            if (!DebugController.confirmedThisSession()) {
+                return false;
+            }
             final boolean want = (Boolean) v;
             DebugController.setWireless(this, want, (ok, s) -> {
                 if (!ok) {
                     authCheckedThisSession = false;
                     Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                } else if (s == null || s.wireless != want) {
+                    Toast.makeText(this, R.string.toast_write_not_effective, Toast.LENGTH_SHORT).show();
                 }
                 refresh(s);
             });
             return true;
         });
 
+        // 开发者选项入口：独立开关，只写 development_settings_enabled，
+        // 既不影响 adb / 无线，也不参与主开关的折叠与记忆。其余行为与两个子开关一致。
+        if (swDevOptsPref != null) {
+            swDevOptsPref.setOnPreferenceChangeListener((Preference p, Object v) -> {
+                if (syncing) {
+                    return true;
+                }
+                // 启动窗口期（真值尚未读回）屏蔽操作：不置灰但点了不执行
+                if (!DebugController.confirmedThisSession()) {
+                    return false;
+                }
+                final boolean want = (Boolean) v;
+                DebugController.setDev(this, want, (ok, s) -> {
+                    if (!ok) {
+                        authCheckedThisSession = false;
+                        Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                    } else if (s == null || s.dev != want) {
+                        Toast.makeText(this, R.string.toast_write_not_effective, Toast.LENGTH_SHORT).show();
+                    } else if (!want) {
+                        // 关闭成功才提示：入口一隐藏，设置里就再也找不到这一项，
+                        // 而唯一的手动恢复路径是连点版本号——不说清楚等于把用户锁在外面。
+                        Toast.makeText(this, R.string.toast_devopts_hidden, Toast.LENGTH_LONG).show();
+                    }
+                    refresh(s);
+                });
+                return true;
+            });
+        }
+
         // 「打开调试前先杀掉联动应用」：真正的执行在 DebugController 里（所有打开调试的入口统一处理）
         if (swKillPref != null) {
+            // 默认开启：首次安装即勾选（与 DebugController 读取的默认值一致）
             swKillPref.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .getBoolean(PREF_KILL_BEFORE_OPEN, false));
+                    .getBoolean(PREF_KILL_BEFORE_OPEN, true));
             swKillPref.setOnPreferenceChangeListener((Preference p, Object v) -> {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                         .putBoolean(PREF_KILL_BEFORE_OPEN, (Boolean) v).apply();
@@ -650,24 +725,17 @@ public class MainActivity extends PreferenceActivity {
 
         swLinkagePref.setOnPreferenceChangeListener((Preference p, Object v) -> {
             boolean on = (Boolean) v;
+            // 未设置默认快捷应用时不允许打开：toast 提示并保持开关关闭（返回 false 不落状态）
+            if (on && LinkagePrefs.getDefault(this).isEmpty()) {
+                Toast.makeText(this, R.string.linkage_no_default, Toast.LENGTH_LONG).show();
+                return false;
+            }
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_LINKAGE, on).apply();
             // shortcut 组合随联动开关变化：开→「打开主页」，关→两个子开关
             ToggleShortcuts.publish(this);
             if (on) {
-                // 开启自动跳转：必须先有联动应用、且设置默认跳转目标
-                List<String> apps = LinkagePrefs.getApps(this);
-                if (apps.isEmpty()) {
-                    Toast.makeText(this, R.string.linkage_apps_empty_toast, Toast.LENGTH_LONG).show();
-                } else if (LinkagePrefs.getDefault(this).isEmpty()) {
-                    Toast.makeText(this, R.string.linkage_need_default, Toast.LENGTH_LONG).show();
-                    openDefaultPicker();
-                } else {
-                    Toast.makeText(this, R.string.linkage_on, Toast.LENGTH_SHORT).show();
-                    // 开启后提醒用户：以后怎么绕过自动跳转、进设置页（均基于现有能力，不新增入口）
-                    showLinkageHintDialog();
-                }
-            } else {
-                Toast.makeText(this, R.string.linkage_off, Toast.LENGTH_SHORT).show();
+                // 开启后提醒用户：以后怎么绕过自动跳转、进设置页（均基于现有能力，不新增入口）
+                showLinkageHintDialog();
             }
             return true;
         });
@@ -689,6 +757,10 @@ public class MainActivity extends PreferenceActivity {
                     AdbToggleService.stop(this);
                 }
             }
+            // 「测试灵动焦点通知」行随之显隐（只有打开开关才显示测试）。
+            // 必须 post：本回调返回后 framework 才把开关新值落进 isChecked()，
+            // 立刻读会拿到旧值，显隐就慢一拍。
+            mainHandler.post(this::updateLiveUpdateState);
             return true;
         });
 
@@ -714,10 +786,13 @@ public class MainActivity extends PreferenceActivity {
                     AdbToggleService.syncCloseNotification(MainActivity.this);
                 }
             } else {
-                // 写入失败：授权大概率已失效（su 超时 / Shizuku 被撤销）。立即刷新授权状态，
-                // 让主开关与联动项灰掉并显示「未授权」，而不是停在旧的「已授权」假象。
+                // 执行失败：授权大概率已失效（su 超时 / Shizuku 被撤销）。立即刷新授权状态，
+                // 让主开关与联动项灰掉并显示「未授权」+「重试」，而不是停在旧的「已授权」假象；
+                // 同时提示用户重试或切换授权模式。
                 privilegedAvailable = false;
+                authCheckedThisSession = false;
                 applyRootState();
+                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
             }
             refresh(s);
         });
@@ -790,9 +865,16 @@ public class MainActivity extends PreferenceActivity {
         });
     }
 
-    /** 执行快捷打开：关闭调试 -> 按开关拉起常驻通知 -> 打开目标应用（写入完成后在回调里依序执行） */
-    private void runLinkage(String pkg) {
-        sLinkageLaunched = true;
+    /**
+     * 执行快捷打开：关闭调试 -> 按开关拉起常驻通知 -> 打开目标应用（写入完成后在回调里依序执行）。
+     *
+     * @param autoJump 是否为「开启快捷打开后启动本 App」的自动跳转（决定是否弹跳转提示）
+     */
+    private void runLinkage(String pkg, boolean autoJump) {
+        sLinkageLaunched = true; // 任意来源跳转都记一笔：回来时不再自动跳，避免反复弹回
+        if (autoJump) {
+            sAutoJumped = true; // 区分来源：回设置页时只有自动跳转才提示「启动时已自动跳转」
+        }
         // 联动走统一入口：一键关闭会记住当前组合并把 USB / 无线都关掉。
         // 常驻通知在 su 写完之后才拉起，天然比旧版的固定 250ms 延时更稳。
         DebugController.setMaster(this, false, (ok, s) -> {
@@ -802,9 +884,50 @@ public class MainActivity extends PreferenceActivity {
             } else {
                 AdbToggleService.syncCloseNotification(this);
             }
-            launchApp(pkg);
+            if (!launchApp(pkg)) {
+                // 目标应用已失效（卸载 / 停用）：提示并留在设置页，而不是静默闪回桌面
+                handleLinkageTargetGone(pkg);
+                if (!prefsLoaded) {
+                    showSettings();
+                }
+                return;
+            }
+            if (autoJump) {
+                Toast.makeText(this, R.string.linkage_auto_jumped, Toast.LENGTH_LONG).show();
+            }
             finish();
         });
+    }
+
+    /**
+     * 快捷打开目标不可用（已卸载 / 已停用 / 无启动入口）的统一处理：
+     * 已卸载的顺手从列表清掉（与 rebuildLinkageList 的自动清理一致），已停用的保留（可随时恢复）；
+     * 两种情况都给出提示，避免「点了没反应」。
+     */
+    private void handleLinkageTargetGone(String pkg) {
+        if (isAppUninstalled(this, pkg)) {
+            List<String> apps = new ArrayList<>(LinkagePrefs.getApps(this));
+            if (apps.remove(pkg)) {
+                LinkagePrefs.setApps(this, apps);
+                ToggleShortcuts.publish(this);
+            }
+            Toast.makeText(this, R.string.linkage_app_uninstalled, Toast.LENGTH_LONG).show();
+            if (prefsLoaded) {
+                rebuildLinkageList();
+            }
+        } else {
+            Toast.makeText(this, R.string.linkage_app_unlaunchable, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 目标应用是否已卸载（停用的应用仍算「装着」，不清理、只在跳转失败时提示） */
+    private static boolean isAppUninstalled(Context ctx, String pkg) {
+        try {
+            ctx.getPackageManager().getApplicationInfo(pkg, 0);
+            return false;
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     /**
@@ -862,34 +985,34 @@ public class MainActivity extends PreferenceActivity {
     }
 
     /**
-     * 按完整状态刷新三行开关。
-     * 主开关 = 聚合态（任一开着就算开，因为 adbd 在跑）；两个子开关显示各自真值。
+     * 按完整状态刷新各行开关。
+     * 主开关 = 聚合态（任一开着就算开，因为 adbd 在跑）；子开关显示各自真值；
+     * 开发者选项行是独立开关，只反映 development_settings_enabled。
      */
     private void refresh(DebugController.State s) {
         if (swMasterPref == null || swUsbPref == null || swWirelessPref == null) {
             return;
         }
-        boolean anyOn = s.anyOn();
-        // 真值是否已由授权通道确认。未确认时缓存来自 ContentResolver，
-        // 而部分 ROM（HyperOS）会向第三方 App 隐藏这两个键、读到的全是 0 ——
-        // 此时若照常显示「已关闭 · 可通过检测」，就是给用户一个假的安全结论，
-        // 这与本 App 存在的意义（确认真实状态）直接冲突，故必须显示成「正在确认」。
-        final boolean calibrated = DebugController.isCalibrated();
-        // 主开关是自定义 widget（箭头 + Switch），手动同步 Switch 勾选
-        if (masterSwitch != null) {
-            syncing = true;
-            // 未校准时滑块置灰、不可拖动：状态未知，滑块位置本身也可能是错的
-            masterSwitch.setEnabled(calibrated);
-            masterSwitch.setChecked(anyOn);
-            syncing = false;
+        // 真值尚未由授权通道确认时，界面按「上次确认状态」渲染，不用调用方传入的快照：
+        // 那多半是 ContentResolver 兜底值（ROM 隐藏这两个键时恒为关），
+        // 直接拿来显示会出现「启动先显示关闭、校准完又跳回开启」的闪变。
+        if (!DebugController.isCalibrated()) {
+            s = DebugController.lastKnownState(this);
         }
-        masterCalibrated = calibrated;
+        boolean anyOn = s.anyOn();
+        // 真值未经本次授权通道确认时，显示「上次确认状态」的文案（保持稳定、不跳字）；
+        // 只有首次使用（历史从没确认过、无上次状态）才显示「正在读取当前状态…」并置灰。
+        final boolean calibrated = DebugController.isCalibrated();
+        // 首次使用（无「上次状态」）才置灰；其余情况显示上次状态、不置灰，
+        // 真值不一致时校准回来修正一次（见 MasterSwitchPreference 的显示规则）
+        final boolean known = calibrated || DebugController.hasConfirmedBefore(this);
+        swMasterPref.applyState(anyOn, known);
         // 展开态跟随主开关：开→展开，关→折叠
         applyMasterExpanded(anyOn);
         // 全开或全关显示明确结论；只有一个开着时提示"部分开启"，避免误以为已安全
         int masterSum;
         int masterColor;
-        if (!calibrated) {
+        if (!known) {
             masterSum = R.string.master_checking;
             masterColor = R.color.stateUnknown;
         } else if (s.allOff()) {
@@ -915,20 +1038,23 @@ public class MainActivity extends PreferenceActivity {
         swWirelessPref.setSummary(s.wireless ? R.string.wireless_on : R.string.wireless_off);
         swWirelessPref.setIcon(stateIcon(s.wireless ? R.color.stateOn : R.color.stateOff));
 
+        if (swDevOptsPref != null) {
+            swDevOptsPref.setSummary(s.dev ? R.string.devopts_on : R.string.devopts_off);
+            swDevOptsPref.setIcon(stateIcon(s.dev ? R.color.stateOn : R.color.stateOff));
+        }
+
         syncing = true;
         swUsbPref.setChecked(s.usb);
         swWirelessPref.setChecked(s.wireless);
+        if (swDevOptsPref != null) {
+            swDevOptsPref.setChecked(s.dev);
+        }
         syncing = false;
 
         // 长按快捷方式的状态灯与界面同步
         ToggleShortcuts.publish(this);
 
-        // 校准状态变化（首次校准完成 / 缓存失效清空）时，重挂整行点击：
-        // 未校准 → 整行不可点（避免状态未知时误操作）；校准完成 → 恢复点击。
-        if (masterRowView != null) {
-            masterRowView.setOnClickListener(
-                    masterCalibrated ? (v) -> toggleMaster() : null);
-        }
+        // 校准状态变化后无需重挂点击：监听常驻，窗口期由回调内部自行屏蔽
     }
 
     /** 根据当前授权模式是否可用刷新控件与提示：未授权时禁用并提示，授权后及时恢复 */
@@ -943,6 +1069,9 @@ public class MainActivity extends PreferenceActivity {
             swUsbPref.setEnabled(true);
             swNotifyPref.setEnabled(true);
             swWirelessPref.setEnabled(true);
+            if (swDevOptsPref != null) {
+                swDevOptsPref.setEnabled(true);
+            }
             // 联动分类下（开关 + 动态填充的默认/应用/管理行）一并启用
             setLinkageEnabled(true);
             // 授权恢复：把主开关行从「未授权，无法写入」改回真实状态文案。
@@ -955,6 +1084,9 @@ public class MainActivity extends PreferenceActivity {
             swUsbPref.setEnabled(false);
             swNotifyPref.setEnabled(false);
             swWirelessPref.setEnabled(false);
+            if (swDevOptsPref != null) {
+                swDevOptsPref.setEnabled(false);
+            }
             // 联动分类下所有项一并禁用（无授权则无法写入调试开关，联动也失去意义）
             setLinkageEnabled(false);
         }
@@ -985,7 +1117,27 @@ public class MainActivity extends PreferenceActivity {
             return;
         }
         List<String> apps = LinkagePrefs.getApps(this);
+        // 已卸载的快捷应用自动清掉：图标/标签都取不到，留着只会在每次跳转时失败。
+        // 每次回到前台都会走到这里（onResume），故卸载后无需手动整理；
+        // 停用的应用不算（可随时恢复），只在跳转失败时提示。
+        List<String> alive = new ArrayList<>();
+        for (String p : apps) {
+            if (!isAppUninstalled(this, p)) {
+                alive.add(p);
+            }
+        }
+        if (alive.size() != apps.size()) {
+            LinkagePrefs.setApps(this, alive);
+            apps = alive;
+            ToggleShortcuts.publish(this); // 默认目标可能随之清掉，动态快捷方式同步
+            Toast.makeText(this, R.string.linkage_app_uninstalled, Toast.LENGTH_LONG).show();
+        }
         String def = LinkagePrefs.getDefault(this);
+        // 只有一个快捷应用时自动选它为默认（兼容旧数据：早先版本不会自动设默认）
+        if (apps.size() == 1 && def.isEmpty()) {
+            def = apps.get(0);
+            LinkagePrefs.setDefault(this, def);
+        }
         // 内容指纹：配置与授权状态都没变就不重建。
         // 重建要移除/新建所有 Preference，并在主线程同步 getApplicationIcon（跨进程 + 解码），
         // 而 onResume 每次都会走到这里 —— 每次回前台都为一份没变的列表重做一遍纯属浪费。
@@ -1066,7 +1218,6 @@ public class MainActivity extends PreferenceActivity {
             rebuildLinkageList();
             // 选完立刻刷新动态快捷方式（「启动联动应用」现取默认 app）
             ToggleShortcuts.publish(this);
-            Toast.makeText(this, R.string.linkage_added, Toast.LENGTH_SHORT).show();
         });
     }
 
@@ -1105,7 +1256,6 @@ public class MainActivity extends PreferenceActivity {
                     LinkagePrefs.setDefault(this, apps.get(pick[0]));
                     rebuildLinkageList();
                     ToggleShortcuts.publish(this);
-                    Toast.makeText(this, R.string.linkage_set_default, Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
@@ -1133,12 +1283,15 @@ public class MainActivity extends PreferenceActivity {
             list.setOnScrollListener(new android.widget.AbsListView.OnScrollListener() {
                 @Override
                 public void onScrollStateChanged(android.widget.AbsListView view, int scrollState) {
-                    wireRowClicks();
+                    // 只在滚动停稳后重接线：onScroll 每帧都重挂会让滑动期持续分配监听器、GC 抖动。
+                    // 滚动中本来就点不了行，停稳后统一接线即可覆盖新进入视野的行。
+                    if (scrollState == SCROLL_STATE_IDLE) {
+                        wireRowClicks();
+                    }
                 }
                 @Override
                 public void onScroll(android.widget.AbsListView view, int firstVisibleItem,
                                      int visibleItemCount, int totalItemCount) {
-                    wireRowClicks();
                 }
             });
         }
@@ -1199,13 +1352,18 @@ public class MainActivity extends PreferenceActivity {
 
     /**
      * 主开关行接线：整行点击 = 切换主开关；箭头按钮单独消费点击，用于折叠/展开；
-     * 行内 Switch 每帧按真值同步（widget 在布局完成后才拿得到，refresh 可能漏掉）。
+     * 行内 Switch 由 MasterSwitchPreference 绑定时同步，这里只接整行点击与箭头。
      */
     private void wireMasterRow(View row) {
         masterRowView = row;
         // 整行点击切换主开关（箭头按钮单独消费，用于折叠/展开）。
-        // 未校准时整行不可点：状态未知，点了也没意义，校准完成后 refresh 会重新挂上点击。
-        row.setOnClickListener(masterCalibrated ? (v) -> toggleMaster() : null);
+        // 启动窗口期（真值尚未读回）屏蔽操作：显示不置灰，但点了不执行
+        row.setOnClickListener(v -> {
+            if (!DebugController.confirmedThisSession()) {
+                return;
+            }
+            toggleMaster();
+        });
         View arrow = row.findViewById(R.id.btn_expand);
         if (arrow != null) {
             arrow.setOnClickListener(v -> toggleExpanded());
@@ -1213,25 +1371,8 @@ public class MainActivity extends PreferenceActivity {
         // 图标只在主开关行内找：原先的 findViewDeep 会遍历整棵 decor 视图树，
         // 而 wireRowClicks 每帧（布局/滚动）都会跑一次，等于每帧做两遍全树遍历。
         updateExpandIcon(row, subSwitchesShown);
-        Switch sw = row.findViewById(R.id.sw_master);
-        if (sw != null) {
-            if (masterSwitch != sw) {
-                masterSwitch = sw;
-                // 用 checked 回调而不是 click：Switch 点击后自身状态已翻转，
-                // 以回调里给的 isChecked 为目标状态，才不会和真值打架。
-                sw.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                    if (syncing) {
-                        return;
-                    }
-                    applyMasterState(isChecked);
-                });
-            }
-            // 关键：widget 是布局完成后才拿到的，refresh() 往往跑在它之前而漏掉同步，
-            // 这里每次布局完都按真值同步一次，避免 Switch 停在 XML 的默认关闭态。
-            syncing = true;
-            sw.setChecked(DebugController.read(this).anyOn());
-            syncing = false;
-        }
+        // 行内 Switch 不在这里接线/同步：由 MasterSwitchPreference 在行绑定时统一处理
+        //（绑定发生在绘制之前，首帧即正确，不受全局布局回调时序影响）
     }
 
     /** 更新主开关行的展开箭头图标（在行内查找，不做全树遍历） */
@@ -1259,7 +1400,7 @@ public class MainActivity extends PreferenceActivity {
                 Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
                 return;
             }
-            runLinkage(pkg);
+            runLinkage(pkg, false);
         });
         row.setOnLongClickListener(v -> {
             if (!privilegedAvailable) {
@@ -1309,14 +1450,18 @@ public class MainActivity extends PreferenceActivity {
         return d;
     }
 
-    private void launchApp(String pkg) {
+    /** 启动目标应用；返回是否成功拉起（已卸载 / 已停用 / 无启动入口都会失败） */
+    private boolean launchApp(String pkg) {
         try {
             Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-            if (i != null) {
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
+            if (i == null) {
+                return false;
             }
-        } catch (Throwable ignored) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            return true;
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -1356,7 +1501,7 @@ public class MainActivity extends PreferenceActivity {
     /**
      * 注册/反注册 Settings 监听，避免泄漏与无谓开销。
      *
-     * 只监听 adb_enabled / adb_wifi_enabled 两个键的 URI，不监听整个 Settings.Global.CONTENT_URI：
+     * 只监听 DebugController 管理的这三个键的 URI，不监听整个 Settings.Global.CONTENT_URI：
      * 后者会让任何 global 设置变更（亮度、飞行模式等）都回调一次，白白触发一轮状态刷新。
      */
     private void observeSettings(boolean register) {
@@ -1383,22 +1528,34 @@ public class MainActivity extends PreferenceActivity {
         }
     }
 
-    /** 实时动态仅 Android 16+ 才有意义，低版本隐藏该设置项 */
+    /**
+     * 「测试灵动焦点通知」行的显隐（与「关闭时显示通知」开关联动）：
+     *  - 低于 Android 16 本功能完全用不了 → 摘掉；
+     *  - 「关闭时显示通知」关闭 → 摘掉：只有打开开关才显示测试入口；
+     *  其余情况挂回「通知」分类末尾并保持可点。
+     * 框架 Preference 没有 setVisible，只能 remove/add。
+     */
     private void updateLiveUpdateState() {
         if (liveUpdatePref == null) {
             return;
         }
-        // 低于 Android 16：本功能完全用不了，直接从通知分类里移除这一行，
-        // 比「变灰 + 提示不支持」更干净（框架 Preference 没有 setVisible，只能摘掉）。
-        if (Build.VERSION.SDK_INT < 36) {
-            PreferenceCategory cat = (PreferenceCategory) findPreference("catNotify");
-            if (cat != null) {
-                cat.removePreference(liveUpdatePref);
-            }
-        } else {
+        boolean want = Build.VERSION.SDK_INT >= 36
+                && swNotifyPref != null && swNotifyPref.isChecked();
+        if (want == liveUpdateShown) {
+            return;
+        }
+        PreferenceCategory cat = (PreferenceCategory) findPreference("catNotify");
+        if (cat == null) {
+            return;
+        }
+        if (want) {
+            cat.addPreference(liveUpdatePref);
             liveUpdatePref.setEnabled(true);
             liveUpdatePref.setSummary(R.string.live_update_sum);
+        } else {
+            cat.removePreference(liveUpdatePref);
         }
+        liveUpdateShown = want;
     }
 
     // —— 双模式授权 ——
@@ -1610,8 +1767,7 @@ public class MainActivity extends PreferenceActivity {
      */
     private void createDesktopShortcutFor(String pkg) {
         if (pkg == null || pkg.isEmpty()) {
-            Toast.makeText(this, R.string.create_shortcut_no_app, Toast.LENGTH_LONG).show();
-            return;
+            return; // 行点击传入的包名恒非空（缺包名场景已废弃），此守卫只防编程错误
         }
         CharSequence label = getApplicationLabel(pkg);
         // 关键：快捷方式必须先打开「本 App」，由 App 关掉调试再联动启动目标应用，
@@ -1626,7 +1782,8 @@ public class MainActivity extends PreferenceActivity {
 
         // Android 8+ 优先用 LauncherApps 钉选（现代 launcher 才支持），失败再回退老广播
         if (Build.VERSION.SDK_INT >= 26 && requestPinShortcut(label, launch, icon)) {
-            Toast.makeText(this, R.string.create_shortcut_done, Toast.LENGTH_SHORT).show();
+            // 真实结果由回调给（PinShortcutReceiver）：钉上才提示「已创建」，
+            // 用户取消 / 被 ROM 吞掉则超时兜底提示「未创建」。这里不再发「已请求」这类无结果提示。
             return;
         }
         Intent intent = new Intent("com.android.launcher.action.INSTALL_SHORTCUT");
@@ -1638,9 +1795,11 @@ public class MainActivity extends PreferenceActivity {
         intent.putExtra("duplicate", false);
         try {
             sendBroadcast(intent);
+            // 两条路径都拿不到「是否真的落到桌面」的真实结果，只能提示已发起
             Toast.makeText(this, R.string.create_shortcut_done, Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
-            Toast.makeText(this, R.string.create_shortcut_fail, Toast.LENGTH_SHORT).show();
+            // 旧广播路径基本不会抛异常；真抛了只记日志（创建失败与否无从得知）
+            android.util.Log.w(TAG, "INSTALL_SHORTCUT broadcast failed", t);
         }
     }
 
@@ -1663,7 +1822,16 @@ public class MainActivity extends PreferenceActivity {
             b.setIcon(Icon.createWithBitmap(icon));
         }
         try {
-            return sm.requestPinShortcut(b.build(), null);
+            // 结果回调：按官方契约，只有真正钉上时才会收到（PendingIntent 按官方样例用
+            // FLAG_IMMUTABLE）；取消/被拒不回调，故 arm() 挂超时兜底提示。
+            Intent cb = new Intent(this, PinShortcutReceiver.class);
+            PendingIntent result = PendingIntent.getBroadcast(this, 0, cb,
+                    PendingIntent.FLAG_IMMUTABLE);
+            boolean accepted = sm.requestPinShortcut(b.build(), result.getIntentSender());
+            if (accepted) {
+                PinShortcutReceiver.arm(this);
+            }
+            return accepted;
         } catch (Throwable t) {
             return false;
         }
@@ -1711,6 +1879,19 @@ public class MainActivity extends PreferenceActivity {
             unregisterReceiver(stateReceiver);
         } catch (Throwable ignored) {
         }
+        // Shizuku 监听成对移除：其监听表是静态的，桌面快捷方式（CLEAR_TASK）会反复重建本 Activity，
+        // 不移除会累积监听器、泄漏旧实例并重复回调。
+        try {
+            if (shizukuBinderListener != null) {
+                Shizuku.removeBinderReceivedListener(shizukuBinderListener);
+                shizukuBinderListener = null;
+            }
+            if (shizukuPermListener != null) {
+                Shizuku.removeRequestPermissionResultListener(shizukuPermListener);
+                shizukuPermListener = null;
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     // 通知权限的授予结果不覆写处理：是否授予只影响常驻通知可见性，不影响开关写入功能，
@@ -1746,8 +1927,10 @@ public class MainActivity extends PreferenceActivity {
             Toast.makeText(this, R.string.live_update_test_sent, Toast.LENGTH_LONG).show();
             return;
         }
+        // 测试结果与授权引导合并进同一个弹窗（弹窗+toast 同屏双报太吵，文案复用现有两串）
         new AlertDialog.Builder(this)
-                .setMessage(R.string.live_update_grant)
+                .setMessage(getString(R.string.live_update_test_sent_plain) + "\n\n"
+                        + getString(R.string.live_update_grant))
                 .setPositiveButton(android.R.string.ok, (d, w) -> {
                     try {
                         // 用字面量 action，避免新常量在编译期不可引用
@@ -1766,7 +1949,6 @@ public class MainActivity extends PreferenceActivity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
-        Toast.makeText(this, R.string.live_update_test_sent_plain, Toast.LENGTH_LONG).show();
     }
 
     /** 测试通知用的固定渠道：只创建一次（幂等），不每次点测试都新建一条 */
@@ -1781,7 +1963,7 @@ public class MainActivity extends PreferenceActivity {
         }
         if (Build.VERSION.SDK_INT >= 26 && !liveChannelEnsured) {
             NotificationChannel ch = new NotificationChannel(
-                    LIVE_UPDATE_CHANNEL_ID, "实时动态测试", NotificationManager.IMPORTANCE_DEFAULT);
+                    LIVE_UPDATE_CHANNEL_ID, "测试通知状态", NotificationManager.IMPORTANCE_DEFAULT);
             ch.setShowBadge(false);
             nm.createNotificationChannel(ch);
             liveChannelEnsured = true;

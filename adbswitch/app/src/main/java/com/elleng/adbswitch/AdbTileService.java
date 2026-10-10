@@ -7,6 +7,7 @@ import android.content.IntentFilter;
 import android.os.Build;
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
+import android.widget.Toast;
 
 /**
  * 通知控制中心（下拉快捷磁贴）：点击即一键开关调试（主开关语义），
@@ -21,7 +22,8 @@ public class AdbTileService extends TileService {
             if (DebugController.ACTION_STATE.equals(i.getAction())) {
                 updateTile(new DebugController.State(
                         i.getBooleanExtra(DebugController.EXTRA_USB, false),
-                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false)));
+                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false),
+                        i.getBooleanExtra(DebugController.EXTRA_DEV, false)));
             }
         }
     };
@@ -63,6 +65,10 @@ public class AdbTileService extends TileService {
                 } else {
                     AdbToggleService.syncCloseNotification(this);
                 }
+            } else {
+                // 读不到真值 / 写失败：明确提示，别让磁贴「点了没反应」；
+                // 用户可重试，或到主界面按提示重试/切换授权模式。
+                Toast.makeText(this, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
             }
             updateTile(s);
         });

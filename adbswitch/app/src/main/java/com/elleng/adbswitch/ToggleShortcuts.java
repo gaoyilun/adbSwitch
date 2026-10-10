@@ -73,7 +73,6 @@ final class ToggleShortcuts {
             if (sig.equals(lastSignature)) {
                 return;
             }
-            lastSignature = sig;
 
             List<ShortcutInfo> list = new ArrayList<>();
             list.add(buildToggle(ctx, s));
@@ -92,7 +91,13 @@ final class ToggleShortcuts {
             if (!pkg.isEmpty()) {
                 list.add(buildLaunch(ctx, pkg, rank++));
             }
-            sm.setDynamicShortcuts(list);
+            // 只有发布成功才记指纹：setDynamicShortcuts 被系统限流/拒绝时返回 false，
+            // 若先记指纹，之后指纹相同就永远不再重试，长按菜单的状态灯会长期失真。
+            if (!sm.setDynamicShortcuts(list)) {
+                android.util.Log.w("AdbSwitch", "setDynamicShortcuts rejected, will retry on next publish");
+                return;
+            }
+            lastSignature = sig;
         } catch (Throwable t) {
             android.util.Log.w("AdbSwitch", "shortcut publish failed", t);
         }

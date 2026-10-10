@@ -45,7 +45,8 @@ public class AdbToggleService extends Service {
             if (DebugController.ACTION_STATE.equals(i.getAction())) {
                 DebugController.State s = new DebugController.State(
                         i.getBooleanExtra(DebugController.EXTRA_USB, false),
-                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false));
+                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false),
+                        i.getBooleanExtra(DebugController.EXTRA_DEV, false));
                 if (s.anyOn()) {
                     // 任一被打开：adbd 又跑起来了，常驻通知没有意义，撤掉
                     ToggleShortcuts.publish(AdbToggleService.this);
@@ -109,12 +110,18 @@ public class AdbToggleService extends Service {
         DebugController.State s;
         if (intent != null && intent.hasExtra(EXTRA_STATE_ON)) {
             boolean anyOn = intent.getBooleanExtra(EXTRA_STATE_ON, false);
-            s = anyOn ? new DebugController.State(true, false) : new DebugController.State(false, false);
+            // dev 只是随行字段，这里用调用方已知的聚合态构造，dev 取 false（通知不展示它）
+            s = anyOn ? new DebugController.State(true, false, false)
+                    : new DebugController.State(false, false, false);
         } else {
             s = DebugController.read(this);
         }
         if (s.anyOn()) {
-            // 任一还开着：不需要常驻通知
+            // 任一还开着：不需要常驻通知。
+            // 但本服务可能经 startForegroundService() 拉起，必须先 startForeground 再停，
+            // 否则系统按「没在时限内进前台」抛 ForegroundServiceDidNotStartInTimeException。
+            // startForeground 后立即 stopSelf，onDestroy 会把这条占位通知取消掉。
+            startForegroundCompat(buildNotification(this, s));
             stopSelf();
             return START_NOT_STICKY;
         }

@@ -20,7 +20,7 @@ public final class UpdateInfo {
     public final String versionName;
     /** 更新说明，可能为空串。 */
     public final String notes;
-    /** 强制更新：为 true 时不提供「忽略」，也不允许点外部关闭。 */
+    /** 强制更新：为 true 时不允许点外部/返回关闭。 */
     public final boolean mandatory;
     /** 主通道 APK 直链；蒲公英通道恒为 null（那边只引导跳安装页）。 */
     public final String apkUrl;

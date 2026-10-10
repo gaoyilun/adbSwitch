@@ -32,34 +32,54 @@
         android:text="@string/picker_loading"
         android:visibility="gone" />
 
-    <!-- 下拉刷新容器：顶部隐藏的刷新提示 + 可滚动列表 -->
-    <FrameLayout
-        android:id="@+id/ptrContainer"
+    <!-- 未读取到应用列表（常见于「应用列表」权限未授权）：提示授权 + 刷新重试按钮 -->
+    <LinearLayout
+        android:id="@+id/llError"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingTop="24dp"
+        android:paddingBottom="24dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvError"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/picker_need_permission"
+            android:textColor="@color/textSecondary"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btnRetry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/picker_retry" />
+
+    </LinearLayout>
+
+    <!-- 下拉刷新：原生 SwipeRefreshLayout 标准控件（替代自研的下拉刷新实现） -->
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
         android:layout_height="500dp"
         android:background="@color/background">
-
-        <TextView
-            android:id="@+id/ptrHeader"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_gravity="top"
-            android:gravity="center"
-            android:textSize="14sp"
-            android:textColor="@color/textSecondary"
-            android:text="@string/ptr_pull" />
 
         <ListView
             android:id="@+id/lvApps"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_gravity="top"
             android:background="@color/surface"
             android:divider="#E3E6EA"
             android:dividerHeight="1dp"
             android:paddingStart="8dp"
             android:paddingEnd="8dp"
             android:scrollbars="vertical" />
-    </FrameLayout>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
 </LinearLayout>

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 默认快捷应用行：应用图标放在右侧（区别于其它行的左侧图标）。
-     仅收紧内边距，图标尺寸与字号沿用系统默认档位（同 pref_row）。 -->
+     仅收紧内边距，图标尺寸与字号沿用系统默认档位（同 pref_row）。
+     文字列 marginStart=10dp：与其它行对齐的关键 —— pref_row 无图标时左侧图标框被收起，
+     文字起点 = 行内边距 12dp + 文字间距 10dp；这里没有左侧图标，故只需补 10dp，
+     既不是 0（会比别的行凸出 10dp），也不能按有图标行算（会缩进 50dp）。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -17,6 +20,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
+        android:layout_marginStart="10dp"
         android:layout_marginEnd="10dp"
         android:orientation="vertical">
 

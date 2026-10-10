@@ -3,6 +3,8 @@ package com.elleng.adbswitch;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 import android.widget.Toast;
 
 /**
@@ -17,9 +19,18 @@ import android.widget.Toast;
  */
 public class NotificationReceiver extends BroadcastReceiver {
 
+    /** goAsync 只能把广播时限撑到约 10s；回调里 finish 必须在此之前，超时兜底强制结束防 ANR */
+    private static final long FINISH_TIMEOUT_MS = 8000;
+    // 用静态 Looper 建 Handler：实例字段初始化里拿 this/getMainLooper 在早期阶段会踩坑
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
     @Override
     public void onReceive(final Context ctx, Intent intent) {
         final PendingResult pr = goAsync();
+        // 兜底：su 挂起 / IO 队列拥堵时回调迟迟不来，到点强制 finish。
+        // 回调正常到达时先取消兜底再 finish；重复 finish 容忍（见 finishQuietly）。
+        final Runnable forceFinish = () -> finishQuietly(pr);
+        MAIN.postDelayed(forceFinish, FINISH_TIMEOUT_MS);
         String action = intent.getAction();
         if (AdbToggleService.ACTION_OPEN.equals(action)) {
             DebugController.setMaster(ctx, true, (ok, s) -> {
@@ -30,7 +41,8 @@ public class NotificationReceiver extends BroadcastReceiver {
                     AdbToggleService.stop(ctx);
                 }
                 ToggleShortcuts.publish(ctx);
-                pr.finish();
+                MAIN.removeCallbacks(forceFinish);
+                finishQuietly(pr);
             });
         } else if (AdbToggleService.ACTION_CLOSE.equals(action)) {
             DebugController.setMaster(ctx, false, (ok, s) -> {
@@ -40,14 +52,25 @@ public class NotificationReceiver extends BroadcastReceiver {
                     AdbToggleService.syncCloseNotification(ctx);
                 }
                 ToggleShortcuts.publish(ctx);
-                pr.finish();
+                MAIN.removeCallbacks(forceFinish);
+                finishQuietly(pr);
             });
         } else if (AdbToggleService.ACTION_DISMISS.equals(action)) {
             // 只取消置顶/常驻，不动开关真值
             AdbToggleService.stop(ctx);
-            pr.finish();
+            MAIN.removeCallbacks(forceFinish);
+            finishQuietly(pr);
         } else {
+            MAIN.removeCallbacks(forceFinish);
+            finishQuietly(pr);
+        }
+    }
+
+    private static void finishQuietly(PendingResult pr) {
+        try {
             pr.finish();
+        } catch (Throwable ignored) {
+            // 重复 finish / 已超时被系统回收：都不值得再折腾
         }
     }
 }

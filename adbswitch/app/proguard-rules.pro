@@ -7,6 +7,7 @@
 -keep public class com.elleng.adbswitch.MainActivity { *; }
 -keep public class com.elleng.adbswitch.AdbToggleService { *; }
 -keep public class com.elleng.adbswitch.NotificationReceiver { *; }
+-keep public class com.elleng.adbswitch.PinShortcutReceiver { *; }
 -keep public class com.elleng.adbswitch.AdbTileService { *; }
 
 # ── 调试开关的对外 action 常量 ─────────────────────────

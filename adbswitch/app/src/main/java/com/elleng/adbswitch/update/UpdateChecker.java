@@ -18,8 +18,8 @@ import java.nio.charset.StandardCharsets;
  *
  * 移植自 LivePhoto 项目的同名实现（Kotlin），按本工程实际情况做了三处调整：
  *  1. Kotlin 协程 → 同步方法（调用方放在后台线程，本工程的 su/Shizuku 通道也是同一套后台线程模型）；
- *  2. 补上「已忽略版本」的持久化（见下方 ignoredVersion）——原实现点「忽略」只关弹窗，
- *     3 天节流一过同一个版本会再弹一次，用户无法真正忽略；
+ *  2. 不提供「忽略」：本 App 走弱提示路线（启动只 Toast、下载入口在关于弹窗），
+ *     不需要「永久别再提醒」的出口，故不持久化任何忽略状态；
  *  3. 把版本比较抽成纯函数 isNewer()，便于单测与复用。
  *
  * 通道编排（与原实现一致，这里写清理由）：
@@ -36,7 +36,6 @@ public final class UpdateChecker {
     private static final String TAG = "UpdateChecker";
     private static final String PREFS = "update_prefs";
     private static final String KEY_LAST_CHECK = "last_check";
-    private static final String KEY_IGNORED = "ignored_version_code";
     // 已知远端最新版本（供「关于」行离线显示「可更新」）
     private static final String KEY_LATEST_CODE = "latest_version_code";
     private static final String KEY_LATEST_NAME = "latest_version_name";
@@ -67,7 +66,7 @@ public final class UpdateChecker {
                 && !UpdateConfig.PGYER_APP_KEY.trim().isEmpty();
     }
 
-    // —— 节流与忽略 ——
+    // —— 节流 ——
 
     public static boolean shouldCheck(Context ctx) {
         long last = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -81,20 +80,7 @@ public final class UpdateChecker {
                 .putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply();
     }
 
-    /** 用户点「忽略」后记下该 versionCode，之后同版本不再弹。 */
-    public static void ignoreVersion(Context ctx, int versionCode) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putInt(KEY_IGNORED, versionCode).apply();
-    }
-
-    public static int ignoredVersion(Context ctx) {
-        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getInt(KEY_IGNORED, 0);
-    }
-
     // —— 已知远端版本（关于行「可更新」提示，离线也可见）——
-    // 即使当前未激活（ENABLED=false），这些键也可能残留上次配置后写入的值，
-    // 故「关于」行读取后应再按 ignoredVersion 过滤，避免显示已忽略的版本。
 
     /** 自动/手动检查发现新版本后记录远端版本号，使关于行离线也能显示「可更新」。 */
     public static void saveLatestKnown(Context ctx, int versionCode, String versionName) {
@@ -115,13 +101,9 @@ public final class UpdateChecker {
                 .getString(KEY_LATEST_NAME, "");
     }
 
-    /** 是否存在「已知且未忽略」的新版本（供关于行显示「可更新」）。 */
+    /** 是否存在已知的新版本（供关于行显示「可更新」）。 */
     public static boolean hasKnownUpdate(Context ctx, int currentCode) {
-        int latest = getLatestVersionCode(ctx);
-        if (latest <= currentCode) {
-            return false;
-        }
-        return latest != ignoredVersion(ctx);
+        return getLatestVersionCode(ctx) > currentCode;
     }
 
     // —— 自动检查的一次性 toast 去重 ——
@@ -252,9 +234,12 @@ public final class UpdateChecker {
             boolean hasUpdate = data.optBoolean("buildHaveNewVersion", false);
             // 注意字段名就是官方那个拼写 appURl（不是 appUrl）
             String pageUrl = emptyToNull(data.optString("appURl"));
+            // 关键：蒲公英官方文档中 buildVersionNo 是 String 类型（"Android Version Code，默认 1"），
+            // 用 optInt 解析字符串会恒返回 0，导致「关于行可更新提示」与「一次性 Toast 去重」失效。
+            // 必须按字符串解析（见 parseIntSafe）。
             return new UpdateInfo(
                     hasUpdate,
-                    data.optInt("buildVersionNo", 0),
+                    parseIntSafe(data.optString("buildVersionNo", "0")),
                     data.optString("buildVersion", ""),
                     data.optString("buildUpdateDescription", ""),
                     false,
@@ -305,5 +290,17 @@ public final class UpdateChecker {
 
     private static String emptyToNull(String s) {
         return (s == null || s.trim().isEmpty()) ? null : s.trim();
+    }
+
+    /** 把字符串安全解析为 int；空/非数字都返回 0。蒲公英的 buildVersionNo 官方定义为 String 类型。 */
+    private static int parseIntSafe(String s) {
+        if (s == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 }

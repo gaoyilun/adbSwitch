@@ -74,6 +74,12 @@
             android:name=".NotificationReceiver"
             android:exported="false" />
 
+        <!-- 桌面快捷方式钉选结果回调（requestPinShortcut 的 resultIntent，只有真正钉上才回调）；
+             显式 Intent 指向本类，不受隐式广播限制 -->
+        <receiver
+            android:name=".PinShortcutReceiver"
+            android:exported="false" />
+
         <!-- Shizuku 桥接：本 App 通过它拿到 shell 权限的 Binder（跨 UID 回传入口）。
              注意：provider 必须 android:exported="true" —— 它是跨 UID（Shizuku 管理器）回调传递
              Binder 的入口，targetSdk>=31 时若设为 false，系统会抛

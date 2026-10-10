@@ -1,78 +1,94 @@
-# 调试开关（AdbSwitch）
+<div align="center">
 
-一个 **root 授权的调试开关 App**：不 hook、不碰任何 App 内部，只用 `su` 真实改写
-`Settings.Global.adb_enabled`，把 USB 调试**真实地**开 / 关。关掉后，让银行类 App（如香港汇丰 HSBC HK）
-弹「请关闭开发者选项」的那些派生属性会一次性归零。
+# 调试开关 · AdbSwitch
 
-> 本仓库当前主方案就是 `adbswitch/` 这一个模块。
-> 早期尝试过的 Xposed（LSPosed）/ Zygisk native hook / 探针 三件套已归档到 `archive/`，
-> 详见 `archive/README.md`，不再主推，也不在本仓库常规构建范围内。
+<img src="icon.png" width="96" style="border-radius: 18px;" alt="app icon"/>
+
+**一个用 root / Shizuku 真实开关 Android USB 调试的本地工具**
+
+[![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)](https://www.android.com)
+[![Written in](https://img.shields.io/badge/Written%20in-Java-007396?logo=openjdk&logoColor=white)](https://www.java.com)
+[![UI](https://img.shields.io/badge/UI-Material%20Components-4285F4?logo=materialdesign&logoColor=white)](https://m3.material.io)
+[![Update](https://img.shields.io/badge/Update-GitHub%20%2B%20Pgyer-FF6F00)](#检查更新)
+
+</div>
 
 ---
 
-## 它解决什么
+## ✨ 功能特性
 
-不用 hook、不碰任何 App 内部，只是用 root（`su`）改写 `Settings.Global.adb_enabled`，
-把 USB 调试**真实地**开 / 关。关掉后，上面那些让 HSBC 弹窗的派生值会一次性自动变干净，
-无需逐条伪造，也不会和任何 hook 方案打架。
+| 功能 | 说明 |
+| :--- | :--- |
+| 🔌 **真实开关 USB 调试** | 用 root（`su`）或 Shizuku（shell uid 2000）改写系统设置，关掉后开发者选项里的 USB 调试项也显示关闭——是真实状态，不是伪装 |
+| 📋 **QS 快捷磁贴** | 下拉通知栏加入「调试开关」磁贴，点一下即切换；关闭时自动拉起常驻通知，打开时自动撤掉 |
+| 🔔 **临时关闭 + 常驻通知** | 关闭 USB 调试后在通知栏常驻一条「USB 调试：当前已关闭」通知，附带「恢复打开」一键动作，恢复正常即自动消失 |
+| ⚡ **快捷打开（联动）** | 专为「打开银行 App 过检」设计：从启动器打开本 App 自动关调试并跳转目标 App；可在桌面生成目标 App 的原生快捷方式 |
 
-## 三个能力
+## 📱 设备兼容性与运行要求
 
-1. **主界面开关**：打开 App 即可一键切换当前 USB 调试状态（需要 root 授权）。
-2. **通知控制中心快捷磁贴（QS Tile）**：下拉通知栏长按/编辑加入「调试开关」磁贴，点一下即切换；
-   关掉时会自动拉起常驻通知，开掉时自动撤掉。
-3. **临时关闭 + 常驻通知**：点「关闭时显示通知（临时关闭）」→ 关闭 USB 调试，并在通知栏常驻一条
+| 项目 | 要求 |
+| :--- | :--- |
+| 系统版本 | Android 8.0（API 26）及以上 |
+| 授权方式 | root 授权，或已安装并授权的 [Shizuku](https://shizuku.rikka.app/)（无需 root） |
+
+- 两种模式在 App 内「授权模式」中切换；未获得任一授权时开关不可用并给出明确提示。
+- 已 root 设备首次打开授予超级用户权限即可；未 root 设备安装并授权 Shizuku 后以 shell 身份完成同样的改写。
+
+## 🚀 安装与使用
+
+1. 在 [**Releases**](https://github.com/gaoyilun/adbSwitch/releases) 页面下载最新 APK 并安装；
+2. 首次打开按提示授予 **root** 或 **Shizuku** 授权；
+3. 想要磁贴：下拉通知栏 → 编辑快捷开关 → 把「调试开关」拖进快捷区；
+4. 想临时过检：开启「关闭时显示通知」，用完后点通知上的「恢复打开」即可；
+5. 想从桌面直达联动 App：进入「快捷打开」→「创建桌面快捷方式」。
+
+## 🔧 核心能力详解
+
+1. **主界面开关**：打开 App 即可一键切换当前 USB 调试状态。
+2. **通知控制中心快捷磁贴（QS Tile）**：下拉通知栏长按 / 编辑加入「调试开关」磁贴，点一下即切换。
+3. **临时关闭 + 常驻通知**：开启「关闭时显示通知（临时关闭）」后关闭 USB 调试，并在通知栏常驻一条
    **「USB 调试：当前已关闭」** 通知，附带「恢复打开」一键动作；恢复正常即自动消失。
+4. **快捷打开（联动）**：用于「打开银行 App 过检」场景——在设置里选择目标应用并开启后，
+   **从启动器打开本 App** 会自动关调试并跳转到目标 App（每次进程启动只自动跳一次，之后可用「立即执行」）。
+   还提供：开调试前先停止目标 App、立即执行联动、创建桌面原生快捷方式。
 
-## 联动
+## 🛠️ 技术栈
 
-「联动」用于「打开银行 App 过检」这类场景：在设置里选择联动应用并开启联动后，
-**从启动器打开本 App** 会自动关调试并跳转到联动应用（每次进程启动只自动跳一次，
-之后想再跳可用「立即执行联动」）。
+- **语言**：Java
+- **UI**：Android 原生 `PreferenceActivity` + Material 控件
+- **授权通道**：root（`su`）/ [Shizuku](https://shizuku.rikka.app/)（shell uid 2000）
+- **构建**：Gradle Kotlin DSL + AGP，编译 SDK 36，minSdk 27
+- **依赖**：仅 Shizuku 工件与 AndroidX Material / SwipeRefreshLayout，其余用 framework 自带控件
 
-联动分类还提供：
+## 🔄 检查更新
 
-- **联动应用**：选择目标应用（整行点击打开选择器，右侧「打开」按钮直接启动）。
-- **开调试前先停止联动应用**：避免联动应用在状态翻转瞬间读到调试态。
-- **立即执行联动**：手动关调试 + 跳转，不受「只自动跳一次」限制。
-- **创建桌面快捷方式**：在桌面生成联动应用的**原生**快捷图标（点击直接拉起联动应用）。
-  这是 Android 自 2.3 起就有的「添加到主屏幕」机制（`INSTALL_SHORTCUT` 广播 / Android 8+ 的
-  LauncherApps 钉选），生成的是真正的桌面图标，区别于 ShortcutManager 长按菜单里的「Shortcut」。
+App 内置弱提示更新检查（GitHub 主通道 + 蒲公英备通道），逻辑完全离线可控：
 
-## 「启动时自动切换」（默认关闭）
+- 版本判定**只比 `versionCode`**（单调递增整数），`versionName` 仅用于展示；
+- 启动自动检查**节流 3 天**、且仅在主线程空闲时跑，磁贴 / 快捷方式开关不触发；
+- 发现新版本**只做一次 Toast + 主页「关于」行显示「可更新」**，**绝不**强制弹窗；
+- 下载与安装入口在「关于 → 检查更新」手动触发，支持 **SHA-256 完整性校验**；
+- 远端版本元数据由本仓库 `update/update.json` 下发，与 App 内 `UpdateConfig` 对齐。
 
-主界面还有一个默认关闭的开关 **「启动时自动切换」**。开启后，App 被唤起（例如被设备自带的
-自动任务「打开汇丰 App 就打开本 App」触发）时会**做一次切换**然后自动退场，把前台交还给汇丰。
+> 本仓库为公开分发仓：仅含项目主页与更新元数据（`update/`），**不含源码**。
 
-> 配合自动任务建议：让触发器只命中汇丰**冷启动**（应用首次打开），避免每次回到前台都翻一次状态。
+## ❓ 常见问题
 
-## 安装与使用
+**Q：关掉 USB 调试后，开发者选项总开关还在吗？**
 
-1. 安装 `dist/AdbSwitch-v1.0.0.apk`，首次打开**授予 root（超级用户）权限**。
-2. 想要磁贴：下拉通知栏 → 编辑快捷开关 → 把「调试开关」拖进快捷区。
-3. 想临时过检：开启「关闭时显示通知」，用完后点通知上的「恢复打开」即可。
-4. 想从桌面直达联动应用：进入「联动」→「创建桌面快捷方式」。
+A：在。本工具只改 `adb_enabled`，开发者选项总开关仍可保留开启，不影响其它已设置项——但 USB 调试那一项会真实显示关闭。
 
-## 原理与边界
+**Q：没有 root 能用吗？**
 
-- 核心命令：`su -c 'settings put global adb_enabled 0/1'`。系统 `UsbDeviceManager` 会观察该值并重新配置
-  USB，使 `sys.usb.config` 自动去掉 `adb`。
-- 没有 root 时主界面会提示未检测到 root，开关不可用。
-- 这是**真实**开关，不是伪装：关掉后开发者选项里 USB 调试那一项也会显示关闭（但开发者选项总开关仍可保留开启，
-  不影响其它已设置项）。
+A：可以。安装并授权 [Shizuku](https://shizuku.rikka.app/) 后，本 App 通过 Shizuku 以 shell 身份完成同样的改写，无需 root。
+
+**Q：这是伪装关闭吗？**
+
+A：不是。它通过系统设置真实改写 `adb_enabled`，系统 `UsbDeviceManager` 会据此重新配置 USB，
+使 `sys.usb.config` 自动去掉 `adb`，是真实的状态变化。
 
 ---
 
-## 从源码构建
-
-```bash
-cd DevOptsHider
-./build-all.sh
-```
-
-产物：`dist/AdbSwitch-v1.0.0.apk`
-
-- Gradle 8.13 + AGP 8.7.2 + JDK 21（本机已缓存的发行版）
-- 编译 SDK 36，minSdk 27，零三方依赖（只用 framework 自带控件）
-
-> 旧的 LSPosed / Zygisk / 探针 方案已归档到 `archive/`，其构建不再由本脚本负责。
+<p align="center">
+  Made with ❤️ on Android
+</p>

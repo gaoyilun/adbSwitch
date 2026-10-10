@@ -2,7 +2,6 @@
 build/
 *.apk
 *.aab
-dist/
 captures/
 .gradle/
 .idea/
@@ -15,3 +14,6 @@ keystore/
 # 本机/环境文件
 local.properties
 .DS_Store
+
+# 蒲公英密钥（含 _api_key，绝不入库；模板 pgyer.properties.example 才入库）
+adbswitch/pgyer.properties

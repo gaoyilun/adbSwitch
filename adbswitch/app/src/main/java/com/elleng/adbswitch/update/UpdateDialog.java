@@ -21,10 +21,13 @@ import java.util.Locale;
  * 「发现新版本」弹窗。
  *
  * 用 framework AlertDialog（本工程是 framework PreferenceActivity，不引入 Compose/MIUIX）：
- * 标题=发现新版本，正文=更新说明，按钮=立刻更新 / 忽略 / 备用下载。
+ * 标题=发现新版本，正文=更新说明，按钮=立刻更新 /（无忽略）/ 备用下载。
  * 点「立刻更新」后弹窗不消失，转为显示下载进度；下载完成后拉起系统安装器。
  *
- * 强制更新（mandatory）：不提供「忽略」，且不允许点外部/返回关闭。
+ * 不提供「忽略」按钮：本 App 是弱提示路线，发现新版要么更新、要么直接关掉弹窗，
+ * 不需要「永久别再提醒」的状态——省掉这个出口，也省掉一整套忽略持久化逻辑。
+ *
+ * 强制更新（mandatory）：不允许点外部/返回关闭。
  *
  * 当前 {@link UpdateConfig#ENABLED} 为 false，本类不会被调用。
  */
@@ -35,9 +38,6 @@ public final class UpdateDialog {
     /** 主通道失败/用户想换渠道时的回调（交由外部打开浏览器）。 */
     public interface Listener {
         void onOpenUrl(String url);
-
-        /** 用户点「忽略」——外部应据此记住该 versionCode。 */
-        void onIgnored(UpdateInfo info);
     }
 
     private UpdateDialog() {
@@ -65,26 +65,14 @@ public final class UpdateDialog {
                 // 按钮的点击逻辑在 onShow 里接管，否则点了就自动 dismiss，来不及显示下载进度
                 .setPositiveButton(R.string.update_now, null)
                 .setNeutralButton(R.string.update_backup, null);
-        if (!info.mandatory) {
-            b.setNegativeButton(R.string.update_later, null);
-        }
         final AlertDialog dlg = b.create();
 
         dlg.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
                 final Button positive = dlg.getButton(DialogInterface.BUTTON_POSITIVE);
-                final Button negative = dlg.getButton(DialogInterface.BUTTON_NEGATIVE);
                 final Button neutral = dlg.getButton(DialogInterface.BUTTON_NEUTRAL);
 
-                if (negative != null) {
-                    negative.setOnClickListener(v -> {
-                        if (listener != null) {
-                            listener.onIgnored(info);
-                        }
-                        dlg.dismiss();
-                    });
-                }
                 if (neutral != null) {
                     if (info.fallbackUrl == null) {
                         neutral.setVisibility(View.GONE);

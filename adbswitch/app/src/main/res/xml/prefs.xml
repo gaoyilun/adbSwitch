@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 调试开关：主开关可折叠/展开，下面挂 USB 与无线两个子开关 -->
+    <!-- 调试开关：主开关可折叠/展开，下面挂 USB 与无线两个子开关；
+         开发者选项行是独立开关（不参与折叠，始终显示）。
+         各行都写死 android:order —— 分类已 setOrderingAsAdded(false)，
+         否则折叠再展开时 addPreference 会把子开关追加到末尾，顺序就乱了。 -->
     <PreferenceCategory
         android:key="catDebug"
         android:title="@string/card_debug_title">
 
-        <Preference
+        <!-- 主开关：自定义子类在行绑定时就同步 Switch 状态（首帧即正确、未读到真值前冻结），
+             见 MasterSwitchPreference -->
+        <com.elleng.adbswitch.MasterSwitchPreference
             android:key="swMaster"
+            android:order="0"
             android:title="@string/master_title"
             android:summary="@string/master_off"
             android:layout="@layout/pref_row_state"
@@ -15,14 +21,26 @@
 
         <SwitchPreference
             android:key="swUsb"
+            android:order="10"
             android:title="@string/usb_title"
             android:summary="@string/usb_off"
             android:layout="@layout/pref_row_state" />
 
         <SwitchPreference
             android:key="swWireless"
+            android:order="20"
             android:title="@string/wireless_title"
             android:summary="@string/wireless_off"
+            android:layout="@layout/pref_row_state" />
+
+        <!-- 开发者选项入口（独立开关）：只写 Settings.Global.development_settings_enabled，
+             与上面两个调试开关互不联动，也不参与主开关的折叠。
+             值由 MainActivity 按真值回填（与 usb / wireless 完全一致）。 -->
+        <SwitchPreference
+            android:key="swDevOpts"
+            android:order="30"
+            android:title="@string/devopts_title"
+            android:summary="@string/devopts_off"
             android:layout="@layout/pref_row_state" />
 
         <!-- 双模式授权：模式选择 + 授权状态合并为同一项。
@@ -30,6 +48,7 @@
              点击打开模式选择对话框；重试按钮已移到底部 Snackbar。 -->
         <Preference
             android:key="auth"
+            android:order="40"
             android:title="@string/auth_mode_title"
             android:summary="@string/auth_mode_sum"
             android:layout="@layout/pref_row" />

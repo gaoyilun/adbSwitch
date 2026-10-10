@@ -21,10 +21,8 @@
     <string name="master_on">已开启 · adbd 运行中</string>
     <string name="master_off">已关闭 · 可通过检测</string>
     <string name="master_partial">部分开启 · adbd 仍在运行</string>
-    <!-- 真值尚未经授权通道确认时的占位结论：此时绝不能显示「已关闭 · 可通过检测」，
-         那会让用户在 adbd 其实还在跑的时候误以为安全（HyperOS 等 ROM 会向 App 隐藏这两个键，
-         ContentResolver 读到的兜底值不可信）。同时整行与滑块都置灰、不可操作，
-         避免用户在状态未知时误触。 -->
+    <!-- 仅「首次使用」（历史从没确认过真值、无上次状态可显示）时的占位结论，此时开关关 + 置灰。
+         有上次状态的常规启动不显示本串：直接按上次状态显示文案、不置灰，真值读回后再修正。 -->
     <string name="master_checking">正在读取当前状态…</string>
 
     <string name="usb_title">USB 调试</string>
@@ -35,26 +33,26 @@
     <string name="wireless_on">已开启 · adbd 运行中</string>
     <string name="wireless_off">已关闭</string>
 
+    <!-- 开发者选项入口：独立开关。只控制设置里开发者选项入口的显隐，
+         与 USB / 无线调试互不联动（关它不会关 adb，关 adb 也不会关它）。 -->
+    <string name="devopts_title">开发者选项</string>
+    <string name="devopts_on">已开启</string>
+    <string name="devopts_off">已关闭</string>
+
     <string name="card_linkage_title">快捷打开</string>
     <string name="linkage_switch">开启时自动打开默认应用</string>
     <string name="linkage_sum">启动本 App 时自动关闭调试并打开默认应用</string>
-    <string name="linkage_no_app">请先选择快捷应用</string>
-    <string name="linkage_on">已开启快捷打开</string>
-    <string name="linkage_off">已关闭快捷打开</string>
 
     <!-- 快捷应用列表（支持多个）：管理入口 + 每项的「点击快捷打开 / 长按创建快捷方式」操作 -->
     <string name="linkage_manage_title">管理快捷应用</string>
     <string name="linkage_manage_sum">勾选要快捷打开的应用</string>
     <string name="linkage_apps_empty">尚未添加任何快捷应用</string>
-    <string name="linkage_added">已更新快捷应用</string>
 
     <!-- 默认快捷应用：开启快捷打开后必须设置，决定「启动本 App 自动打开哪个」 -->
     <string name="linkage_default_title">默认快捷应用</string>
-    <string name="linkage_default_none">未设置（开启后需先设置）</string>
+    <string name="linkage_default_none">未设置</string>
     <string name="linkage_no_default">请先设置默认快捷应用</string>
-    <string name="linkage_need_default">已开启，请设置默认快捷应用</string>
     <string name="linkage_apps_empty_toast">请先添加快捷应用</string>
-    <string name="linkage_set_default">已设置默认快捷应用</string>
 
     <!-- 快捷应用行提示（替代包名显示）：整行点击=快捷打开；长按=创建桌面快捷方式 -->
     <string name="quick_hint">点击快捷打开，长按创建快捷方式</string>
@@ -62,20 +60,26 @@
     <string name="kill_before_open_title">开启调试自动关闭快捷应用</string>
     <string name="kill_before_open_sum">避免快捷应用在状态翻转瞬间读到调试</string>
 
-    <string name="linkage_skipped">已跳过自动打开，需再次打开请直接点对应快捷应用</string>
+    <string name="linkage_skipped">启动时已自动跳转，本次进入应用主页</string>
+    <!-- 自动跳转发生的当下提示（Toast 会悬浮到目标应用上层，用户能看到） -->
+    <string name="linkage_auto_jumped">已自动跳转，如需关闭自动跳转请返回本应用</string>
+    <!-- 快捷应用失效：已卸载的顺手从列表清掉；停用的保留（可恢复），只提示打不开 -->
+    <string name="linkage_app_uninstalled">快捷应用已卸载，已从列表移除</string>
+    <string name="linkage_app_unlaunchable">快捷应用已被停用，无法打开</string>
     <string name="linkage_need_notif">快捷打开需要通知权限，请先授予</string>
 
     <!-- 开启「快捷打开」后弹窗告知：如何绕过自动跳转、进入应用设置页（均用现有能力，不新增入口） -->
-    <string name="linkage_hint_title">如何进入设置页</string>
-    <string name="linkage_hint_body">开启后，点本应用图标会自动关闭调试并打开目标应用。如需进入设置页，可任选其一：\n\n· 长按本应用图标，在快捷菜单点「打开主页」即可进入设置（不触发快捷打开）\n· 调试关闭后，下拉通知栏点「应用设置」进入\n· 本次应用未划掉后台时，直接点应用图标也会停在设置页</string>
+    <string name="linkage_hint_title">开启后启动将跳转应用</string>
+    <string name="linkage_hint_body">开启后，点本应用图标会自动关闭调试并打开目标应用。可通过如下方式打开主页：\n\n· 长按应用图标，通过快捷菜单「打开主页」\n· 通过通知中「应用设置」进入\n· 启动跳转应用后，再次打开app可回到主页</string>
 
-    <string name="create_shortcut_no_app">请先选择快捷应用</string>
-    <string name="create_shortcut_done">已请求在桌面创建快捷方式</string>
-    <string name="create_shortcut_fail">创建失败，请检查桌面是否被禁用</string>
+    <!-- 桌面快捷方式结果：requestPinShortcut 只在真正钉上时回调（PinShortcutReceiver），
+         用户取消 / 被 ROM 吞掉（如未授权「创建桌面快捷方式」）都不会回调，故超时兜底提示未创建 -->
+    <string name="create_shortcut_ok">已创建，已添加到桌面</string>
+    <string name="create_shortcut_fail">未创建成功，请确认是否授权</string>
+    <!-- 旧广播路径（launcher 不支持钉选时的回退）拿不到结果，只能提示已发起 -->
+    <string name="create_shortcut_done">已创建，如未成功请确认是否授权</string>
 
-    <string name="ptr_pull">下拉刷新应用列表</string>
-    <string name="ptr_release">松开立即刷新</string>
-    <string name="ptr_refreshing">正在刷新…</string>
+    <!-- 下拉刷新由标准控件 SwipeRefreshLayout 提供进度动画，只保留完成提示 -->
     <string name="ptr_done">已刷新应用列表</string>
 
     <string name="card_notify_title">通知</string>
@@ -84,13 +88,19 @@
     <string name="live_update_title">测试灵动焦点通知</string>
     <string name="live_update_sum">检测权限并发送一条测试通知</string>
     <string name="live_update_grant">系统暂未允许显示灵动焦点通知，是否前往授权？</string>
-    <string name="live_update_test_sent">已发送测试通知，状态栏出现胶囊即生效（测试渠道可在系统通知设置中删除）</string>
-    <string name="live_update_test_sent_plain">已发送测试通知，但未获授权，仅作普通通知显示（测试渠道可在系统通知设置中删除）</string>
+    <!-- toast 只留关键动作提示，别再堆括号补充说明（太长会被截断显示不全） -->
+    <string name="live_update_test_sent">已发送测试通知，返回桌面或锁屏查看</string>
+    <string name="live_update_test_sent_plain">已发送，未获授权，仅作普通通知显示</string>
     <string name="live_update_test_title">灵动焦点通知测试</string>
     <string name="live_update_test_text">状态栏出现胶囊即表示已生效</string>
     <string name="live_update_unsupported">当前系统不支持（需 Android 16+）</string>
 
     <string name="toast_root_fail">执行失败，请检查授权模式</string>
+    <!-- 「命令退出码 0 但回读真值没变」：多见于 ROM 屏蔽了该键。必须给明确反馈，
+         否则界面只是无声弹回，用户只覺得「点了没反应」。 -->
+    <string name="toast_write_not_effective">写入未生效，请检查授权模式</string>
+    <!-- 关闭开发者选项后的恢复路径提示：入口一旦隐藏，只能靠连点版本号找回 -->
+    <string name="toast_devopts_hidden">开发者选项入口已隐藏，恢复需在设置中连点版本号</string>
 
     <!-- 关于 -->
     <string name="about_title">关于</string>
@@ -111,7 +121,6 @@
     <string name="update_checking">正在检查更新…</string>
     <string name="update_found">发现新版本 v%1$s</string>
     <string name="update_now">立刻更新</string>
-    <string name="update_later">忽略</string>
     <string name="update_backup">备用下载</string>
     <string name="update_open_page">前往下载</string>
     <string name="update_preparing">正在准备下载…</string>
@@ -127,18 +136,21 @@
     <string name="update_toast_new">发现新版本 %1$s</string>
 
     <string name="picker_title">选择快捷应用</string>
-    <string name="picker_title_multi">管理快捷应用</string>
+    <!-- 多选弹窗标题：右侧带「已设置」数量，如「管理快捷应用（0个）」 -->
+    <string name="picker_title_multi_count">管理快捷应用（%1$d个）</string>
     <string name="picker_confirm">确定</string>
     <string name="picker_hint">搜索应用名称 / 包名</string>
     <string name="picker_loading">正在读取已安装应用…</string>
-    <string name="picker_load_fail">读取应用列表失败</string>
+    <string name="picker_load_fail">获取应用列表失败，请检查是否授权</string>
+    <string name="picker_need_permission">未读取到应用列表，请先在系统设置中授权应用列表权限</string>
+    <string name="picker_retry">刷新重试</string>
     <string name="notify_settings">应用设置</string>
 
     <!-- 常驻通知与磁贴文案（原先硬编码在 Java 里，统一收拢便于维护） -->
-    <string name="notify_channel_name">调试开关</string>
-    <string name="notify_channel_desc">调试临时关闭后的常驻控制通知</string>
-    <string name="notify_title_on">调试：已开启</string>
-    <string name="notify_title_off">调试：当前已关闭</string>
+    <string name="notify_channel_name">通知栏快捷开关</string>
+    <string name="notify_channel_desc">调试临时关闭后显示常驻控制通知</string>
+    <string name="notify_title_on">adb调试已开启</string>
+    <string name="notify_title_off">adb调试已关闭</string>
     <string name="notify_action_close">临时关闭</string>
     <string name="notify_action_open">恢复打开</string>
     <string name="notify_sub_safe">adbd 已停止，检测可通过</string>

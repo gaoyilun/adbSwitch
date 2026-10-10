@@ -10,15 +10,12 @@ import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
-import android.widget.AbsListView;
 import android.widget.BaseAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
-import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -35,8 +32,8 @@ import java.util.Set;
 
 /**
  * 快捷应用选择 —— 原生 AlertDialog 弹窗。
- * 内含搜索框 + 可滚动列表 + 轻量下拉刷新（无第三方依赖，仅用 framework 控件）。
- * 下拉到顶后继续下拉可重新扫描已安装应用，反映新装/卸载的变化。
+ * 内含搜索框 + 可滚动列表 + 下拉刷新（标准控件 SwipeRefreshLayout，不自研手势）。
+ * 下拉刷新可重新扫描已安装应用，反映新装/卸载的变化。
  *
  * 两种模式：
  *  - 单选（{@link #show}）：点列表项即选定并关闭（用于一次性选择）；
@@ -44,11 +41,6 @@ import java.util.Set;
  *    用于「管理快捷应用」——勾上即加入、取消即移除，一次搞定多个 app 的增删。
  */
 public class AppListDialog {
-
-    /** 下拉刷新触发阈值（px） */
-    private static final int PTR_THRESHOLD = 140;
-    /** 刷新提示区高度（px），与布局中 ptrHeader 的 56dp 对应 */
-    private int headerHeightPx;
 
     private final Context context;
     private final boolean multi;
@@ -64,10 +56,12 @@ public class AppListDialog {
     private final ArrayList<AppInfo> filtered = new ArrayList<>();
 
     private ListView listView;
-    private TextView ptrHeader;
     private TextView loadingView;
     private EditText searchBox;
-    private FrameLayout ptrContainer;
+    /** 标准下拉刷新容器（SwipeRefreshLayout）；未读取到列表时整体隐藏、露出错误提示区 */
+    private androidx.swiperefreshlayout.widget.SwipeRefreshLayout swipeRefresh;
+    /** 未读取到应用列表时的提示区（提示授权 + 「刷新重试」按钮） */
+    private View errorView;
     private AppAdapter adapter;
     private AlertDialog dialog;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -79,13 +73,6 @@ public class AppListDialog {
      */
     private final java.util.concurrent.ExecutorService iconLoader =
             java.util.concurrent.Executors.newSingleThreadExecutor();
-    /** 列表是否静止：快速滑动时不解码图标（避免成百个解码任务堆积、可见行图标迟迟不出来），
-     *  停下（SCROLL_STATE_IDLE）时才补解码当前可见行。 */
-    private boolean listIdle = true;
-
-    private float startY = -1;
-    private boolean pulling = false;
-    private boolean refreshing = false;
 
     public interface OnAppChosenListener {
         void onAppChosen(String pkg);
@@ -147,19 +134,28 @@ public class AppListDialog {
 
     private void build() {
         float density = context.getResources().getDisplayMetrics().density;
-        headerHeightPx = (int) (56 * density + 0.5f);
         iconSizePx = (int) (40 * density + 0.5f);
 
         View root = LayoutInflater.from(context).inflate(R.layout.dialog_app_picker, null);
-        ptrContainer = root.findViewById(R.id.ptrContainer);
-        ptrHeader = root.findViewById(R.id.ptrHeader);
+        swipeRefresh = root.findViewById(R.id.swipeRefresh);
         loadingView = root.findViewById(R.id.tvLoading);
         listView = root.findViewById(R.id.lvApps);
+        errorView = root.findViewById(R.id.llError);
+        View retry = root.findViewById(R.id.btnRetry);
+        if (retry != null) {
+            retry.setOnClickListener(v -> {
+                // 刷新重试：重新扫描（例如用户刚到系统设置里授权了应用列表权限）
+                errorView.setVisibility(View.GONE);
+                swipeRefresh.setVisibility(View.VISIBLE);
+                loadingView.setVisibility(View.VISIBLE);
+                scanAppsAsync(false);
+            });
+        }
         EditText et = root.findViewById(R.id.etSearch);
         searchBox = et;
 
-        // 初始：刷新提示隐藏在顶部之上
-        ptrHeader.setTranslationY(-headerHeightPx);
+        // 下拉刷新走标准控件回调，手势/进度圈由 SwipeRefreshLayout 自己管
+        swipeRefresh.setOnRefreshListener(() -> scanAppsAsync(true));
 
         adapter = new AppAdapter();
         listView.setAdapter(adapter);
@@ -174,6 +170,7 @@ public class AppListDialog {
                     checked.add(info.pkg);
                 }
                 updateRowCheckbox(view, info.pkg);
+                updateTitle();
             } else {
                 if (singleListener != null) {
                     singleListener.onAppChosen(info.pkg);
@@ -183,32 +180,6 @@ public class AppListDialog {
                 }
             }
         });
-
-        // 滚动状态监听：滑动中标记 listIdle=false（不触发新解码），停下后补解码当前可见行，
-        // 避免快速滑动时成百上千个图标解码任务排队、可见行图标迟迟浮现。
-        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
-            @Override
-            public void onScrollStateChanged(AbsListView view, int scrollState) {
-                listIdle = (scrollState == AbsListView.OnScrollListener.SCROLL_STATE_IDLE);
-                if (listIdle) {
-                    int first = view.getFirstVisiblePosition();
-                    int last = view.getLastVisiblePosition();
-                    for (int i = first; i <= last && i < filtered.size(); i++) {
-                        AppInfo info = filtered.get(i);
-                        if (info.icon == null && !info.iconLoading) {
-                            submitDecode(info);
-                        }
-                    }
-                }
-            }
-
-            @Override
-            public void onScroll(AbsListView view, int firstVisibleItem,
-                                 int visibleItemCount, int totalItemCount) {
-            }
-        });
-
-        listView.setOnTouchListener((View v, MotionEvent e) -> handleTouch(e));
 
         et.addTextChangedListener(new android.text.TextWatcher() {
             @Override
@@ -225,8 +196,13 @@ public class AppListDialog {
             }
         });
 
+        // 多选标题右侧带上数量（如「管理快捷应用（0个）」），随勾选实时变化（见 updateTitle）
+        CharSequence title = multi
+                ? context.getString(R.string.picker_title_multi_count,
+                        preselected == null ? 0 : preselected.size())
+                : context.getString(R.string.picker_title);
         AlertDialog.Builder b = new AlertDialog.Builder(context)
-                .setTitle(multi ? R.string.picker_title_multi : R.string.picker_title)
+                .setTitle(title)
                 .setView(root)
                 .setNegativeButton(android.R.string.cancel, null);
         if (multi) {
@@ -247,6 +223,14 @@ public class AppListDialog {
         dialog.show();
 
         scanAppsAsync(false);
+    }
+
+    /** 多选模式：标题数量随勾选实时更新（如「管理快捷应用（2个）」） */
+    private void updateTitle() {
+        if (!multi || dialog == null) {
+            return;
+        }
+        dialog.setTitle(context.getString(R.string.picker_title_multi_count, checked.size()));
     }
 
     /** 仅刷新某一行的勾选框（避免整列表 notify 造成滚动跳动） */
@@ -287,106 +271,30 @@ public class AppListDialog {
                 all.clear();
                 all.addAll(data);
                 loadingView.setVisibility(View.GONE);
+                // 未读取到应用列表（扫描失败或一个应用都没读出来，常见于「应用列表」权限未授权）：
+                // 直接提示需要授权并给「刷新重试」，不再对着空列表干等。
+                boolean empty = data.isEmpty();
+                if (empty) {
+                    swipeRefresh.setVisibility(View.GONE);
+                    if (errorView != null) {
+                        errorView.setVisibility(View.VISIBLE);
+                    }
+                } else {
+                    if (errorView != null) {
+                        errorView.setVisibility(View.GONE);
+                    }
+                    swipeRefresh.setVisibility(View.VISIBLE);
+                }
                 // 必须用搜索框里的当前文本重新过滤：写死空串会把用户已输入的关键字冲掉，
                 // 表现为「下拉刷新一下，搜索条件莫名失效」。
                 applyFilter(searchBox != null ? searchBox.getText().toString() : "");
-                if (!success) {
-                    Toast.makeText(context, R.string.picker_load_fail, Toast.LENGTH_LONG).show();
-                }
-                if (pullRefresh) {
-                    refreshing = false;
-                    animateBack();
-                    if (success) {
-                        Toast.makeText(context, R.string.ptr_done, Toast.LENGTH_SHORT).show();
-                    }
+                // 收掉标准控件的刷新进度圈
+                swipeRefresh.setRefreshing(false);
+                if (pullRefresh && success && !empty) {
+                    Toast.makeText(context, R.string.ptr_done, Toast.LENGTH_SHORT).show();
                 }
             });
         }, "app-picker-scan").start();
-    }
-
-    // —— 下拉刷新手势处理 ——
-
-    private boolean handleTouch(MotionEvent e) {
-        if (refreshing) {
-            return false; // 刷新中，列表正常滚动
-        }
-        switch (e.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                if (atListTop()) {
-                    startY = e.getRawY();
-                    pulling = false;
-                } else {
-                    startY = -1;
-                }
-                break;
-
-            case MotionEvent.ACTION_MOVE:
-                if (startY < 0) {
-                    return false;
-                }
-                float delta = e.getRawY() - startY;
-                if (delta > 0 && atListTop()) {
-                    // 下拉：同时把提示区和列表往下推，露出刷新提示
-                    pulling = true;
-                    float reveal = Math.min(delta, headerHeightPx);
-                    ptrHeader.setTranslationY(-headerHeightPx + reveal);
-                    listView.setTranslationY(reveal);
-                    ptrHeader.setText(delta >= PTR_THRESHOLD
-                            ? R.string.ptr_release : R.string.ptr_pull);
-                    return true; // 消费事件，阻止列表自身滚动
-                } else if (delta <= 0) {
-                    resetPull();
-                    return false;
-                }
-                break;
-
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                if (pulling) {
-                    float dy = e.getRawY() - startY;
-                    if (dy >= PTR_THRESHOLD) {
-                        doRefresh();
-                    } else {
-                        animateBack();
-                    }
-                    pulling = false;
-                    startY = -1;
-                    return true;
-                }
-                startY = -1;
-                break;
-        }
-        return false;
-    }
-
-    private boolean atListTop() {
-        if (listView.getChildCount() == 0) {
-            return true;
-        }
-        if (listView.getFirstVisiblePosition() > 0) {
-            return false;
-        }
-        View first = listView.getChildAt(0);
-        return first != null && first.getTop() >= 0;
-    }
-
-    private void resetPull() {
-        ptrHeader.setTranslationY(-headerHeightPx);
-        listView.setTranslationY(0);
-    }
-
-    private void animateBack() {
-        ptrHeader.animate().translationY(-headerHeightPx).setDuration(200).start();
-        listView.animate().translationY(0).setDuration(200).start();
-    }
-
-    private void doRefresh() {
-        refreshing = true;
-        // 固定露出刷新提示
-        ptrHeader.setTranslationY(0);
-        listView.setTranslationY(headerHeightPx);
-        ptrHeader.setText(R.string.ptr_refreshing);
-        scanAppsAsync(true);
     }
 
     // —— 应用列表加载 / 过滤 ——
@@ -438,7 +346,19 @@ public class AppListDialog {
             out.add(new AppInfo(label, ai.packageName, ai));
         }
         final Collator coll = Collator.getInstance(Locale.getDefault());
-        Collections.sort(out, (x, y) -> coll.compare(x.label, y.label));
+        // 排序：打开弹窗前已设置的快捷应用置顶，其余按名称排后。
+        // 置顶依据是打开时的快照（preselected）而不是当前勾选集合（checked）——
+        // 否则用户本次弹窗里勾选/取消会实时重排行，列表跳来跳去没法点。
+        final Set<String> pinned = new HashSet<>(
+                preselected == null ? java.util.Collections.emptyList() : preselected);
+        Collections.sort(out, (x, y) -> {
+            boolean xp = pinned.contains(x.pkg);
+            boolean yp = pinned.contains(y.pkg);
+            if (xp != yp) {
+                return xp ? -1 : 1;
+            }
+            return coll.compare(x.label, y.label);
+        });
         return out;
     }
 
@@ -461,7 +381,7 @@ public class AppListDialog {
         }
     }
 
-    /** 提交一次图标解码：仅在列表静止时调用（getView / 滚动停顿回调），避免任务堆积 */
+    /** 提交一次图标解码：getView 绑定行时立即调用（实时加载），由共享线程串行执行 */
     private void submitDecode(AppInfo info) {
         info.iconLoading = true;
         final AppInfo target = info;
@@ -551,8 +471,9 @@ public class AppListDialog {
                 }
             }
             // 后台解码图标，完成后回主线程填充（Bitmap 不可变，跨线程安全）。
-            // 仅在列表静止时解码：滑动过程中不提交新任务，避免任务堆积。
-            if (info.icon == null && !info.iconLoading && listIdle) {
+            // 行一绑定就提交解码（实时加载）：不要按滚动状态延迟，
+            // 否则滑动/刚打开时图标长时间空白，体验反而差。
+            if (info.icon == null && !info.iconLoading) {
                 submitDecode(info);
             }
             return convertView;
