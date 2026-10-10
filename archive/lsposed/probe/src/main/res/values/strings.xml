@@ -1,8 +1,0 @@
-<resources>
-    <string name="app_name">DevHider 探针</string>
-    <string name="btn_rescan">重新检测</string>
-    <string name="btn_copy_fail">复制异常</string>
-    <string name="toast_copied">已复制 %d 条异常到剪贴板</string>
-    <string name="toast_no_fail">没有异常项，全部已隐藏</string>
-    <string name="hint">绿色 = 目标 App 读不到痕迹；红色 = 仍有痕迹暴露。把这个 App 加进 LSPosed 作用域后强制停止再打开。</string>
-</resources>

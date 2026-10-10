@@ -17,3 +17,6 @@ local.properties
 
 # 蒲公英密钥（含 _api_key，绝不入库；模板 pgyer.properties.example 才入库）
 adbswitch/pgyer.properties
+
+# WorkBuddy 项目工作日志（内部，不入库）
+.workbuddy/
