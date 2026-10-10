@@ -40,7 +40,7 @@ public class NotificationReceiver extends BroadcastReceiver {
                 } else {
                     AdbToggleService.stop(ctx);
                 }
-                ToggleShortcuts.publish(ctx);
+                ToggleShortcuts.markDirty(ctx);
                 MAIN.removeCallbacks(forceFinish);
                 finishQuietly(pr);
             });
@@ -51,7 +51,7 @@ public class NotificationReceiver extends BroadcastReceiver {
                 } else {
                     AdbToggleService.syncCloseNotification(ctx);
                 }
-                ToggleShortcuts.publish(ctx);
+                ToggleShortcuts.markDirty(ctx);
                 MAIN.removeCallbacks(forceFinish);
                 finishQuietly(pr);
             });

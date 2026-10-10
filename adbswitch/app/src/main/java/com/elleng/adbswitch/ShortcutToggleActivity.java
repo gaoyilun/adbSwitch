@@ -37,7 +37,7 @@ public class ShortcutToggleActivity extends Activity {
                     Toast.makeText(app, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
                     return;
                 }
-                ToggleShortcuts.publish(app);
+                ToggleShortcuts.markDirty(app);
                 boolean on = wireless ? s.wireless : s.usb;
                 Toast.makeText(app,
                         app.getString(wireless ? R.string.wireless_title : R.string.usb_title)
@@ -63,7 +63,7 @@ public class ShortcutToggleActivity extends Activity {
             } else {
                 AdbToggleService.syncCloseNotification(app);
             }
-            ToggleShortcuts.publish(app);
+            ToggleShortcuts.markDirty(app);
             Toast.makeText(app, s.anyOn() ? R.string.master_on : R.string.master_off,
                     Toast.LENGTH_SHORT).show();
         });

@@ -37,3 +37,10 @@
 
 ## 验证产物小技巧
 - 混淆后类名被改；验证新代码真在 APK 里：解压 APK，对 `classes.dex` 用 Python 字节计数（`open(f,'rb').read().count(b'...')`），中文用 `.encode('utf-8')`，别用 shell grep（中文会假阴性）。资源串在 `resources.arsc`（本工程为 UTF-8 编码）同理。
+
+## 2026-10-10 优化轮后的新结构约定
+- **DebugController 是唯一写入口**：主/子开关写=单次 shell（`__ASW_*_{B,A}__` 标记行定位前后态）；`enqueue(key,task)` 同键去重（在途只记最新参数）；状态分发走 `addStateListener/removeStateListener`（**不再发 ACTION_STATE 广播**，新消费者一律挂 listener）；`read()` 兜底=`lastKnownState`（cfg 的 LAST_* 持久化），只查 ContentResolver 兜底属全新安装路径。
+- **minSdk=27**（build.gradle.kts 实锤）：`SDK_INT>=26` 恒真，此类死分支禁止再写。
+- **图标转位图统一走 `DrawableUtils.toBitmap(drawable,size)`**（AppListDialog/MainActivity/ToggleShortcuts 共用）；AppListDialog 图标缓存=static LruCache 200 个、进程内存级不落盘。
+- **快捷方式发布只调 `ToggleShortcuts.markDirty(ctx)`**（250ms 主线程去抖），勿直接调 `publish`。
+- 工程根在 `adbswitch/` 子目录（仓库根没有 settings.gradle）；`adbswitch/local.properties` 需含 `sdk.dir`（曾变空导致构建失败，已补回）。

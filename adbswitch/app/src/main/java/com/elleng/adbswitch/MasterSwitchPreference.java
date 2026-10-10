@@ -54,6 +54,12 @@ public class MasterSwitchPreference extends Preference {
     private boolean syncing = false;
     /** 折叠箭头当前指向（true=已展开）；绑定与外部刷新共用 */
     private boolean expandedState = true;
+    /** Preference 级 enabled 的镜像（未授权时 applyRootState 会 setEnabled(false)）。
+     *  Switch widget 的 enabled 必须 = 它 && known —— 曾有缺陷：widget 只看 known，
+     *  未授权时整行点击被禁但直接拨 Switch 仍能触发写入，绕过了授权门禁。 */
+    private boolean prefEnabled = true;
+    /** 最近一次绑定的 known（首次使用未校准时的置灰维度） */
+    private boolean lastKnownAllowed = true;
 
     public MasterSwitchPreference(Context context) {
         super(context);
@@ -75,6 +81,16 @@ public class MasterSwitchPreference extends Preference {
         expandListener = l;
     }
 
+    /** Preference 级 enabled 变化时立即同步已绑定的 Switch（未授权置灰必须拦住 widget 本身） */
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+        prefEnabled = enabled;
+        if (boundSwitch != null) {
+            boundSwitch.setEnabled(enabled && lastKnownAllowed);
+        }
+    }
+
     /**
      * 真值刷新后由 MainActivity 调用，立即同步已绑定行里的 Switch；
      * 行尚未绑定时不做任何事（绑定时 {@link #onBindViewHolder} 会按同一规则摆好）。
@@ -84,9 +100,10 @@ public class MasterSwitchPreference extends Preference {
             return;
         }
         lastShownOn = on;
+        lastKnownAllowed = enabled;
         syncing = true;
         boundSwitch.setChecked(on);
-        boundSwitch.setEnabled(enabled);
+        boundSwitch.setEnabled(enabled && prefEnabled);
         syncing = false;
     }
 
@@ -96,6 +113,8 @@ public class MasterSwitchPreference extends Preference {
         ImageButton arrow = boundRow == null ? null : boundRow.findViewById(R.id.btn_expand);
         if (arrow != null) {
             arrow.setImageResource(expanded ? R.drawable.ic_collapse : R.drawable.ic_expand);
+            arrow.setContentDescription(getContext().getString(
+                    expanded ? R.string.master_collapse_desc : R.string.master_expand_desc));
         }
     }
 
@@ -113,6 +132,9 @@ public class MasterSwitchPreference extends Preference {
                 }
             });
             arrow.setImageResource(expandedState ? R.drawable.ic_collapse : R.drawable.ic_expand);
+            // 无障碍：箭头随展开/折叠态播报对应语义（P3）
+            arrow.setContentDescription(getContext().getString(
+                    expandedState ? R.string.master_collapse_desc : R.string.master_expand_desc));
         }
         MaterialSwitch sw = view.findViewById(R.id.sw_master);
         boundSwitch = sw;
@@ -127,18 +149,21 @@ public class MasterSwitchPreference extends Preference {
                 ? DebugController.read(getContext()).anyOn()
                 : DebugController.lastKnownState(getContext()).anyOn();
         lastShownOn = on;
+        lastKnownAllowed = known;
         // 先摘监听再摆状态，避免绑定时误触发拨动回调
         sw.setOnCheckedChangeListener(null);
         syncing = true;
         sw.setChecked(on);
-        sw.setEnabled(known);
+        // 双重门禁：known（首次未校准置灰）&& Preference 级 enabled（未授权置灰）
+        sw.setEnabled(known && isEnabled());
         syncing = false;
         sw.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (syncing) {
                 return;
             }
-            // 启动窗口期（真值尚未读回）的点击直接屏蔽：弹回显示值、不执行
+            // 启动窗口期（真值尚未读回）的点击直接屏蔽：弹回显示值、不执行，并给一次性轻提示
             if (!DebugController.confirmedThisSession()) {
+                MainActivity.toastReading(getContext());
                 applyState(lastShownOn, true);
                 return;
             }
