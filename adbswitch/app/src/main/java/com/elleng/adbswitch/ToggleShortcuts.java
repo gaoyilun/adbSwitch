@@ -6,7 +6,6 @@ import android.content.SharedPreferences;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 
@@ -161,19 +160,34 @@ final class ToggleShortcuts {
     private static Icon appIcon(Context ctx, String pkg) {
         try {
             Drawable d = ctx.getPackageManager().getApplicationIcon(pkg);
-            if (d instanceof android.graphics.drawable.BitmapDrawable) {
-                return Icon.createWithBitmap(
-                        ((android.graphics.drawable.BitmapDrawable) d).getBitmap());
+            int size = Math.max(1, Math.max(
+                    d.getIntrinsicWidth() > 0 ? d.getIntrinsicWidth() : 96,
+                    d.getIntrinsicHeight() > 0 ? d.getIntrinsicHeight() : 96));
+            Bitmap bmp = DrawableUtils.toBitmap(d, size);
+            if (bmp != null) {
+                return Icon.createWithBitmap(bmp);
             }
-            int w = Math.max(1, d.getIntrinsicWidth() > 0 ? d.getIntrinsicWidth() : 96);
-            int h = Math.max(1, d.getIntrinsicHeight() > 0 ? d.getIntrinsicHeight() : 96);
-            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            Canvas c = new Canvas(bmp);
-            d.setBounds(0, 0, w, h);
-            d.draw(c);
-            return Icon.createWithBitmap(bmp);
         } catch (Throwable t) {
-            return Icon.createWithResource(ctx, R.mipmap.ic_launcher);
         }
+        return Icon.createWithResource(ctx, R.mipmap.ic_launcher);
+    }
+
+    // —— 合并发布：状态广播高频连发时，只真正发布最后一次（发布走 IPC 且要构造图标） ——
+
+    private static final android.os.Handler PUBLISH_HANDLER =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private static volatile Context pendingCtx = null;
+    private static final Runnable PUBLISH_RUN = () -> {
+        Context ctx = pendingCtx;
+        if (ctx != null) {
+            publish(ctx);
+        }
+    };
+
+    /** 标记「需重发」并延迟合并：连发的状态变化只发布最后一次，避免每次广播都重做 IPC。 */
+    static void markDirty(Context ctx) {
+        pendingCtx = ctx.getApplicationContext();
+        PUBLISH_HANDLER.removeCallbacks(PUBLISH_RUN);
+        PUBLISH_HANDLER.postDelayed(PUBLISH_RUN, 250);
     }
 }

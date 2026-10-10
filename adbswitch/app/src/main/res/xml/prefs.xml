@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <!-- 调试开关：主开关可折叠/展开，下面挂 USB 与无线两个子开关；
          开发者选项行是独立开关（不参与折叠，始终显示）。
          各行都写死 android:order —— 分类已 setOrderingAsAdded(false)，
-         否则折叠再展开时 addPreference 会把子开关追加到末尾，顺序就乱了。 -->
+         否则折叠再展开时 addPreference 会把子开关追加到末尾，顺序就乱了。
+         分组标题不显示（零高度无标题头 pref_category_bare）：顶栏已是同名标题，无需重复。 -->
     <PreferenceCategory
         android:key="catDebug"
+        android:layout="@layout/pref_category_bare"
         android:title="@string/card_debug_title">
 
         <!-- 主开关：自定义子类在行绑定时就同步 Switch 状态（首帧即正确、未读到真值前冻结），
@@ -19,29 +22,32 @@
             android:layout="@layout/pref_row_state"
             android:widgetLayout="@layout/pref_widget_master" />
 
-        <SwitchPreference
+        <SwitchPreferenceCompat
             android:key="swUsb"
             android:order="10"
             android:title="@string/usb_title"
             android:summary="@string/usb_off"
-            android:layout="@layout/pref_row_state" />
+            android:layout="@layout/pref_row_state"
+            android:widgetLayout="@layout/pref_widget_switch" />
 
-        <SwitchPreference
+        <SwitchPreferenceCompat
             android:key="swWireless"
             android:order="20"
             android:title="@string/wireless_title"
             android:summary="@string/wireless_off"
-            android:layout="@layout/pref_row_state" />
+            android:layout="@layout/pref_row_state"
+            android:widgetLayout="@layout/pref_widget_switch" />
 
         <!-- 开发者选项入口（独立开关）：只写 Settings.Global.development_settings_enabled，
              与上面两个调试开关互不联动，也不参与主开关的折叠。
              值由 MainActivity 按真值回填（与 usb / wireless 完全一致）。 -->
-        <SwitchPreference
+        <SwitchPreferenceCompat
             android:key="swDevOpts"
             android:order="30"
             android:title="@string/devopts_title"
             android:summary="@string/devopts_off"
-            android:layout="@layout/pref_row_state" />
+            android:layout="@layout/pref_row_state"
+            android:widgetLayout="@layout/pref_widget_switch" />
 
         <!-- 双模式授权：模式选择 + 授权状态合并为同一项。
              标题=授权模式；副标题直接显示「root模式 · 未授权」等（无【】括号）。
@@ -51,31 +57,37 @@
             android:order="40"
             android:title="@string/auth_mode_title"
             android:summary="@string/auth_mode_sum"
-            android:layout="@layout/pref_row" />
+            android:layout="@layout/pref_row" 
+            app:iconSpaceReserved="false" />
 
     </PreferenceCategory>
 
     <PreferenceCategory
         android:key="catLinkage"
+        android:layout="@layout/pref_category"
         android:title="@string/card_linkage_title">
 
         <!-- persistent=false：这三个开关的值只存 cfg（由 MainActivity 显式回填、由 DebugController /
              AdbToggleService 读取）。让 framework 再自存一份默认 SharedPreferences 就会出现两份状态，
              界面与实际行为可能对不上。 -->
-        <SwitchPreference
+        <SwitchPreferenceCompat
             android:key="swLinkage"
             android:title="@string/linkage_switch"
             android:summary="@string/linkage_sum"
             android:layout="@layout/pref_row"
-            android:persistent="false" />
+            android:widgetLayout="@layout/pref_widget_switch"
+            android:persistent="false" 
+            app:iconSpaceReserved="false" />
 
         <!-- 打开调试前先关闭快捷应用：避免它在调试开启的瞬间读到状态翻转 -->
-        <SwitchPreference
+        <SwitchPreferenceCompat
             android:key="swKillBeforeOpen"
             android:title="@string/kill_before_open_title"
             android:summary="@string/kill_before_open_sum"
             android:layout="@layout/pref_row"
-            android:persistent="false" />
+            android:widgetLayout="@layout/pref_widget_switch"
+            android:persistent="false" 
+            app:iconSpaceReserved="false" />
 
         <!-- 默认快捷应用行 + 各快捷应用行 + 「管理快捷应用」行：均由 MainActivity
              按当前配置的列表动态填充（见 rebuildLinkageList），不在 XML 里写死。 -->
@@ -85,20 +97,24 @@
     <!-- 通知设置：与「调试开关」「快捷打开」并列 -->
     <PreferenceCategory
         android:key="catNotify"
+        android:layout="@layout/pref_category"
         android:title="@string/card_notify_title">
 
-        <SwitchPreference
+        <SwitchPreferenceCompat
             android:key="swNotify"
             android:title="@string/btn_temp_close"
             android:summary="@string/temp_close_sum"
             android:layout="@layout/pref_row"
-            android:persistent="false" />
+            android:widgetLayout="@layout/pref_widget_switch"
+            android:persistent="false" 
+            app:iconSpaceReserved="false" />
 
         <Preference
             android:key="liveUpdate"
             android:title="@string/live_update_title"
             android:summary="@string/live_update_sum"
-            android:layout="@layout/pref_row" />
+            android:layout="@layout/pref_row" 
+            app:iconSpaceReserved="false" />
 
     </PreferenceCategory>
 
@@ -109,6 +125,7 @@
         android:title="@string/about_title"
         android:summary="@string/about_summary"
         android:layout="@layout/pref_row"
-        android:persistent="false" />
+        android:persistent="false"
+        app:iconSpaceReserved="false" />
 
 </PreferenceScreen>

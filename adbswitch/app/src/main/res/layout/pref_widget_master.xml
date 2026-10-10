@@ -15,11 +15,11 @@
         android:padding="9dp"
         android:scaleType="fitCenter"
         android:src="@drawable/ic_expand"
-        android:tint="@color/textSecondary"
+        android:tint="?attr/colorOnSurfaceVariant"
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/master_expand_desc" />
 
-    <Switch
+    <com.google.android.material.materialswitch.MaterialSwitch
         android:id="@+id/sw_master"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

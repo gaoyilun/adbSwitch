@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material 3 主界面骨架：
+     AppBarLayout + MaterialToolbar 顶栏（动态 surface 底，替代 framework ActionBar），
+     下方 FragmentContainerView 承载 PreferenceFragmentCompat（设置列表）。
+     fitsSystemWindows + statusBarForeground：Android 15+ 强制 edge-to-edge 后，
+     系统不再自动为内容避让状态栏（旧 framework ActionBar 由系统容器处理 insets），
+     AppBarLayout 需自行消费状态栏 inset，否则标题会顶进状态栏区域。
+     背景与状态栏前景均取 ?attr/colorSurface（动态），随壁纸变化且三者同色。 -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        android:fitsSystemWindows="true"
+        app:statusBarForeground="?attr/colorSurface"
+        app:elevation="0dp">
+
+        <!-- 高度自适应：标题+副标题两行需要超过 actionBarSize 的空间，
+             固定 actionBarSize 会把两行挤在一起 -->
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="?attr/actionBarSize"
+            app:titleTextAppearance="@style/AdbToolbarTitle"
+            app:subtitleTextAppearance="@style/AdbToolbarSubtitle" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/settings_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

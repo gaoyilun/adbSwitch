@@ -39,23 +39,15 @@ public class AdbToggleService extends Service {
     private NotificationManager nm;
     private boolean observerRegistered = false;
 
-    private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context c, Intent i) {
-            if (DebugController.ACTION_STATE.equals(i.getAction())) {
-                DebugController.State s = new DebugController.State(
-                        i.getBooleanExtra(DebugController.EXTRA_USB, false),
-                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false),
-                        i.getBooleanExtra(DebugController.EXTRA_DEV, false));
-                if (s.anyOn()) {
-                    // 任一被打开：adbd 又跑起来了，常驻通知没有意义，撤掉
-                    ToggleShortcuts.publish(AdbToggleService.this);
-                    stopSelf();
-                } else {
-                    // 实时刷新为「已关闭」状态
-                    updateNotification(s);
-                }
-            }
+    /** 状态变化 listener（替代原进程内广播）：任一开启即撤掉常驻通知，否则刷新为已关闭 */
+    private final DebugController.StateListener stateListener = s -> {
+        if (s.anyOn()) {
+            // 任一被打开：adbd 又跑起来了，常驻通知没有意义，撤掉
+            ToggleShortcuts.markDirty(AdbToggleService.this);
+            stopSelf();
+        } else {
+            // 实时刷新为「已关闭」状态
+            updateNotification(s);
         }
     };
 
@@ -85,12 +77,8 @@ public class AdbToggleService extends Service {
         super.onCreate();
         nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         createChannel();
-        IntentFilter f = new IntentFilter(DebugController.ACTION_STATE);
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(stateReceiver, f, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(stateReceiver, f);
-        }
+        // 状态变化改走进程内 listener 注册表（App 单进程，广播纯开销）
+        DebugController.addStateListener(stateListener);
         try {
             // 只监听这两个键：监听整个 Settings.Global.CONTENT_URI 会让任何 global 变更都回调一次
             for (String key : new String[]{
@@ -159,7 +147,7 @@ public class AdbToggleService extends Service {
     public void onDestroy() {
         super.onDestroy();
         try {
-            unregisterReceiver(stateReceiver);
+            DebugController.removeStateListener(stateListener);
         } catch (Throwable ignored) {
         }
         if (observerRegistered) {
@@ -176,7 +164,7 @@ public class AdbToggleService extends Service {
 
     /** 实时刷新通知内容（状态变化或本服务内主动调用） */
     private void updateNotification(DebugController.State s) {
-        ToggleShortcuts.publish(this);
+        ToggleShortcuts.markDirty(this);
         if (nm != null) {
             nm.notify(NOTIFY_ID, buildNotification(this, s));
         }
@@ -247,16 +235,13 @@ public class AdbToggleService extends Service {
     }
 
     private static void ensureChannel(Context ctx, NotificationManager nmm) {
-        if (Build.VERSION.SDK_INT >= 26) {
-            // Live Updates 要求重要性高于 MIN；用 DEFAULT 保证可被系统提升为实时动态，
-            // 同时仍属低打扰（无音效、collapse 行为由系统控制）。
-            NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, ctx.getString(R.string.notify_channel_name),
-                    NotificationManager.IMPORTANCE_DEFAULT);
-            ch.setDescription(ctx.getString(R.string.notify_channel_desc));
-            ch.setShowBadge(false);
-            nmm.createNotificationChannel(ch);
-        }
+        // minSdk=27，通知渠道 API 必然可用；不再判断 SDK_INT>=26（死分支）。
+        NotificationChannel ch = new NotificationChannel(
+                CHANNEL_ID, ctx.getString(R.string.notify_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT);
+        ch.setDescription(ctx.getString(R.string.notify_channel_desc));
+        ch.setShowBadge(false);
+        nmm.createNotificationChannel(ch);
     }
 
     private static Notification buildNotification(Context ctx, DebugController.State s) {
@@ -266,9 +251,8 @@ public class AdbToggleService extends Service {
         Intent close = new Intent(ctx, NotificationReceiver.class).setAction(ACTION_CLOSE);
         PendingIntent piClose = PendingIntent.getBroadcast(ctx, 2, close, PendingIntent.FLAG_IMMUTABLE);
 
-        Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
-                ? new Notification.Builder(ctx, CHANNEL_ID)
-                : new Notification.Builder(ctx);
+        // minSdk=27，通知渠道 API 必然可用；不再判断 SDK_INT>=26（死分支）。
+        Notification.Builder b = new Notification.Builder(ctx, CHANNEL_ID);
         // 必须设 ongoing：Android 16 的 Live Update 提升（setRequestPromotedOngoing）以
         // 「ongoing 通知」为前提——前台服务用的是 specialUse 类型不被提升，所以不设 ongoing 时
         // 实际常驻通知只显示为普通通知（不进状态栏胶囊/锁屏）。

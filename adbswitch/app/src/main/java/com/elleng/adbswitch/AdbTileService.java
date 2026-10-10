@@ -16,27 +16,14 @@ import android.widget.Toast;
  */
 public class AdbTileService extends TileService {
 
-    private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context c, Intent i) {
-            if (DebugController.ACTION_STATE.equals(i.getAction())) {
-                updateTile(new DebugController.State(
-                        i.getBooleanExtra(DebugController.EXTRA_USB, false),
-                        i.getBooleanExtra(DebugController.EXTRA_WIRELESS, false),
-                        i.getBooleanExtra(DebugController.EXTRA_DEV, false)));
-            }
-        }
-    };
+    /** 状态变化 listener（替代原进程内广播）：磁贴随真值刷新 */
+    private final DebugController.StateListener stateListener = s -> updateTile(s);
 
     @Override
     public void onStartListening() {
         super.onStartListening();
-        IntentFilter f = new IntentFilter(DebugController.ACTION_STATE);
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(stateReceiver, f, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(stateReceiver, f);
-        }
+        // 状态变化改走进程内 listener 注册表（App 单进程，广播纯开销）
+        DebugController.addStateListener(stateListener);
         updateTile(DebugController.read(this));
     }
 
@@ -44,7 +31,7 @@ public class AdbTileService extends TileService {
     public void onStopListening() {
         super.onStopListening();
         try {
-            unregisterReceiver(stateReceiver);
+            DebugController.removeStateListener(stateListener);
         } catch (Throwable ignored) {
         }
     }
@@ -76,7 +63,7 @@ public class AdbTileService extends TileService {
 
     private void updateTile(DebugController.State s) {
         // 磁贴刷新时顺带同步长按快捷方式的状态灯（下拉面板展开即读真值，灯能保持较新）
-        ToggleShortcuts.publish(this);
+        ToggleShortcuts.markDirty(this);
         Tile t = getQsTile();
         if (t == null) {
             return;

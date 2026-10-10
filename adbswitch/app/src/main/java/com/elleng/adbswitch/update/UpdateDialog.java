@@ -1,6 +1,8 @@
 package com.elleng.adbswitch.update;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.os.Handler;
@@ -59,7 +61,7 @@ public final class UpdateDialog {
             notes.setText(info.notes.trim());
         }
 
-        AlertDialog.Builder b = new AlertDialog.Builder(ctx)
+        AlertDialog.Builder b = new MaterialAlertDialogBuilder(ctx)
                 .setTitle(ctx.getString(R.string.update_found, info.versionName))
                 .setView(view)
                 // 按钮的点击逻辑在 onShow 里接管，否则点了就自动 dismiss，来不及显示下载进度

@@ -1,6 +1,8 @@
 package com.elleng.adbswitch;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -87,6 +89,9 @@ public class AppListDialog {
         final String label;
         final String pkg;
         final ApplicationInfo ai;
+        /** 预存小写副本，过滤时不再每行每次 toLowerCase（P3） */
+        final String labelLower;
+        final String pkgLower;
         volatile Bitmap icon;
         volatile boolean iconLoading;
 
@@ -94,8 +99,23 @@ public class AppListDialog {
             this.label = label;
             this.pkg = pkg;
             this.ai = ai;
+            this.labelLower = label.toLowerCase(Locale.getDefault());
+            this.pkgLower = pkg.toLowerCase(Locale.getDefault());
         }
     }
+
+    /**
+     * 图标跨会话缓存：Bitmap 解码较重，选择器反复打开时复用已解码的图标，
+     * 避免每次都重新 loadIcon + 缩放。按包名索引，上限 200 个，按内存占用（KB）计。
+     * 静态字段 → 跨对话框实例（多次打开「管理快捷应用」）共享，进程存活期间有效。
+     */
+    private static final android.util.LruCache<String, Bitmap> ICON_CACHE =
+            new android.util.LruCache<String, Bitmap>(200) {
+                @Override
+                protected int sizeOf(String key, Bitmap value) {
+                    return value.getAllocationByteCount() / 1024;
+                }
+            };
 
     private AppListDialog(Context context, boolean multi, List<String> preselected,
                           OnAppChosenListener singleListener, OnAppsChosenListener multiListener) {
@@ -148,14 +168,14 @@ public class AppListDialog {
                 errorView.setVisibility(View.GONE);
                 swipeRefresh.setVisibility(View.VISIBLE);
                 loadingView.setVisibility(View.VISIBLE);
-                scanAppsAsync(false);
+                scanAppsAsync();
             });
         }
         EditText et = root.findViewById(R.id.etSearch);
         searchBox = et;
 
         // 下拉刷新走标准控件回调，手势/进度圈由 SwipeRefreshLayout 自己管
-        swipeRefresh.setOnRefreshListener(() -> scanAppsAsync(true));
+        swipeRefresh.setOnRefreshListener(this::scanAppsAsync);
 
         adapter = new AppAdapter();
         listView.setAdapter(adapter);
@@ -188,7 +208,8 @@ public class AppListDialog {
 
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                applyFilter(s.toString());
+                // P3：搜索 300ms 防抖，避免每敲一个字符就全量过滤一次
+                scheduleFilter();
             }
 
             @Override
@@ -201,7 +222,7 @@ public class AppListDialog {
                 ? context.getString(R.string.picker_title_multi_count,
                         preselected == null ? 0 : preselected.size())
                 : context.getString(R.string.picker_title);
-        AlertDialog.Builder b = new AlertDialog.Builder(context)
+        AlertDialog.Builder b = new MaterialAlertDialogBuilder(context)
                 .setTitle(title)
                 .setView(root)
                 .setNegativeButton(android.R.string.cancel, null);
@@ -222,7 +243,7 @@ public class AppListDialog {
         loadingView.setVisibility(View.VISIBLE);
         dialog.show();
 
-        scanAppsAsync(false);
+        scanAppsAsync();
     }
 
     /** 多选模式：标题数量随勾选实时更新（如「管理快捷应用（2个）」） */
@@ -245,24 +266,33 @@ public class AppListDialog {
     }
 
     private void release() {
+        main.removeCallbacks(filterTask);
         iconLoader.shutdownNow();
         dialog = null;
     }
 
+    /** 300ms 防抖的过滤任务：每次输入先撤掉上一次的待执行，避免连敲时重复全量过滤 */
+    private final Runnable filterTask = () -> {
+        if (searchBox != null) {
+            applyFilter(searchBox.getText().toString());
+        }
+    };
+
+    private void scheduleFilter() {
+        main.removeCallbacks(filterTask);
+        main.postDelayed(filterTask, 300);
+    }
+
     /** 后台扫描已安装应用，完成后回主线程刷新列表 */
-    private void scanAppsAsync(boolean pullRefresh) {
+    private void scanAppsAsync() {
         new Thread(() -> {
             ArrayList<AppInfo> result;
-            boolean ok;
             try {
                 result = loadApps();
-                ok = true;
             } catch (Throwable t) {
                 android.util.Log.e("AppListDialog", "loadApps failed", t);
                 result = new ArrayList<>();
-                ok = false;
             }
-            final boolean success = ok;
             final ArrayList<AppInfo> data = result;
             main.post(() -> {
                 if (dialog == null || !dialog.isShowing()) {
@@ -288,11 +318,8 @@ public class AppListDialog {
                 // 必须用搜索框里的当前文本重新过滤：写死空串会把用户已输入的关键字冲掉，
                 // 表现为「下拉刷新一下，搜索条件莫名失效」。
                 applyFilter(searchBox != null ? searchBox.getText().toString() : "");
-                // 收掉标准控件的刷新进度圈
+                // 收掉标准控件的刷新进度圈（不再弹「已刷新应用列表」Toast：进度圈本身就是反馈）
                 swipeRefresh.setRefreshing(false);
-                if (pullRefresh && success && !empty) {
-                    Toast.makeText(context, R.string.ptr_done, Toast.LENGTH_SHORT).show();
-                }
             });
         }, "app-picker-scan").start();
     }
@@ -365,17 +392,7 @@ public class AppListDialog {
     /** 后台把应用图标渲染成方形 Bitmap（Drawable 不能跨线程用，Bitmap 可以） */
     private Bitmap decodeIcon(ApplicationInfo ai, int size) {
         try {
-            android.graphics.drawable.Drawable d = ai.loadIcon(pm);
-            if (d instanceof android.graphics.drawable.BitmapDrawable) {
-                Bitmap src = ((android.graphics.drawable.BitmapDrawable) d).getBitmap();
-                return Bitmap.createScaledBitmap(src, size, size, true);
-            }
-            Bitmap bmp = Bitmap.createBitmap(Math.max(1, size), Math.max(1, size),
-                    Bitmap.Config.ARGB_8888);
-            android.graphics.Canvas c = new android.graphics.Canvas(bmp);
-            d.setBounds(0, 0, size, size);
-            d.draw(c);
-            return bmp;
+            return DrawableUtils.toBitmap(ai.loadIcon(pm), size);
         } catch (Throwable t) {
             return null;
         }
@@ -392,6 +409,9 @@ public class AppListDialog {
                 }
                 Bitmap bmp = decodeIcon(target.ai, iconSizePx);
                 target.icon = bmp;
+                if (bmp != null) {
+                    ICON_CACHE.put(target.pkg, bmp);
+                }
                 target.iconLoading = false;
                 main.post(() -> {
                     if (dialog == null || !dialog.isShowing()) {
@@ -413,9 +433,7 @@ public class AppListDialog {
         q = q.trim().toLowerCase(Locale.getDefault());
         filtered.clear();
         for (AppInfo a : all) {
-            if (q.isEmpty()
-                    || a.label.toLowerCase(Locale.getDefault()).contains(q)
-                    || a.pkg.toLowerCase(Locale.getDefault()).contains(q)) {
+            if (q.isEmpty() || a.labelLower.contains(q) || a.pkgLower.contains(q)) {
                 filtered.add(a);
             }
         }
@@ -460,6 +478,13 @@ public class AppListDialog {
             h.pkg.setText(info.pkg);
             final String key = info.pkg;
             h.icon.setTag(key);
+            // 先查跨会话缓存（命中即省去解码）；仅当本进程内还没解码过时才去取
+            if (info.icon == null) {
+                Bitmap cached = ICON_CACHE.get(key);
+                if (cached != null) {
+                    info.icon = cached;
+                }
+            }
             h.icon.setImageBitmap(info.icon);
             // 多选模式：显示勾选框并据集合绑定状态
             if (h.check != null) {

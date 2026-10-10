@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 「发现新版本」弹窗内容：更新说明 + 下载进度（进度初始隐藏，点「立刻更新」后显示）。 -->
+<!-- 「发现新版本」弹窗内容：更新说明 + 下载进度。动态文字色用 ?attr/colorOnSurface / colorOnSurfaceVariant。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -14,7 +14,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textAppearance="?android:attr/textAppearanceListItem"
-        android:textColor="?android:attr/textColorPrimary"
+        android:textColor="?attr/colorOnSurface"
         android:textIsSelectable="true" />
 
     <ProgressBar
@@ -31,7 +31,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
         android:textAppearance="?android:attr/textAppearanceListItemSmall"
-        android:textColor="?android:attr/textColorSecondary"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:visibility="gone" />
 
 </LinearLayout>

@@ -1,18 +1,14 @@
 <resources>
-    <!-- Material 原生配色（Blue 800/700 系列） -->
-    <color name="colorPrimary">#1565C0</color>
-    <color name="colorPrimaryDark">#0D47A1</color>
-    <color name="colorAccent">#1976D2</color>
-    <color name="colorOnPrimary">#FFFFFF</color>
-
-    <color name="surface">#FFFFFF</color>
-    <color name="background">#F2F4F7</color>
-
-    <color name="textPrimary">#212121</color>
-    <color name="textSecondary">#6B7280</color>
-
+    <!-- 业务语义色（调试状态指示 / 错误警示），非 M3 动态角色，固定以保持状态可读性。
+         其余所有 M3 颜色角色（primary/surface/onSurface/outline/error…）一律交由
+         Theme.Material3.Dynamic 由系统壁纸动态派生（莫奈取色）。 -->
     <color name="stateOn">#2E7D32</color>     <!-- 已开启：绿色 -->
     <color name="stateOff">#EF6C00</color>    <!-- 已关闭：橙色 -->
-    <color name="stateUnknown">#9E9E9E</color> <!-- 状态未确认：中性灰（不暗示安全也不暗示危险） -->
-    <color name="error">#D32F2F</color>
+    <color name="stateUnknown">#9E9E9E</color> <!-- 状态未确认：中性灰 -->
+    <color name="error">#BA1A1A</color>      <!-- 警示红（Java 直引用，固定） -->
+    <!-- 反色条（Snackbar）上的警示红：Snackbar 底色恒为 M3 反色 surface——
+         浅色模式下条是深底 → 用浅红（M3 dark error tone90）；
+         深色模式下条是浅底 → 用深红（见 values-night，M3 light error tone40）。
+         与当前模式的 error 档正好相反，才能保证两种模式下都有足够对比度。 -->
+    <color name="errorInverse">#FFB4AB</color>
 </resources>

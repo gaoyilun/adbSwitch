@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 调试开关三行的自定义布局：与 pref_row 仅图标框不同——这里把图标框收到 20dp，
-     让「状态圆点」只约等于一行文字高度（pref_row 的 40dp 会把圆点撑成两行字高）。
-     其余内边距、字号、颜色均沿用系统设置项档位，与原 pref_row 保持一致。 -->
+     让「状态圆点」只约等于一行文字高度。文字色取动态 colorOnSurface / colorOnSurfaceVariant。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -43,7 +42,7 @@
             android:ellipsize="marquee"
             android:singleLine="true"
             android:textAppearance="?android:attr/textAppearanceListItem"
-            android:textColor="?android:attr/textColorPrimary" />
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@android:id/summary"
@@ -53,7 +52,7 @@
             android:ellipsize="end"
             android:maxLines="3"
             android:textAppearance="?android:attr/textAppearanceListItemSecondary"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
     </LinearLayout>
 

@@ -1,39 +1,23 @@
 <resources>
-    <!-- 主题挂在 MaterialComponents 下：底部提示用原生 Snackbar（Material 组件），
-         其布局会解析 colorSurface / textAppearance 等 Material 属性，
-         挂在纯 framework 主题下会直接 InflateException 崩溃。
-         这里沿用 .DarkActionBar 变体并显式覆盖 android: 颜色，
-         framework ActionBar / Preference 的观感与原先一致。 -->
-    <style name="AppTheme" parent="Theme.MaterialComponents.Light.DarkActionBar">
-        <item name="android:colorPrimary">@color/colorPrimary</item>
-        <item name="android:colorPrimaryDark">@color/colorPrimaryDark</item>
-        <item name="android:colorAccent">@color/colorAccent</item>
-        <!-- 开关（含快捷打开等）开启态使用应用主题蓝，替代默认青色 -->
-        <item name="android:colorControlActivated">@color/colorPrimary</item>
-        <item name="android:statusBarColor">@color/colorPrimaryDark</item>
-        <!-- 状态栏为深色，图标用浅色 -->
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowBackground">@color/background</item>
-        <!-- 关键：MaterialComponents/AppCompat 主题只支持 androidx 的支持 ActionBar（要 AppCompatActivity），
-             本 App 是 framework PreferenceActivity，走的是 framework ActionBar，
-             因此必须显式打开 android:windowActionBar 并关掉 NoTitle，否则顶栏会整条消失。 -->
-        <item name="android:windowActionBar">true</item>
-        <item name="android:windowNoTitle">false</item>
-        <!-- 顶栏（ActionBar）样式：蓝底 + 白色标题/副标题，保证可读性 -->
-        <item name="android:actionBarStyle">@style/AppActionBar</item>
+    <!-- Material 3 动态（莫奈）主题：
+         parent 用 Dynamic 分支 —— 系统从壁纸提取色调，灌入 colorPrimary/colorSurface/...
+         所有 M3 颜色角色不再写死（已移除覆盖），动态取色才能生效。
+         仅把窗口背景 / 状态栏指向 ?attr/colorSurface（动态 surface），
+         保证状态栏 + 顶栏 + 页面同色，且整体随壁纸变化。
+         顶栏标题 / 副标题字号在 activity_main.xml 的 MaterialToolbar 上显式指定。 -->
+    <style name="AppTheme" parent="Theme.Material3.DynamicColors.DayNight.NoActionBar">
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">?attr/colorSurface</item>
     </style>
 
-    <style name="AppActionBar" parent="@android:style/Widget.Material.ActionBar.Solid">
-        <item name="android:background">@color/colorPrimary</item>
-        <item name="android:titleTextStyle">@style/AppActionBarTitle</item>
-        <item name="android:subtitleTextStyle">@style/AppActionBarSubtitle</item>
+    <!-- 顶栏标题：M3 Title Large 基准（22sp），缩小到 18sp -->
+    <style name="AdbToolbarTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textSize">18sp</item>
     </style>
 
-    <style name="AppActionBarTitle" parent="@android:style/TextAppearance.Material.Widget.ActionBar.Title">
-        <item name="android:textColor">@color/colorOnPrimary</item>
-    </style>
-
-    <style name="AppActionBarSubtitle" parent="@android:style/TextAppearance.Material.Widget.ActionBar.Subtitle">
-        <item name="android:textColor">#C8E1FF</item>
+    <!-- 顶栏副标题：M3 Body Medium 基准（14sp），缩小到 12sp -->
+    <style name="AdbToolbarSubtitle" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textSize">12sp</item>
     </style>
 </resources>
