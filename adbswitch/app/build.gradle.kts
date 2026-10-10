@@ -33,8 +33,8 @@ android {
         applicationId = "com.elleng.adbswitch"
         minSdk = 27
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
         buildConfigField("long", "BUILD_TIME_MS", "${buildTimeMs}L")
 
         // 蒲公英备通道密钥：从仓库外 pgyer.properties 注入 BuildConfig，避免明文进源码/公开仓库。
