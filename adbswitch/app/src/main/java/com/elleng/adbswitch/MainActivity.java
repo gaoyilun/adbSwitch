@@ -1015,6 +1015,13 @@ public class MainActivity extends AppCompatActivity {
         if (autoJump) {
             sAutoJumped = true; // 区分来源：回设置页时只有自动跳转才提示「启动时已自动跳转」
         }
+        // 从快捷方式冷启动时 onCreate 不会构建设置页（handleEntry 已判定为「自行处理」而跳过 showSettings），
+        // 而 setMaster 是异步的、未授权时最坏要等满超时（10s）。若不先建好设置页，这段等待期间界面就是
+        // 一个只有 toolbar、内容区空白的主页——表现就是「卡住 / 白屏」。
+        // 故先把设置页作为背景建好：成功则稍后 finish 跳走，失败则停在有内容的设置页上（显示未授权 + 重试）。
+        if (!prefsLoaded) {
+            showSettings();
+        }
         // 联动走统一入口：一键关闭会记住当前组合并把 USB / 无线都关掉。
         // 常驻通知在 su 写完之后才拉起，天然比旧版的固定 250ms 延时更稳。
         DebugController.setMaster(this, false, (ok, s, reason) -> {
@@ -1025,9 +1032,11 @@ public class MainActivity extends AppCompatActivity {
                 applyRootState();
                 Toast.makeText(this, DebugController.failureMessage(this, reason),
                         Toast.LENGTH_SHORT).show();
-            } else {
-                AdbToggleService.syncCloseNotification(this);
+                // 未授权：保留已建好的设置页（显示「未授权，无法写入」+ 重试按钮），
+                // 不再静默跳目标应用 / 关掉本页——否则用户既没关成调试、又看不到任何说明（白屏或闪走）。
+                return;
             }
+            AdbToggleService.syncCloseNotification(this);
             if (!launchApp(pkg)) {
                 // 目标应用已失效（卸载 / 停用）：提示并留在设置页，而不是静默闪回桌面
                 handleLinkageTargetGone(pkg);
