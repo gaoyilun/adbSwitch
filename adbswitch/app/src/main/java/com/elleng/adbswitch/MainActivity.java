@@ -831,14 +831,11 @@ public class MainActivity extends AppCompatActivity {
         authPref = pref("auth");
         if (authPref != null) {
             authPref.setOnPreferenceClickListener(p -> {
-                // WSS（默认推荐）模式下若尚未授权，直接进一次性授权引导 —— 此时弹模式选择没意义，
-                // 因为问题不在「选哪个通道」而在「还没拿到 pm grant」。
-                if (AuthManager.getMode(MainActivity.this) == AuthManager.Mode.SECURE_SETTINGS
-                        && !AuthManager.hasWriteSecureSettings(MainActivity.this)) {
-                    showWssBootstrapDialog();
-                } else {
-                    chooseAuthMode();
-                }
+                // 点击整行一律打开模式选择（免 root / root / Shizuku 三通道），
+                // 让用户**随时都能切换通道**——首次授权也允许直接切到 root / Shizuku，
+                // 而不是被锁死在 WSS 引导里。选 WSS 且未授权时，由 chooseAuthMode 内部
+                // 再弹一次性授权引导（见其 SECURE_SETTINGS 分支），默认弹窗授权不受影响。
+                chooseAuthMode();
                 return true;
             });
         }
