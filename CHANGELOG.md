@@ -27,3 +27,9 @@
 - 优化授权交互：首次授权后允许直接在「授权模式」中切换到 root / Shizuku 通道，不再被锁死在免 root 引导里（选免 root 且未授权时仍会先弹一次性授权引导）。
 - 修复应用内更新：缺「安装未知应用」授权跳系统设置授权后返回，直接复用已下载的安装包继续安装，不再重新下载（重试同样走复用路径）。
 
+### 免 root 模式在 HyperOS 等 ROM 上的修复（参考 Geto / IMD）
+
+- **根因**：纯 WSS（已授权 `WRITE_SECURE_SETTINGS`、无 Shizuku 兜底）时，ContentResolver 读 `adb_enabled` / `adb_wifi_enabled` / `development_settings_enabled` 会被 ROM 隐藏/欺骗；旧实现把被隐藏的读当真值，导致「状态读不对、写后又被假回读打回、开关拨不动」。
+- **对齐开源方案**：参考 Geto、IMD（It's My Device）的实现——它们同样走标准 WSS API（无 HyperOS 专属绕过），写用 `Settings.Global.putString` 并**据其布尔返回值识别"行是否真写进去"**，读用 `getString`。本版本相应改用 `getString` / `putString`，并在 `putString` 返回 `false`（被系统静默丢弃、不抛错）时如实标记写入失败（REASON_WRITE_DROPPED），UI 提示「写入未生效」而非静默弹回。
+- **纯 WSS 信任自身写入**：无 Shizuku 兜底时，写后不再用被隐藏的 ContentResolver 回读，改为信任本次写入 + 本地持久化的「上次确认状态」（lastKnownState），避免 UI 自相矛盾；后台校准也跳过，防止假值污染本地状态。
+

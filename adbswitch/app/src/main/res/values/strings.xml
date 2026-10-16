@@ -215,4 +215,7 @@
     <!-- 免root模式未授权时点开关：DebugController 写入口统一拦下并回传 REASON_NEED_GRANT。
          App 内点击会直接弹一次性授权引导；这条文案主要给磁贴 / 桌面快捷方式等无界面入口。 -->
     <string name="toast_wss_need_grant">免root模式尚未授权，请打开App完成一次性授权</string>
+    <!-- 免root模式写这些键被系统静默丢弃（HyperOS 等 ROM 对第三方应用直接丢、不抛错）。
+         对齐 Geto/IMD 的做法：用 putString 的布尔返回值识别"没真写进去"，如实告知而非静默弹回。 -->
+    <string name="toast_wss_write_dropped">写入未生效：系统（该机型）未接受本次设置，可能被限制</string>
 </resources>

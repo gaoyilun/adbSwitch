@@ -52,6 +52,14 @@ public final class RootUtil {
      * 若落进 root 兜底通道，无 root 设备上只会报一句「没有 su」，把用户往 Magisk 带偏。
      */
     public static final int REASON_NEED_GRANT = 7;
+    /**
+     * 免root模式（WSS）下，ContentResolver 写入这些键被系统静默丢弃：
+     * {@code Settings.Global.putString} 返回 false（不是异常，命令层面"成功"了）。
+     * 某些 ROM（如 HyperOS）对第三方应用写 {@code adb_enabled} / {@code adb_wifi_enabled}
+     * 直接丢弃且不抛错，putInt 的 void 返回会让调用方误以为写成功了——
+     * 必须显式把这个假成功标记成失败，UI 才能如实提示「写入未生效」。
+     */
+    public static final int REASON_WRITE_DROPPED = 8;
 
     public static class Result {
         public int code;

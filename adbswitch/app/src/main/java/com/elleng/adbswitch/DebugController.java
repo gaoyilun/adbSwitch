@@ -205,6 +205,14 @@ public final class DebugController {
             return; // 节流
         }
         lastRefreshReqAt = now;
+        // 纯 WSS 无 shell 兜底：ContentResolver 回读被 ROM 隐藏/欺骗（HyperOS 上尤甚），
+        // 若跑授权通道校准，会用假值污染本地持久化状态（lastKnownState）与缓存，导致 UI
+        // 与写入自相矛盾（读显示错、写后又被假回读打回）。这种模式下信任「上次确认状态」
+        // + 自身写入：标记本会话已确认以放行点击，不再做会被欺骗的校准。
+        if (wssTrustWriteOnly(app)) {
+            confirmedThisSession = true;
+            return;
+        }
         IO.execute(() -> {
             State s = readViaPrivileged(app);
             if (s != null) {
@@ -313,11 +321,36 @@ public final class DebugController {
         return AuthManager.getEffectiveMode(ctx) == AuthManager.Mode.SECURE_SETTINGS;
     }
 
-    /** WSS 直写单个键（无需 root / Shizuku）。抛错（如未授权）视为写入失败（REASON_EXEC） */
+    /**
+     * 纯 WSS（已授权 WRITE_SECURE_SETTINGS）但无任何 shell 兜底（Shizuku 不可用）时，
+     * ContentResolver 读这三个键会被 ROM 隐藏/欺骗（HyperOS 上尤甚），回读不可信 ——
+     * 写后只能信任自身写入 + 持久化的「上次确认状态」（lastKnownState），不再把被隐藏的
+     * ContentResolver 读当真值。这正是 HyperOS 上「免 root 模式读不到状态、也拨不动开关」
+     * 的根因与对策；Geto/IMD 同样走标准 WSS API，纯 WSS 时也只能是 best-effort。
+     */
+    private static boolean wssTrustWriteOnly(Context ctx) {
+        return AuthManager.getEffectiveMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
+                && !ShizukuUtil.available();
+    }
+
+    /**
+     * WSS 直写单个键（无需 root / Shizuku）。
+     * 对齐 Geto/IMD：用 {@code Settings.Global.putString}（字符串 API）而非 putInt，
+     * 并**用其布尔返回值识别「这一行到底写没写进去」**——部分 ROM（如 HyperOS）对第三方
+     * 应用写 adb_enabled / adb_wifi_enabled 直接静默丢弃且不抛错，putInt 的 void 返回会
+     * 让调用方误以为写成功了。返回 false → 标记 REASON_WRITE_DROPPED（如实告知而非静默弹回）。
+     */
     private static void putWss(Context ctx, String key, int val) {
         try {
-            Settings.Global.putInt(ctx.getContentResolver(), key, val);
-            lastFailReason = RootUtil.REASON_NONE;
+            boolean written = Settings.Global.putString(
+                    ctx.getContentResolver(), key, Integer.toString(val));
+            if (!written) {
+                android.util.Log.w(TAG, "wss put " + key + "=" + val
+                        + " not written (dropped by ROM)");
+                lastFailReason = RootUtil.REASON_WRITE_DROPPED;
+            } else {
+                lastFailReason = RootUtil.REASON_NONE;
+            }
         } catch (Throwable t) {
             android.util.Log.w(TAG, "wss put " + key + " failed", t);
             lastFailReason = RootUtil.REASON_EXEC;
@@ -363,7 +396,9 @@ public final class DebugController {
             RootUtil.Result r = ShizukuUtil.run(SHELL_READ_CMD);
             return parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
         }
-        return readStateWss(ctx);
+        // 纯 WSS 无 shell 兜底：ContentResolver 读被 ROM 隐藏/欺骗（HyperOS 上尤甚），回读不可信——
+        // 直接返回本地持久化的「上次确认状态」（lastKnownState），不再把被隐藏的真值当真。
+        return wssTrustWriteOnly(ctx) ? lastKnownState(ctx) : readStateWss(ctx);
     }
 
     /** WSS 模式写单个键（含写后回读）；opening 且 Shizuku 可用时先经 Shizuku 杀联动应用 */
@@ -371,13 +406,25 @@ public final class DebugController {
         if (kill) {
             killLinkageViaShizuku(ctx, on);
         }
+        boolean trustOnly = wssTrustWriteOnly(ctx);
+        // 纯 WSS 无 shell 兜底时，before 也用本地持久化的「上次确认状态」（回读被隐藏不可信）
+        State before = trustOnly ? lastKnownState(ctx) : readViaShellOrWss(ctx);
         putWss(ctx, key, on ? 1 : 0);
         lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
         WriteResult w = new WriteResult();
         w.ok = (lastFailReason == RootUtil.REASON_NONE);
-        // 子开关只有这一个回读（没有 before 读可借），保留同步回读：WSS+Shizuku 设备上它是
-        // 一次 newProcess，但「信任写结果」得用缓存猜另外两个键，反而不可信。
-        w.after = readViaShellOrWss(ctx);
+        if (trustOnly) {
+            // 纯 WSS 无 shell 兜底：ContentResolver 回读被 ROM 隐藏/欺骗，写后不回读，直接信任写入。
+            // putString 返回 true（且未抛错）→ 按期望值提交；返回 false（静默丢弃）/ 抛错 → 拒绝提交，
+            // 由 UI 如实提示「写入未生效」，而不是让开关静默弹回、骗用户以为关了。
+            w.after = w.ok ? new State(
+                    KEY_USB.equals(key) ? on : before.usb,
+                    KEY_WIRELESS.equals(key) ? on : before.wireless,
+                    KEY_DEV.equals(key) ? on : before.dev) : null;
+        } else {
+            // 有 Shizuku 兜底的设备仍回读真值（一次 newProcess，但可靠，能纠正 ROM 屏蔽写入）
+            w.after = readViaShellOrWss(ctx);
+        }
         return w;
     }
 
@@ -395,7 +442,11 @@ public final class DebugController {
      */
     private static MasterMerge masterMergeWriteWss(Context ctx, boolean on, State knownBefore) {
         State saved = loadSaved(ctx);
-        State before = knownBefore != null ? knownBefore : readViaShellOrWss(ctx);
+        // 纯 WSS 无 shell 兜底：before 用本地持久化的「上次确认状态」（回读被隐藏不可信）；
+        // 否则优先用调用方刚读到的真值，避免重复读。
+        boolean trustOnly = wssTrustWriteOnly(ctx);
+        State before = trustOnly ? lastKnownState(ctx)
+                : (knownBefore != null ? knownBefore : readViaShellOrWss(ctx));
         killLinkageViaShizuku(ctx, on);
         boolean tUsb = on ? saved.usb : false;
         boolean tWifi = on && wirelessSupported() ? saved.wireless : false;
@@ -482,10 +533,16 @@ public final class DebugController {
     }
 
     private static int getInt(Context ctx, String key) {
+        // 对齐 Geto/IMD：用 getString 读再解析，而非 getInt。
+        // getInt 对「键不存在」会抛 SettingNotFoundException，而 getString 返回 null（更稳）；
+        // 二者对"已存在的值"解析结果一致。读不到（null / 异常）按「未开启」处理。
         try {
-            return Settings.Global.getInt(ctx.getContentResolver(), key);
+            String v = Settings.Global.getString(ctx.getContentResolver(), key);
+            if (v == null) {
+                return -1;
+            }
+            return Integer.parseInt(v);
         } catch (Throwable t) {
-            // 读不到（键不存在/Provider 异常）按「未开启」处理；真值会在下一次刷新回读纠正
             android.util.Log.w(TAG, "read " + key + " failed", t);
             return -1;
         }
@@ -526,6 +583,8 @@ public final class DebugController {
                 return ctx.getString(R.string.toast_auth_timeout);
             case RootUtil.REASON_NEED_GRANT:
                 return ctx.getString(R.string.toast_wss_need_grant);
+            case RootUtil.REASON_WRITE_DROPPED:
+                return ctx.getString(R.string.toast_wss_write_dropped);
             default:
                 return ctx.getString(R.string.toast_root_fail);
         }
@@ -806,7 +865,9 @@ public final class DebugController {
      * WSS 信任写后的复核（仅在 MasterMerge.trusted 时调用；运行在 IO 线程）。
      *
      * masterMergeWriteWss 为了不把 100~500ms 的 shell 回读压在点击等待上，直接用期望值提交。
-     * 这里补一次同源回读兜底：ROM 静默屏蔽写入（putInt 不抛错但值没变）时纠正缓存并广播。
+     * 这里补一次同源回读兜底：ROM 静默屏蔽写入（putString 返回 true 但值其实没变）时纠正
+     * 缓存并广播。（注意：putString 返回 false 的情况已在 masterMergeWriteWss / writeKeyWss
+     * 里被标记成 REASON_WRITE_DROPPED 拒绝提交，不会走到这里。）
      * 纯 WSS 设备没有可信回读通道（ContentResolver 可能被 ROM 隐藏），跳过——做了反而误导。
      * 调用方把它放在写回调之后执行：UI 已拿到即时反馈，复核耗时不再占用户等待。
      */
