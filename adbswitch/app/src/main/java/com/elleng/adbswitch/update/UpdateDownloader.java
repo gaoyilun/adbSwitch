@@ -11,6 +11,7 @@ import android.util.Log;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -218,6 +219,35 @@ public final class UpdateDownloader {
         try {
             return f != null && f.isFile() && f.length() > 0L;
         } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 校验已下载文件的整体 SHA-256 是否与期望一致（阻塞读全文件；2MB 级 APK 耗时可忽略）。
+     * 用于「复用上次已下载但没装上的 APK」前的完整性确认，防止把陈旧/损坏的旧包装出去。
+     * 期望值为 null 时返回 false —— 没法确认是哪次的包，宁可不复用（调用方应回退重新下载）。
+     */
+    public static boolean sha256Matches(File f, String expectedSha256) {
+        if (f == null || !f.isFile() || expectedSha256 == null) {
+            return false;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream in = new FileInputStream(f)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    digest.update(buf, 0, n);
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest.digest()) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString().equalsIgnoreCase(expectedSha256);
+        } catch (Throwable t) {
+            Log.w(TAG, "SHA-256 校验异常: " + f, t);
             return false;
         }
     }

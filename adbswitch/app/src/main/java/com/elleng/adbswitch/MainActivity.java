@@ -1609,6 +1609,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 更新弹窗停在「等待安装授权」且用户刚在系统设置授完「安装未知应用」返回时，
+        // 直接复用已下载的 APK 续装（不重新下载）。内部自校验状态，无弹窗时是空操作。
+        UpdateDialog.onHostResumed(this);
         // 设置界面尚未构建（例如调试入口只用 postDelayed 延迟构建）时，
         // 偏好项字段都还是 null，下面的刷新会 NPE，必须先跳过。
         if (!prefsLoaded) {
