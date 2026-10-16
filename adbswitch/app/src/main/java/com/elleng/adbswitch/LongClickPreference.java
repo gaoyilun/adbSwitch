@@ -45,7 +45,12 @@ public class LongClickPreference extends Preference {
         super.onBindViewHolder(holder);
         View row = holder.itemView;
         if (longClickListener != null) {
-            row.setOnLongClickListener(v -> longClickListener.onRowLongClick());
+            row.setOnLongClickListener(v -> {
+                // 平台规范：长按手势应给触觉反馈，否则用户无从判断手势是否被识别
+                // （本行的长按=创建桌面快捷方式，无声无息很容易被反复重按）
+                v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+                return longClickListener.onRowLongClick();
+            });
             // 使长按生效：itemView 需要处于 long-clickable 状态
             row.setLongClickable(true);
         } else {

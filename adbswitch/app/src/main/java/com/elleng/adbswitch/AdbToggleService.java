@@ -39,6 +39,18 @@ public class AdbToggleService extends Service {
     private NotificationManager nm;
     private boolean observerRegistered = false;
 
+    /**
+     * 降级直发路径（postDirect）的看门狗。
+     *
+     * 为什么需要：startForegroundService 被后台限制拒绝时走 postDirect，只发一条通知，
+     * 没有 Service 实例来注册 observer / stateListener。若用户随后从别处（系统开发者选项、
+     * adb、其他工具）打开调试，这条直发通知会永远停在「已关闭」——与 App「确认真实状态」
+     * 的使命冲突。故用静态 listener + observer 顶上：任一开启即撤掉通知并自我注销。
+     * 静态字段只存 app context 与监听器本身，不持有 Activity，无泄漏风险。
+     */
+    private static DebugController.StateListener sDirectStateListener;
+    private static android.database.ContentObserver sDirectSettingsObserver;
+
     /** 状态变化 listener（替代原进程内广播）：任一开启即撤掉常驻通知，否则刷新为已关闭 */
     private final DebugController.StateListener stateListener = s -> {
         if (s.anyOn()) {
@@ -214,6 +226,8 @@ public class AdbToggleService extends Service {
         if (nmm != null) {
             nmm.cancel(NOTIFY_ID);
         }
+        // 通知既已撤掉，降级看门狗也没有存在意义，一并注销
+        unregisterDirectWatchdog(ctx.getApplicationContext());
     }
 
     /** 降级路径：不起前台服务，直接发常驻通知（内容与服务内发的完全一致） */
@@ -227,6 +241,64 @@ public class AdbToggleService extends Service {
             nmm.notify(NOTIFY_ID, buildNotification(ctx, s));
         } catch (Throwable t) {
             Log.e(TAG, "postDirect failed", t);
+        }
+        registerDirectWatchdog(ctx);
+    }
+
+    /** 给降级直发通知挂上看门狗（幂等：已注册则直接返回） */
+    private static synchronized void registerDirectWatchdog(Context ctx) {
+        final Context app = ctx.getApplicationContext();
+        if (sDirectStateListener == null) {
+            sDirectStateListener = st -> {
+                NotificationManager nmm2 = (NotificationManager) app.getSystemService(
+                        Context.NOTIFICATION_SERVICE);
+                if (st.anyOn()) {
+                    // 调试被别处打开：撤掉直发通知并自我注销（本路径没有 Service 兜底）
+                    if (nmm2 != null) {
+                        nmm2.cancel(NOTIFY_ID);
+                    }
+                    unregisterDirectWatchdog(app);
+                } else if (nmm2 != null) {
+                    // 两个都关：刷新为最新「已关闭」内容
+                    nmm2.notify(NOTIFY_ID, buildNotification(app, st));
+                }
+            };
+            DebugController.addStateListener(sDirectStateListener);
+        }
+        if (sDirectSettingsObserver == null) {
+            sDirectSettingsObserver = new android.database.ContentObserver(
+                    new android.os.Handler(android.os.Looper.getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    // 只作废缓存并后台重新校准：结论由 stateListener 出（同 Service 内存路径）
+                    DebugController.invalidateAndRefresh(app);
+                }
+            };
+            try {
+                for (String key : new String[]{
+                        DebugController.KEY_USB, DebugController.KEY_WIRELESS}) {
+                    app.getContentResolver().registerContentObserver(
+                            android.provider.Settings.Global.getUriFor(key), false,
+                            sDirectSettingsObserver);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "direct watchdog observer register failed", t);
+            }
+        }
+    }
+
+    /** 注销降级看门狗（通知被撤掉 / 调试被打开时调用；幂等） */
+    private static synchronized void unregisterDirectWatchdog(Context app) {
+        if (sDirectStateListener != null) {
+            DebugController.removeStateListener(sDirectStateListener);
+            sDirectStateListener = null;
+        }
+        if (sDirectSettingsObserver != null) {
+            try {
+                app.getContentResolver().unregisterContentObserver(sDirectSettingsObserver);
+            } catch (Throwable ignored) {
+            }
+            sDirectSettingsObserver = null;
         }
     }
 

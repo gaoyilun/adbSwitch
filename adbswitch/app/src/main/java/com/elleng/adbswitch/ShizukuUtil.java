@@ -6,7 +6,6 @@ import android.os.ParcelFileDescriptor;
 import com.elleng.adbswitch.util.RootUtil;
 
 import java.io.FileInputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import moe.shizuku.server.IShizukuService;
@@ -144,8 +143,10 @@ public final class ShizukuUtil {
             // 若先 waitFor，命令输出一旦撑满管道缓冲，子进程会阻塞在写、waitFor 永不返回，
             // 而 DebugController 的 IO 是单线程执行器 —— 卡死一次，之后所有开关操作全部排队失效。
             final IRemoteProcess p = proc;
-            final StringBuilder outB = new StringBuilder();
-            final StringBuilder errB = new StringBuilder();
+            // StringBuffer：tOut.join(2000) 超时后读取方与 drain 线程仍可能并发访问，
+            // StringBuilder 非线程安全（见 RootUtil.su 同款修复）。
+            final StringBuffer outB = new StringBuffer();
+            final StringBuffer errB = new StringBuffer();
             Thread tOut = new Thread(() -> {
                 try {
                     outB.append(drain(p.getInputStream()));
@@ -211,19 +212,32 @@ public final class ShizukuUtil {
         return res;
     }
 
+    /**
+     * 抽干一条进程输出流并关闭它。
+     *
+     * 两个坑都在这个方法里修过：
+     *  1. ParcelFileDescriptor 本身必须关闭 —— 旧实现只关了内层 FileInputStream，
+     *     每次 run() 泄漏一个 Linux fd，长期使用后 Too many open files。
+     *  2. 不能按 1024 字节分块 new String(buf, 0, n, UTF_8)：多字节序列（中文/emoji）
+     *     跨块边界会被解码成 U+FFFD 乱码。先收完整字节再一次性解码。
+     */
     private static String drain(ParcelFileDescriptor pfd) {
         if (pfd == null) {
             return "";
         }
-        try (FileInputStream fis = new FileInputStream(pfd.getFileDescriptor())) {
-            byte[] buf = new byte[1024];
+        // 先读到底再关 pfd：关闭动作在 try-with-resources 退出时发生，
+        // 此时流已 EOF，不会截断读取。
+        try (ParcelFileDescriptor p = pfd;
+             FileInputStream fis = new FileInputStream(p.getFileDescriptor())) {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
             int n;
-            StringBuilder sb = new StringBuilder();
             while ((n = fis.read(buf)) > 0) {
-                sb.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                bos.write(buf, 0, n);
             }
-            return sb.toString();
-        } catch (IOException e) {
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Throwable e) {
+            // 含「重复关闭」等无害异常：读到哪儿算哪儿，绝不让读取失败炸掉执行器
             return "";
         }
     }

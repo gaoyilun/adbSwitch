@@ -46,6 +46,12 @@ public final class RootUtil {
     public static final int REASON_NO_BINDER = 5;
     /** Shizuku 在跑，但本应用没被授权 */
     public static final int REASON_NO_PERMISSION = 6;
+    /**
+     * 免root模式（WSS）尚未拿到那一次性的 pm grant。
+     * 单独一个原因码：此时缺的既不是 su 也不是 Shizuku，而是「去完成一次性授权」——
+     * 若落进 root 兜底通道，无 root 设备上只会报一句「没有 su」，把用户往 Magisk 带偏。
+     */
+    public static final int REASON_NEED_GRANT = 7;
 
     public static class Result {
         public int code;
@@ -108,19 +114,18 @@ public final class RootUtil {
             // 于是 waitFor 永远不返回。su 还在等授权弹窗时尤其容易卡死。
             // （ShizukuUtil 是同一个坑，两边保持一致。）
             final Process proc = p;
-            final StringBuilder outB = new StringBuilder();
-            final StringBuilder errB = new StringBuilder();
+            // StringBuffer：见 drain() 注释——读取线程与 waitFor 超时后的主读取方并发写/读
+            final StringBuffer outB = new StringBuffer();
+            final StringBuffer errB = new StringBuffer();
             Thread tOut = new Thread(() -> outB.append(drain(proc.getInputStream())));
             Thread tErr = new Thread(() -> errB.append(drain(proc.getErrorStream())));
             tOut.start();
             tErr.start();
             boolean timedOut = false;
+            boolean nonZeroExit = false;
             if (proc.waitFor(TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                 res.code = proc.exitValue();
-                // 退出码非 0：su 起来了但没给权限（授权被拒 / Magisk 拒绝 / 命令失败）
-                if (res.code != 0) {
-                    res.reason = REASON_DENIED;
-                }
+                nonZeroExit = res.code != 0;
             } else {
                 // 超时：先杀进程再收尾，绝不让 IO 线程卡在这里
                 timedOut = true;
@@ -135,6 +140,13 @@ public final class RootUtil {
             tErr.join(2000);
             res.out = outB.toString();
             res.err = errB.toString();
+            // 退出码非 0：区分「su 没给权限」与「命令本身失败」。
+            // 旧实现一律归 REASON_DENIED，导致 settings 写入被 ROM 拦截这类真实失败
+            // 也对用户显示「root 授权被拒」，把排查方向带偏（与 ShizukuUtil 的
+            // REASON_EXEC 分类对齐）。判据见 looksDenied()。
+            if (nonZeroExit) {
+                res.reason = looksDenied(res) ? REASON_DENIED : REASON_EXEC;
+            }
             if (timedOut) {
                 res.err = (res.err == null || res.err.isEmpty() ? "" : res.err + "\n")
                         + "su 执行超时(" + TIMEOUT_MS + "ms)";
@@ -166,8 +178,24 @@ public final class RootUtil {
                 || m.contains("permission denied") && m.contains("su");
     }
 
+    /**
+     * 非零退出是否像「授权被拒」：输出里带拒绝字样，或完全没有任何输出
+     * （su 被 Magisk / 用户拒绝时典型表现：命令根本没跑，stderr 也是空的）。
+     */
+    private static boolean looksDenied(Result r) {
+        String text = (String.valueOf(r.err) + "\n" + String.valueOf(r.out))
+                .toLowerCase(java.util.Locale.ROOT);
+        if (text.contains("denied") || text.contains("not permitted")
+                || text.contains("permission denied") || text.contains("not allowed")) {
+            return true;
+        }
+        return r.err.trim().isEmpty() && r.out.trim().isEmpty();
+    }
+
     private static String drain(java.io.InputStream is) {
-        StringBuilder sb = new StringBuilder();
+        // StringBuffer：drain 线程与 waitFor 超时后的读取方并发访问（join(2000) 超时后
+        // 仍可能读到还在写的线程），StringBuilder 非线程安全，内部数组可能被写越界。
+        StringBuffer sb = new StringBuffer();
         try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
             String line;
             while ((line = br.readLine()) != null) {

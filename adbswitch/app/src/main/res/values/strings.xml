@@ -12,7 +12,9 @@
     <string name="sc_toggle_wireless_short">无线调试</string>
     <string name="sc_toggle_wireless_long">单独开关无线调试，不打开界面</string>
 
-    <string name="header_subtitle">一键开关 USB 与无线调试（root / Shizuku）</string>
+    <!-- 副标题不再点名具体授权方式：默认就是免root模式，root / Shizuku 已降为兜底，
+         写出来反而让人误以为必须二选一。 -->
+    <string name="header_subtitle">一键开关 USB 与无线调试</string>
 
     <string name="card_debug_title">调试开关</string>
 
@@ -164,11 +166,16 @@
     <string name="tile_all_on">调试：全开</string>
     <string name="tile_partial">调试：部分开</string>
 
-    <!-- 双模式授权（root / Shizuku） -->
+    <!-- 三种授权模式（免root / root / Shizuku） -->
     <string name="auth_mode_title">授权模式</string>
-    <string name="auth_mode_sum">点击选择 root 或 Shizuku</string>
+    <string name="auth_mode_sum">点击选择授权模式（推荐免root模式）</string>
     <string name="auth_mode_root">root</string>
     <string name="auth_mode_shizuku">Shizuku</string>
+    <!-- 默认推荐通道「免root模式」：一次性 pm grant WRITE_SECURE_SETTINGS 后，
+         应用进程内直写 Settings.Global，无需 root、也无需 Shizuku 常驻。
+         root / Shizuku 保留为兜底写通道与「代跑 pm grant」的引导手段。
+         面向用户一律称「免root模式」，权限原名只出现在授权命令与机制说明里。 -->
+    <string name="auth_mode_wss">免root模式（推荐）</string>
     <string name="auth_retry">重试</string>
     <string name="auth_status_root_ok">root模式 · 已授权</string>
     <string name="auth_status_root_no">root模式 · 未授权</string>
@@ -179,7 +186,7 @@
     <string name="auth_toast_root_no">root模式未授权，请检查权限或切换至Shizuku模式</string>
     <string name="auth_need_start">请先在 Shizuku 应用中启动服务</string>
     <string name="auth_no_priv">未授权，无法写入调试开关</string>
-    <string name="auth_need_grant">请先完成授权（root 或 Shizuku）</string>
+    <string name="auth_need_grant">请先完成授权（免root / root / Shizuku 任一）</string>
     <!-- 按失败原因细分的提示：五种原因对应五种不同的处理动作，
          笼统一句「执行失败」等于让用户自己猜该做什么。 -->
     <string name="toast_no_su">未检测到 root（su 不可用），建议改用 Shizuku 模式</string>
@@ -190,4 +197,22 @@
     <!-- Shizuku 侧授权弹不出来时的自救指引（shouldShowRequestPermissionRationale 置位时给出）。
          措辞用条件句：该标志的语义两侧不一致，不能断言用户一定选了「不再询问」。 -->
     <string name="toast_shizuku_denied_forever">若 Shizuku 未弹出授权框，请在 Shizuku 的「已授权应用」中手动允许本应用</string>
+
+    <!-- WRITE_SECURE_SETTINGS 一次性授权的引导（三种等价方式：手动 adb / Shizuku 代跑 / root 代跑 pm grant） -->
+    <string name="auth_status_wss_ok">免root模式 · 已授权</string>
+    <string name="auth_status_wss_no">免root模式 · 未授权</string>
+    <string name="auth_bootstrap_title">完成一次性授权</string>
+    <string name="auth_bootstrap_body">免root模式需要一次性授予 WRITE_SECURE_SETTINGS 权限。该权限无法在系统设置里点击授予，只能用以下任一方式执行一次 pm grant：\n\n· 手动 adb：电脑连接后在终端执行\n· Shizuku 代跑：本机无需电脑\n· root 代跑：本机无需电脑\n\n授权成功后立即生效，跨重启 / 软重启保留；仅卸载重装需要重新授权一次。</string>
+    <string name="auth_bootstrap_cmd_label">授权命令</string>
+    <string name="auth_bootstrap_copy">复制adb命令</string>
+    <!-- 复制成功的 Toast 反馈（按钮文案是动作，这里是结果，两者不同） -->
+    <string name="auth_copy_done">已复制授权命令</string>
+    <string name="auth_bootstrap_via_shizuku">用 Shizuku 代跑</string>
+    <string name="auth_bootstrap_via_root">用 root 代跑</string>
+    <string name="auth_grant_ok">授权成功</string>
+    <string name="auth_grant_fail">授权未成功，请检查后重试</string>
+    <string name="toast_wss_no_perm">免root模式尚未授权，请点上方「授权模式」完成一次性授权</string>
+    <!-- 免root模式未授权时点开关：DebugController 写入口统一拦下并回传 REASON_NEED_GRANT。
+         App 内点击会直接弹一次性授权引导；这条文案主要给磁贴 / 桌面快捷方式等无界面入口。 -->
+    <string name="toast_wss_need_grant">免root模式尚未授权，请打开App完成一次性授权</string>
 </resources>

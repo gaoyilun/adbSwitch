@@ -63,7 +63,14 @@ final class LinkagePrefs {
 
     /** 整体写入联动应用列表（保序、去重；默认 app 若被移出列表则一并清空）。 */
     static void setApps(Context c, List<String> apps) {
-        Set<String> set = new LinkedHashSet<>(apps);
+        Set<String> set = new LinkedHashSet<>();
+        for (String p : apps) {
+            // 只收合法包名：这些字符串最终会拼进 root/shell 的 am force-stop 命令，
+            // 入口堵住含 shell 元字符的值，杜绝命令注入（消费侧 killScriptFor 也会再校验一次）。
+            if (isValidPackageName(p)) {
+                set.add(p);
+            }
+        }
         JSONArray a = new JSONArray();
         for (String p : set) {
             a.put(p);
@@ -78,6 +85,14 @@ final class LinkagePrefs {
         if (set.size() == 1) {
             setDefault(c, set.iterator().next());
         }
+    }
+
+    /**
+     * 包名合法性校验（Android 包名规范子集：字母/数字/点/下划线/连字符）。
+     * 用途只有一个：保证这些字符串拼进 shell 命令时不会引入元字符（; $() | & ` 等）。
+     */
+    static boolean isValidPackageName(String pkg) {
+        return pkg != null && pkg.matches("[a-zA-Z0-9_.-]+");
     }
 
     /** 追加若干应用（去重，保留已有顺序在前）。 */

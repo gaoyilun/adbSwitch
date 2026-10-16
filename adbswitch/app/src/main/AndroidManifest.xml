@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- Shizuku：用 shell(uid 2000) 权限真实改写 Settings，无需 root -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <!-- 默认推荐通道：一次性 pm grant 后，应用进程内直写 Settings.Global（无需 root / Shizuku）。
+         声明后 checkSelfPermission 才能反映授权态，pm grant 也才有目标。 -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <!-- Android 11+ 包可见性：声明本应用需要「能看到并查询所有可启动（有桌面图标）的应用」，
          否则 getInstalledApplications / getLaunchIntentForPackage 只能返回少量系统应用。

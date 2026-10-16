@@ -105,8 +105,15 @@ public final class UpdateDownloader {
             if (code == 206 && resume) {
                 Log.i(TAG, "断点续传，从 " + downloaded + " 字节继续");
             } else if (code == 200) {
-                // 服务端不支持续传（或本来就从头下）：丢弃已下载部分
+                // 服务端不支持续传（或资源已变）：必须丢掉已下载部分重新下。
+                // 关键：resume 也要一并置 false —— 下方 FileOutputStream(part, resume) 是追加模式，
+                // 只重置 downloaded 而留着 append=true，会把完整响应拼在旧 .part 后面，APK 直接损坏。
+                // （截断写入即使 delete 失败也能丢弃旧内容，故 delete 失败只记日志不阻断。）
                 downloaded = 0L;
+                resume = false;
+                if (part.exists() && !part.delete()) {
+                    Log.w(TAG, "丢弃旧 .part 失败（改用截断写入）: " + part);
+                }
             } else {
                 throw new IllegalStateException("HTTP " + code);
             }

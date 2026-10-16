@@ -6,5 +6,8 @@
         <item name="android:statusBarColor">?attr/colorSurface</item>
         <item name="android:windowBackground">?attr/colorSurface</item>
         <item name="android:windowLightStatusBar">false</item>
+        <!-- 夜间：导航栏同色 surface；图标用浅色（windowLightNavigationBar 默认 false）。
+             API 35+ edge-to-edge 下颜色被忽略，仅作低版本一致性。 -->
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
     </style>
 </resources>

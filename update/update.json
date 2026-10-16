@@ -1,9 +1,9 @@
 {
-  "versionCode": 3,
-  "versionName": "1.0.2",
-  "notes": "· 界面全面升级 Material 3 Design，支持莫奈动态取色\n· 新增开发者选项独立开关\n· 开关操作合并为单次命令执行，响应更快\n· 修复切换授权模式后开关状态异常的问题\n· 若干体验与稳定性优化",
+  "versionCode": 4,
+  "versionName": "1.0.3",
+  "notes": "· 新增「免 root 模式」：WRITE_SECURE_SETTINGS 一次性授权，后续开关调试/无线调试不再需要反复开关开发者选项或 adb；授权粘滞（仅卸载重装需重新授权），默认推荐\n· 授权模式支持免 root / root / Shizuku 三种通道，可在「授权模式」一键切换\n· 安全性：修复 am force-stop 命令注入（包名白名单校验）\n· 稳定性：修复 WSS 读取静默回退 su、FileProvider 下载回退崩溃、HTTP 200 续传损坏 APK、并发写队列竞态、ParcelFileDescriptor 泄漏、UTF-8 多字节截断、StringBuilder 线程不安全、后台通知状态失步\n· 适配 Android 15 边到边（edge-to-edge）与导航栏配色\n· 优化「快捷打开」列表图标加载，回前台不再重复解码",
   "mandatory": false,
-  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.0.2/com.elleng.adbswitch-1.0.2-universal-release.apk",
+  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.0.3/com.elleng.adbswitch-1.0.3-universal-release.apk",
   "fallbackUrl": "https://github.com/gaoyilun/adbSwitch/releases",
-  "sha256": "25a9e39b983ac47d71b04fdd5bb1ad2fa7b88eb524f92a6aff79f7d41310de5a"
+  "sha256": "39e7c2d526a9543cb00d63c3fe461fe929c4cab41075261249cfe7ff4335cdac"
 }

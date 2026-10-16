@@ -45,7 +45,9 @@ import androidx.preference.SwitchPreferenceCompat;
 import com.elleng.adbswitch.util.RootUtil;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import com.elleng.adbswitch.update.UpdateChecker;
 import com.elleng.adbswitch.update.UpdateDialog;
 import com.elleng.adbswitch.update.UpdateInfo;
@@ -102,6 +104,11 @@ public class MainActivity extends AppCompatActivity {
     private SwitchPreferenceCompat swLinkagePref;
     private SwitchPreferenceCompat swNotifyPref;
     private SwitchPreferenceCompat swWirelessPref;
+    /**
+     * 无线调试行是否可用（adb_wifi_enabled 键自 API 30 才存在）。
+     * false 时该行已从 catDebug 摘掉、折叠逻辑也不再把它加回来，主开关只管理 USB。
+     */
+    private boolean wirelessSupported = true;
     /** 开发者选项入口开关：独立开关，不与主开关联动、不参与折叠（始终挂在 catDebug 里） */
     private SwitchPreferenceCompat swDevOptsPref;
     private SwitchPreferenceCompat swKillPref;
@@ -118,8 +125,14 @@ public class MainActivity extends AppCompatActivity {
     private boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
     /** 上次重建「快捷打开」列表的内容指纹（配置没变就不重建，见 rebuildLinkageList） */
     private String lastLinkageSignature = null;
+    /** 联动应用图标缓存：按包名缓存已解码的 Drawable，rebuildLinkageList 复用，避免每次回前台重复跨进程 getApplicationIcon 解码 */
+    private final Map<String, Drawable> linkageIconCache = new HashMap<>();
     /** 本启动周期是否已成功确认过授权：确认过则不再重复检测（切模式 / 执行失败会重置重测） */
     private boolean authCheckedThisSession = false;
+    /** WSS 引导中「用 Shizuku 代跑」：Shizuku 授权弹窗返回结果后，是否接着跑一次 pm grant */
+    private boolean pendingWssGrantAfterShizuku = false;
+    /** WSS 未授权的一次性授权引导是否已自动弹过（每次会话只自动弹一次，见 performAuthCheck） */
+    private boolean wssBootstrapShown = false;
     /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
     private com.google.android.material.snackbar.Snackbar authSnackbar = null;
     /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
@@ -272,6 +285,16 @@ public class MainActivity extends AppCompatActivity {
                         android.util.Log.i(TAG, "Shizuku permission result=" + grantResult);
                         // force：用户刚刚在弹窗里做了选择，必须立刻重测，不能被节流挡住
                         performAuthCheck(true);
+                        // WSS 引导里「用 Shizuku 代跑」：只有拿到授权才接着跑 pm grant，
+                        // 否则清掉挂起标记（用户拒绝 → 就此结束，不要残留状态下次误触发）
+                        boolean granted = grantResult
+                                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                        if (pendingWssGrantAfterShizuku) {
+                            pendingWssGrantAfterShizuku = false;
+                            if (granted) {
+                                runGrantAsync(true);
+                            }
+                        }
                     }
                 }
             };
@@ -422,6 +445,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void runAutoCheck() {
+        // 后台线程只用 application context：网络检查最长十几秒，匿名线程持有 Activity
+        // 强引用期间（旋转屏幕/退出）实例无法回收（历史教训：弱化一切跨线程的 Activity 引用）。
+        final Context app = getApplicationContext();
         new Thread(() -> {
             UpdateInfo info = null;
             try {
@@ -432,16 +458,16 @@ public class MainActivity extends AppCompatActivity {
             if (info == null) {
                 return; // 所有通道失败：不写节流，下次启动重试
             }
-            UpdateChecker.markChecked(this);
+            UpdateChecker.markChecked(app);
             if (info.hasUpdate) {
                 // 记下远端版本，关于行离线也能显示「可更新」
-                UpdateChecker.saveLatestKnown(this, info.versionCode, info.versionName);
+                UpdateChecker.saveLatestKnown(app, info.versionCode, info.versionName);
                 // 仅对「未提示过的新版本」弹一次 Toast，不弹窗、不打扰
-                if (info.versionCode != UpdateChecker.toastedVersion(this)) {
+                if (info.versionCode != UpdateChecker.toastedVersion(app)) {
                     final String name = info.versionName;
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                    runOnUiThread(() -> Toast.makeText(app,
                             getString(R.string.update_toast_new, name), Toast.LENGTH_LONG).show());
-                    UpdateChecker.markToasted(this, info.versionCode);
+                    UpdateChecker.markToasted(app, info.versionCode);
                 }
             }
             // 无论是否有更新，都刷新关于行（可能刚记下了可更新版本）
@@ -481,6 +507,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         Toast.makeText(this, R.string.update_checking, Toast.LENGTH_SHORT).show();
+        // 后台线程只用 application context（同 runAutoCheck：不持 Activity 强引用跑网络）
+        final Context app = getApplicationContext();
         new Thread(() -> {
             UpdateInfo info = null;
             try {
@@ -489,10 +517,10 @@ public class MainActivity extends AppCompatActivity {
                 android.util.Log.w("AdbSwitch", "update check failed", t);
             }
             if (info != null) {
-                UpdateChecker.markChecked(this);
+                UpdateChecker.markChecked(app);
                 if (info.hasUpdate) {
                     // 记下远端版本，关于行同步显示「可更新」
-                    UpdateChecker.saveLatestKnown(this, info.versionCode, info.versionName);
+                    UpdateChecker.saveLatestKnown(app, info.versionCode, info.versionName);
                 }
             }
             final UpdateInfo result = info;
@@ -561,8 +589,41 @@ public class MainActivity extends AppCompatActivity {
             return; // 节流：失败也不反复 fork su 干等
         }
         lastAuthProbeAt = now;
+        // 探测线程只用 application context：probe 最坏阻塞 10s（su 等授权），
+        // 匿名线程持有 Activity 强引用期间实例无法回收。回主线程的 post 已有
+        // isDestroyed/isFinishing 守卫，不碰已销毁的 UI。
+        final Context app = getApplicationContext();
         new Thread(() -> {
-            final AuthManager.Mode mode = AuthManager.getMode(MainActivity.this);
+            final AuthManager.Mode mode = AuthManager.getMode(app);
+            // WSS（默认推荐）模式：只查本应用是否已持有 WRITE_SECURE_SETTINGS。
+            // 这是纯 checkSelfPermission，零成本、不 fork su、不会惊动 Magisk ——
+            // 遵循「只探当前模式对应的后端」，不要在 Shizuku/root 模式下去探不相干的后端。
+            if (mode == AuthManager.Mode.SECURE_SETTINGS) {
+                final boolean granted = AuthManager.hasWriteSecureSettings(app);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    if (isDestroyed() || isFinishing()) {
+                        return; // Activity 已销毁，避免 UI/窗口泄漏
+                    }
+                    privilegedAvailable = granted;
+                    if (granted) {
+                        authCheckedThisSession = true;
+                    }
+                    applyRootState();
+                    updateAuthStatusUI();
+                    if (!granted) {
+                        // 首次进入且未授权：自动弹出一次性授权引导 —— 用户不必先去点
+                        // 「授权模式」那一行才知道要做什么（全新安装默认就是 WSS 模式）。
+                        // 只自动弹一次（按会话计）：否则每次回前台 / 每次重测都会糊一个弹窗；
+                        // 用户取消后仍保留底部 Snackbar（带「重试」）作为常驻入口。
+                        if (!wssBootstrapShown) {
+                            wssBootstrapShown = true;
+                            showWssBootstrapDialog();
+                        }
+                        showAuthNotice(mode, false, RootUtil.RootStatus.DENIED);
+                    }
+                });
+                return;
+            }
             // Shizuku 模式不 fork su（代价高且会惊动 Magisk），root 模式才探
             final RootUtil.RootStatus rootStatus = mode == AuthManager.Mode.ROOT
                     ? RootUtil.probe() : RootUtil.RootStatus.DENIED;
@@ -682,7 +743,33 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
             setPreferencesFromResource(R.xml.prefs, null);
-            ((MainActivity) requireActivity()).onPreferencesCreated();
+            // 类型保护：requireActivity 的强转在异常复用路径下会以 ClassCastException
+            // 直接把进程带崩；本 fragment 正常只挂在 MainActivity 容器里，加一道 instanceof 兜底。
+            if (requireActivity() instanceof MainActivity) {
+                ((MainActivity) requireActivity()).onPreferencesCreated();
+            }
+        }
+
+        @Override
+        public androidx.recyclerview.widget.RecyclerView onCreateRecyclerView(
+                android.view.LayoutInflater inflater, android.view.ViewGroup parent,
+                Bundle state) {
+            androidx.recyclerview.widget.RecyclerView rv =
+                    super.onCreateRecyclerView(inflater, parent, state);
+            // Android 15+ 强制 edge-to-edge：列表会延伸到导航栏底下，最后一行被遮住
+            // （顶部状态栏 inset 已由 activity_main.xml 的 AppBarLayout 消费）。
+            // 标准做法：clipToPadding=false + 把系统栏 inset 作为列表底部内边距，
+            // 滚到末尾时最后一行仍完整可见。
+            rv.setClipToPadding(false);
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(rv, (v, insets) -> {
+                androidx.core.graphics.Insets bars = insets.getInsets(
+                        androidx.core.view.WindowInsetsCompat.Type.systemBars());
+                v.setPadding(0, 0, 0, bars.bottom);
+                return insets;
+            });
+            // 视图可能已 attached：主动请求一次 inset 应用，否则首帧不生效
+            androidx.core.view.ViewCompat.requestApplyInsets(rv);
+            return rv;
         }
     }
 
@@ -720,6 +807,14 @@ public class MainActivity extends AppCompatActivity {
         if (catDebug != null) {
             catDebug.setOrderingAsAdded(false);
         }
+        // 无线调试设置键自 Android 11（API 30）才引入：低版本没有该键，读会抛异常、写也是无效键。
+        // 直接摘掉无线行，主开关此时只管理 USB（DebugController 侧同步把无线恒按「关」且不写该键）。
+        if (Build.VERSION.SDK_INT < 30) {
+            wirelessSupported = false;
+            if (catDebug != null && swWirelessPref != null) {
+                catDebug.removePreference(swWirelessPref);
+            }
+        }
         liveUpdatePref = pref("liveUpdate");
         buildInfoPref = pref("buildInfo");
         // 「关于」行：整行点击弹窗（旧 framework 实现行不可点、需 ListView 行接线；
@@ -736,7 +831,14 @@ public class MainActivity extends AppCompatActivity {
         authPref = pref("auth");
         if (authPref != null) {
             authPref.setOnPreferenceClickListener(p -> {
-                chooseAuthMode();
+                // WSS（默认推荐）模式下若尚未授权，直接进一次性授权引导 —— 此时弹模式选择没意义，
+                // 因为问题不在「选哪个通道」而在「还没拿到 pm grant」。
+                if (AuthManager.getMode(MainActivity.this) == AuthManager.Mode.SECURE_SETTINGS
+                        && !AuthManager.hasWriteSecureSettings(MainActivity.this)) {
+                    showWssBootstrapDialog();
+                } else {
+                    chooseAuthMode();
+                }
                 return true;
             });
         }
@@ -889,9 +991,7 @@ public class MainActivity extends AppCompatActivity {
             writer.write(want, (ok, s, reason) -> {
                 if (!ok) {
                     authCheckedThisSession = false;
-                    Toast.makeText(MainActivity.this,
-                            DebugController.failureMessage(MainActivity.this, reason),
-                            Toast.LENGTH_SHORT).show();
+                    handleWriteFailure(reason);
                 } else if (s == null || field.get(s) != want) {
                     // 命令退出码 0 却没写进去（个别 ROM 会屏蔽该键）：界面只会无声弹回，必须明确告知
                     Toast.makeText(MainActivity.this, notEffectiveRes, Toast.LENGTH_SHORT).show();
@@ -925,8 +1025,7 @@ public class MainActivity extends AppCompatActivity {
                 privilegedAvailable = false;
                 authCheckedThisSession = false;
                 applyRootState();
-                Toast.makeText(this, DebugController.failureMessage(this, reason),
-                        Toast.LENGTH_SHORT).show();
+                handleWriteFailure(reason);
             }
             refresh(s);
         });
@@ -946,7 +1045,10 @@ public class MainActivity extends AppCompatActivity {
         if (want != subSwitchesShown) {
             if (want) {
                 cat.addPreference(swUsbPref);
-                cat.addPreference(swWirelessPref);
+                // API<30 没有无线调试键：该行已摘掉，不再加回来
+                if (wirelessSupported) {
+                    cat.addPreference(swWirelessPref);
+                }
             } else {
                 cat.removePreference(swUsbPref);
                 cat.removePreference(swWirelessPref);
@@ -995,8 +1097,7 @@ public class MainActivity extends AppCompatActivity {
                 privilegedAvailable = false;
                 authCheckedThisSession = false;
                 applyRootState();
-                Toast.makeText(this, DebugController.failureMessage(this, reason),
-                        Toast.LENGTH_SHORT).show();
+                handleWriteFailure(reason);
             }
             refresh(s);
             if (done != null) {
@@ -1096,10 +1197,15 @@ public class MainActivity extends AppCompatActivity {
                 .format(new java.util.Date(BuildConfig.BUILD_TIME_MS));
         AuthManager.Mode mode = AuthManager.getMode(this);
 
-        // 授权模式行与主界面「授权模式」保持一致文案（root/Shizuku模式 · 已授权/未授权）
-        int authStatusRes = (mode == AuthManager.Mode.SHIZUKU
-                ? (privilegedAvailable ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no)
-                : (privilegedAvailable ? R.string.auth_status_root_ok : R.string.auth_status_root_no));
+        // 授权模式行与主界面「授权模式」保持一致文案（各模式 · 已授权/未授权）
+        int authStatusRes;
+        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
+            authStatusRes = privilegedAvailable ? R.string.auth_status_wss_ok : R.string.auth_status_wss_no;
+        } else if (mode == AuthManager.Mode.SHIZUKU) {
+            authStatusRes = privilegedAvailable ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no;
+        } else {
+            authStatusRes = privilegedAvailable ? R.string.auth_status_root_ok : R.string.auth_status_root_no;
+        }
 
         // 结构化布局（dialog_about.xml）：直接给各 TextView 设文本，不使用带 %1$s/%1$d 占位符的字符串，
         // 避免占位符未被 String.format 填充而原样显示。
@@ -1280,6 +1386,12 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         if (alive.size() != apps.size()) {
+            // 卸载的包从图标缓存里清掉，避免缓存持有已不存在应用的 Drawable
+            for (String removed : apps) {
+                if (!alive.contains(removed)) {
+                    linkageIconCache.remove(removed);
+                }
+            }
             LinkagePrefs.setApps(this, alive);
             apps = alive;
             ToggleShortcuts.markDirty(this); // 默认目标可能随之清掉，动态快捷方式同步
@@ -1329,7 +1441,7 @@ public class MainActivity extends AppCompatActivity {
         });
         CharSequence defLabel = def.isEmpty() ? getString(R.string.linkage_default_none) : getApplicationLabel(def);
         defPref.setSummary(defLabel);
-        defPref.setIcon(def.isEmpty() ? null : loadAppDrawable(def));
+        defPref.setIcon(def.isEmpty() ? null : loadAppDrawableCached(def));
         cat.addPreference(defPref);
 
         // 2) 每个快捷应用一行：整行点击=快捷打开；长按=创建桌面快捷方式
@@ -1342,7 +1454,7 @@ public class MainActivity extends AppCompatActivity {
             p.setTitle(label == null ? pkg : label);
             // 摘要改为操作提示，不再显示包名
             p.setSummary(R.string.quick_hint);
-            p.setIcon(loadAppDrawable(pkg));
+            p.setIcon(loadAppDrawableCached(pkg));
             p.setOnPreferenceClickListener(pv -> {
                 if (!privilegedAvailable) {
                     Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
@@ -1587,35 +1699,150 @@ public class MainActivity extends AppCompatActivity {
 
     // —— 双模式授权 ——
 
-    /** 弹出授权模式选择对话框（root / Shizuku），选中后持久化并立即重测 */
+    /** 弹出授权模式选择对话框（WSS 推荐 / root / Shizuku），选中后持久化并立即重测 */
     private void chooseAuthMode() {
         final AuthManager.Mode cur = AuthManager.getMode(this);
-        final int checked = (cur == AuthManager.Mode.SHIZUKU) ? 1 : 0;
+        final int checked = cur == AuthManager.Mode.ROOT ? 1
+                : cur == AuthManager.Mode.SHIZUKU ? 2 : 0;
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.auth_choose_title)
                 .setSingleChoiceItems(
-                        new CharSequence[]{getString(R.string.auth_mode_root),
+                        new CharSequence[]{getString(R.string.auth_mode_wss),
+                                getString(R.string.auth_mode_root),
                                 getString(R.string.auth_mode_shizuku)},
                         checked,
                         (d, which) -> {
-                            AuthManager.Mode mode = (which == 1)
-                                    ? AuthManager.Mode.SHIZUKU : AuthManager.Mode.ROOT;
+                            AuthManager.Mode mode = which == 1 ? AuthManager.Mode.ROOT
+                                    : which == 2 ? AuthManager.Mode.SHIZUKU
+                                    : AuthManager.Mode.SECURE_SETTINGS;
                             AuthManager.setMode(MainActivity.this, mode);
-                            // 执行通道变了（su ↔ Shizuku），旧状态缓存作废并立即用新通道重新校准：
+                            // 执行通道变了（WSS 直写 ↔ su ↔ Shizuku），旧状态缓存作废并立即用新通道重新校准：
                             // 不作废的话，切换后 UI 仍按旧缓存渲染，且校准可能被节流挡住导致卡在旧值。
                             DebugController.invalidateAndRefresh(MainActivity.this);
                             // 切换模式后授权状态必变，重置缓存、强制重新检测
                             authCheckedThisSession = false;
+                            // 重新武装「WSS 未授权自动引导」：切到 WSS 时应当再自动弹一次
+                            wssBootstrapShown = false;
                             d.dismiss();
                             updateAuthStatusUI();
-                            // 切到新模式下立刻双检测：root 模式 fork su；
-                            // Shizuku 模式先主动请求授权（force，用户是刚明确切过来的）
+                            if (mode == AuthManager.Mode.SECURE_SETTINGS) {
+                                // 选了推荐通道：还没授权就给一次性引导；已授权则按新通道重测
+                                if (!AuthManager.hasWriteSecureSettings(MainActivity.this)) {
+                                    showWssBootstrapDialog();
+                                } else {
+                                    performAuthCheck(true);
+                                }
+                                return;
+                            }
+                            // 切到 root / Shizuku：Shizuku 模式先主动请求授权（force，用户是刚明确切过来的）
                             maybeRequestShizukuPermission(true);
                             // force：用户刚切了模式，旧探测结论作废，必须立刻按新通道重测
                             performAuthCheck(true);
                         })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    /**
+     * 写入失败的统一收口（主 / 子开关三条回调共用）。
+     *
+     * 免root模式尚未授权（REASON_NEED_GRANT）时不弹笼统 Toast，直接打开一次性授权引导 ——
+     * 用户缺的是一次 pm grant，既不是 root 也不是 Shizuku，别把人的注意力带偏
+     * （磁贴 / 桌面快捷方式等无界面入口走 DebugController.failureMessage 的对应文案）。
+     */
+    private void handleWriteFailure(int reason) {
+        if (reason == RootUtil.REASON_NEED_GRANT) {
+            showWssBootstrapDialog();
+            return;
+        }
+        Toast.makeText(this, DebugController.failureMessage(this, reason),
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * WRITE_SECURE_SETTINGS 一次性授权引导（三种等价方式，实现都在 AuthManager）：
+     *   · 手动 adb   —— 用户复制命令到电脑执行一次（本文只负责复制）
+     *   · Shizuku 代跑 —— 本应用借 Shizuku 的 shell(uid 2000) 跑一次 pm grant
+     *   · root 代跑   —— 本应用借 su 跑一次 pm grant
+     * 授权粘滞：跨重启 / 软重启保留，仅卸载重装会撤销，故无需重复引导。
+     */
+    private void showWssBootstrapDialog() {
+        final String cmd = AuthManager.grantCommand(this);
+        android.view.View v = getLayoutInflater()
+                .inflate(R.layout.dialog_auth_bootstrap, null);
+        ((TextView) v.findViewById(R.id.wss_body)).setText(R.string.auth_bootstrap_body);
+        ((TextView) v.findViewById(R.id.wss_cmd)).setText(cmd);
+
+        androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.auth_bootstrap_title)
+                .setView(v)
+                .create();
+
+        // 四个动作必须是真实 Button：此前用 setItems 配合 setMessage 时，列表项不呈现为可点条目
+        // （观感是纯文字、点击无回调），且 AlertDialog 最多只支持三个按钮，放不下这四个动作。
+        v.findViewById(R.id.btn_wss_root).setOnClickListener(x -> {
+            dialog.dismiss();
+            runGrantAsync(false);       // 借 root 跑一次 pm grant
+        });
+        final View btnShizuku = v.findViewById(R.id.btn_wss_shizuku);
+        btnShizuku.setOnClickListener(x -> {
+            dialog.dismiss();
+            // 走三段式：未获 Shizuku 授权时先弹授权框，授权回来再代跑 pm grant
+            grantWssViaShizuku();
+        });
+        // 按设备实际能力置灰：Shizuku 服务没在跑时，「用 Shizuku 代跑」点了也只会拿到一句
+        // 「请先启动 Shizuku」——不如直接置灰，把注意力留给可用的两条路（手动 adb / root）。
+        // pingBinder 是本地 JNI 探活、不发 IPC，主线程调用安全。
+        // root 按钮不预探测：RootUtil.probe() 是一次真实 su fork，未授权设备上会弹 Magisk
+        // 授权框——只是「看看选项」不该被弹窗打扰；它点了失败的后果由 grant 失败重显弹窗兜住。
+        if (!ShizukuUtil.running()) {
+            btnShizuku.setEnabled(false);
+        }
+        v.findViewById(R.id.btn_wss_copy).setOnClickListener(x -> copyToClipboard(cmd));
+        v.findViewById(R.id.btn_wss_cancel).setOnClickListener(x -> dialog.dismiss());
+        dialog.show();
+    }
+
+    private void copyToClipboard(String text) {
+        try {
+            android.content.ClipboardManager cm =
+                    (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("pm grant", text));
+                Toast.makeText(this, R.string.auth_copy_done, Toast.LENGTH_SHORT).show();
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("AdbSwitch", "copy grant command failed", t);
+        }
+    }
+
+    /**
+     * 借 Shizuku / root 代跑一次 pm grant（后台线程：pm grant 是一次阻塞的 shell 调用）。
+     * 成功后立刻按新状态重测 —— 授权刚拿到，旧探测结论已作废。
+     */
+    private void runGrantAsync(boolean viaShizuku) {
+        new Thread(() -> {
+            final boolean ok = viaShizuku
+                    ? AuthManager.grantViaShizuku(getApplicationContext())
+                    : AuthManager.grantViaRoot(getApplicationContext());
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if (isDestroyed() || isFinishing()) {
+                    return;
+                }
+                Toast.makeText(MainActivity.this,
+                        ok ? R.string.auth_grant_ok : R.string.auth_grant_fail,
+                        Toast.LENGTH_SHORT).show();
+                if (!ok) {
+                    // 代跑失败（没有 su / Shizuku 没起来 / 被拒）：引导弹窗已关，只剩一个 Toast，
+                    // 用户没有补救入口——直接重显引导弹窗，换一条路或取消。
+                    showWssBootstrapDialog();
+                }
+                authCheckedThisSession = false;
+                DebugController.invalidateAndRefresh(MainActivity.this);
+                performAuthCheck(true);
+                updateAuthStatusUI();
+            });
+        }, "pm-grant").start();
     }
 
     /** 渲染合并的「授权模式」行（标题=授权模式，副标题直接显示「root模式 · 未授权」等）
@@ -1627,9 +1854,14 @@ public class MainActivity extends AppCompatActivity {
         }
         AuthManager.Mode mode = AuthManager.getMode(this);
         boolean ok = privilegedAvailable;
-        int statusRes = (mode == AuthManager.Mode.SHIZUKU)
-                ? (ok ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no)
-                : (ok ? R.string.auth_status_root_ok : R.string.auth_status_root_no);
+        int statusRes;
+        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
+            statusRes = ok ? R.string.auth_status_wss_ok : R.string.auth_status_wss_no;
+        } else if (mode == AuthManager.Mode.SHIZUKU) {
+            statusRes = ok ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no;
+        } else {
+            statusRes = ok ? R.string.auth_status_root_ok : R.string.auth_status_root_no;
+        }
 
         if (ok) {
             // 已授权：还原默认样式，不单独变色、不挂图标
@@ -1664,10 +1896,48 @@ public class MainActivity extends AppCompatActivity {
      *              false=走 5s 防抖。防抖是必要的：授权结果回调会再次触发 performAuthCheck，
      *              若未授权就无防抖地再次请求，会形成「请求 -> 结果 -> 重测 -> 请求」的循环。
      */
+    /**
+     * WSS 引导里的「用 Shizuku 代跑」：借 Shizuku 的 shell(uid 2000) 跑一次 pm grant。
+     *
+     * 三段式，缺一不可：
+     *  1) Shizuku 服务没起 → 引导用户去 Shizuku 里启动（此时没人能代跑）；
+     *  2) 服务在、但本应用**还没被 Shizuku 授权** → 必须先弹 Shizuku 授权框
+     *     （复用既有的 requestShizukuPermissionRaw）；授权结果回到 shizukuPermListener 后，
+     *     由它再触发真正的 pm grant；
+     *  3) 已授权 → 直接跑 pm grant。
+     *
+     * ⚠️ 不能只调 AuthManager.grantViaShizuku()：它原先以 ShizukuUtil.available()
+     * （= 服务在跑 && 已授权）为前提，而用户点这个按钮的原因恰恰是「还没授权」，
+     * 条件恒为 false → 静默返回、点了没反应。这是本按钮点击无反应的根因之一。
+     */
+    private void grantWssViaShizuku() {
+        if (!ShizukuUtil.running()) {
+            Toast.makeText(this, R.string.auth_need_start, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!ShizukuUtil.permissionGranted()) {
+            pendingWssGrantAfterShizuku = true;
+            requestShizukuPermissionRaw(true);
+            return; // 结果由 shizukuPermListener 收回后再跑 pm grant
+        }
+        runGrantAsync(true);
+    }
+
     private void maybeRequestShizukuPermission(boolean force) {
         if (AuthManager.getMode(this) != AuthManager.Mode.SHIZUKU) {
             return;
         }
+        requestShizukuPermissionRaw(force);
+    }
+
+    /**
+     * 真正发起 Shizuku 授权请求（**不带模式门槛**）。
+     *
+     * 抽这一层的缘由：WSS 引导里的「用 Shizuku 代跑」同样需要弹出 Shizuku 授权框，
+     * 但那时当前授权模式是 WSS 而不是 Shizuku；若直接走 maybeRequestShizukuPermission，
+     * 会被它开头「模式必须是 Shizuku」的判定挡掉 —— 表现就是点了没反应。
+     */
+    private void requestShizukuPermissionRaw(boolean force) {
         if (!ShizukuUtil.running()) {
             android.util.Log.i(TAG, "Shizuku binder not alive, skip permission request");
             return;
@@ -1714,6 +1984,17 @@ public class MainActivity extends AppCompatActivity {
     /** 未授权时「重试」：root 模式直接重测；Shizuku 模式先确认服务在跑，未授权则弹授权请求 */
     private void onAuthRetry() {
         AuthManager.Mode mode = AuthManager.getMode(this);
+        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
+            // WSS 模式缺的是那一次性的 pm grant：重试 = 重新打开引导弹窗。
+            // 不能只走 performAuthCheck——它的自动弹窗有「每会话一次」的闸门
+            // （wssBootstrapShown），用户手动点「重试」会被静默挡成一句红字 Snackbar。
+            if (!AuthManager.hasWriteSecureSettings(this)) {
+                showWssBootstrapDialog();
+                return;
+            }
+            performAuthCheck(true);
+            return;
+        }
         if (mode == AuthManager.Mode.SHIZUKU) {
             if (!ShizukuUtil.running()) {
                 Toast.makeText(this, R.string.auth_need_start, Toast.LENGTH_LONG).show();
@@ -1739,11 +2020,15 @@ public class MainActivity extends AppCompatActivity {
      * Shizuku 模式下再细分「服务没启动」与「已启动但没授权」，否则只说"未授权"用户无从下手；
      * root 模式下细分「根本没有 su」与「有 su 但未授权」——前者换模式才有意义，
      * 后者才该去 Magisk 点允许。
+     * WSS 模式下缺的既不是 root 也不是 Shizuku，而是那**一次性的 pm grant** ——
+     * 必须给独立文案（旧实现会落进 root 分支，把用户往 Magisk 那边带偏）。
      */
     private void showAuthNotice(AuthManager.Mode mode, boolean shizukuRunning,
                                 RootUtil.RootStatus rootStatus) {
         final int textRes;
-        if (mode == AuthManager.Mode.SHIZUKU) {
+        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
+            textRes = R.string.toast_wss_no_perm;
+        } else if (mode == AuthManager.Mode.SHIZUKU) {
             textRes = shizukuRunning ? R.string.auth_toast_shizuku_no : R.string.auth_need_start;
         } else if (rootStatus == RootUtil.RootStatus.NO_SU) {
             textRes = R.string.toast_no_su;
@@ -1808,6 +2093,24 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable t) {
             return ContextCompat.getDrawable(this, R.mipmap.ic_launcher);
         }
+    }
+
+    /**
+     * 取联动应用图标（带内存缓存）：优先命中 {@link #linkageIconCache}，命中时经 ConstantState
+     * 克隆一个新 Drawable 实例（共享底层位图、不再跨进程解码），未命中才走 {@link #loadAppDrawable}
+     * 解码并缓存。目的：rebuildLinkageList 每次回前台都会重建列表，未变化的包不必重复
+     * getApplicationIcon（IPC + 位图解码），消除 onResume 的同步卡顿；同时返回独立实例，
+     * 避免同一 Drawable 被「默认快捷应用行」与某条 app 行同时绑定带来状态串扰。
+     */
+    private Drawable loadAppDrawableCached(String pkg) {
+        Drawable cached = linkageIconCache.get(pkg);
+        if (cached != null) {
+            Drawable.ConstantState cs = cached.getConstantState();
+            return cs != null ? cs.newDrawable() : cached;
+        }
+        Drawable d = loadAppDrawable(pkg);
+        linkageIconCache.put(pkg, d);
+        return d;
     }
 
     /**

@@ -158,6 +158,15 @@ public class AppListDialog {
 
         View root = LayoutInflater.from(context).inflate(R.layout.dialog_app_picker, null);
         swipeRefresh = root.findViewById(R.id.swipeRefresh);
+        // 布局里列表区固定 500dp：AlertDialog 不会自动限制自定义视图高度，小屏 / 横屏 /
+        // 分屏下弹窗会被窗口裁掉、底部按钮够不着。按屏幕高度钳制（仍保留 500dp 上限）。
+        int maxListPx = (int) (context.getResources().getDisplayMetrics().heightPixels * 0.6f);
+        int wantListPx = (int) (500 * density + 0.5f);
+        ViewGroup.LayoutParams listLp = swipeRefresh.getLayoutParams();
+        if (listLp != null) {
+            listLp.height = Math.min(wantListPx, maxListPx);
+            swipeRefresh.setLayoutParams(listLp);
+        }
         loadingView = root.findViewById(R.id.tvLoading);
         listView = root.findViewById(R.id.lvApps);
         errorView = root.findViewById(R.id.llError);

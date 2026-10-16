@@ -71,6 +71,17 @@ public final class DebugController {
     /** 开发者选项入口开关（Settings.Global.DEVELOPMENT_SETTINGS_ENABLED） */
     public static final String KEY_DEV = "development_settings_enabled";
 
+    /**
+     * 无线调试设置键（adb_wifi_enabled）自 Android 11（API 30）才引入。
+     * 低版本没有这个键：{@code Settings.Global.getInt} 会抛 SettingNotFoundException，
+     * {@code settings get global} 返回字符串 "null" —— 读写两侧都必须按「无线不存在」处理，
+     * 否则一次读不到就把整个状态读取拖垮（旧实现：一个键抛异常、整读返回 null，
+     * 导致低版本设备永远读不回真值、UI 卡在「正在读取」且主开关全程置灰）。
+     */
+    static boolean wirelessSupported() {
+        return android.os.Build.VERSION.SDK_INT >= 30;
+    }
+
     /** 合并读取/写入时各键的输出标记（一次 shell 取回全部值，按标记行定位，不靠行号） */
     private static final String TAG_USB_B = "__ASW_USB_B__";
     private static final String TAG_WIFI_B = "__ASW_WIFI_B__";
@@ -124,8 +135,13 @@ public final class DebugController {
     /** 缓存的真值（由后台经授权通道校准）：值与校准时间合成单一快照原子更新，避免 UI 看到撕裂 */
     private static volatile Snapshot cache = null;
     private static volatile long lastRefreshReqAt = 0;
-    /** 缓存有效期：超过则后台重新校准 */
-    private static final long STALE_MS = 5000;
+    /**
+     * 缓存有效期：超过则后台重新校准。
+     * 按通道分开取值：WSS 直读是亚毫秒级 Binder，shell 读一次 100~500ms ——
+     * 两类通道共用一个阈值，要么让 shell 通道白跑校准，要么让 WSS 通道反应迟钝。
+     */
+    private static final long STALE_MS_SHELL = 5000;
+    private static final long STALE_MS_WSS = 1500;
     /** 后台校准的最小间隔（read() 被高频调用，必须节流） */
     private static final long REFRESH_MIN_INTERVAL = 1500;
     /** 自身写入后短窗内忽略 observer 的「外部改动」：写入路径已自带回读校准，别再 fork */
@@ -170,13 +186,19 @@ public final class DebugController {
         return c.state;
     }
 
+    /** 当前通道的缓存有效期：WSS 直读亚毫秒，可用更短阈值（磁贴连点时状态更跟手） */
+    private static long staleMs(Context ctx) {
+        return AuthManager.getEffectiveMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
+                ? STALE_MS_WSS : STALE_MS_SHELL;
+    }
+
     /** 后台用授权通道校准真值并通知 listener（主线程安全，内部已节流） */
     public static void triggerRefresh(Context ctx) {
         final Context app = ctx.getApplicationContext();
         long now = android.os.SystemClock.uptimeMillis();
         // at==0 表示缓存尚未经授权通道校准（兜底值），必须立即校准
         Snapshot c = cache;
-        if (c != null && c.at != 0 && now - c.at < STALE_MS) {
+        if (c != null && c.at != 0 && now - c.at < staleMs(app)) {
             return; // 已校准且仍新鲜
         }
         if (now - lastRefreshReqAt < REFRESH_MIN_INTERVAL) {
@@ -200,7 +222,7 @@ public final class DebugController {
      */
     public static void invalidateAndRefresh(Context ctx) {
         // 自身写入也会触发 observer（两个键就是两次）：写入路径已回读校准并通知，
-        // 短窗内不再重复 fork；外部改动若落在窗内，最迟 STALE_MS 后也会校准到。
+        // 短窗内不再重复 fork；外部改动若落在窗内，最迟缓存有效期（staleMs）到了也会校准到。
         long now = android.os.SystemClock.uptimeMillis();
         if (now - lastOwnWriteAt < OWN_WRITE_SUPPRESS_MS) {
             return;
@@ -277,14 +299,139 @@ public final class DebugController {
      * @return usb / wireless 读不到有效值时返回 null（调用方保留旧缓存，不覆盖为真假难辨的状态）
      */
     private static State readViaPrivileged(Context app) {
-        RootUtil.Result r = runPrivileged(app,
-                "echo " + TAG_USB_B + "=$(settings get global " + KEY_USB + ");"
-                        + " echo " + TAG_WIFI_B + "=$(settings get global " + KEY_WIRELESS + ");"
-                        + " echo " + TAG_DEV_B + "=$(settings get global " + KEY_DEV + ")");
-        return parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
+        return readViaShellOrWss(app);
     }
 
-    /** 从合并 shell 输出里按标记行解析出三个键的真值；usb/wireless 无效返回 null */
+    /** WSS 模式下的合并读命令（与 readViaPrivileged 原内联命令一致，抽成常量复用） */
+    private static final String SHELL_READ_CMD =
+            "echo " + TAG_USB_B + "=$(settings get global " + KEY_USB + ");"
+                    + " echo " + TAG_WIFI_B + "=$(settings get global " + KEY_WIRELESS + ");"
+                    + " echo " + TAG_DEV_B + "=$(settings get global " + KEY_DEV + ")";
+
+    /** 实际写通道是否为 WSS（默认推荐）：WSS 已授权时走应用进程内直写，无需 root / Shizuku */
+    private static boolean wssWriteActive(Context ctx) {
+        return AuthManager.getEffectiveMode(ctx) == AuthManager.Mode.SECURE_SETTINGS;
+    }
+
+    /** WSS 直写单个键（无需 root / Shizuku）。抛错（如未授权）视为写入失败（REASON_EXEC） */
+    private static void putWss(Context ctx, String key, int val) {
+        try {
+            Settings.Global.putInt(ctx.getContentResolver(), key, val);
+            lastFailReason = RootUtil.REASON_NONE;
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "wss put " + key + " failed", t);
+            lastFailReason = RootUtil.REASON_EXEC;
+        }
+    }
+
+    /**
+     * WSS 直读三个键（ContentResolver）。部分 ROM（如 HyperOS）可能隐藏这些键（读到 0），
+     * 此时读到的值与真值不符——纯 WSS 设备没有更可信的读通道，只能如此（有 Shizuku 时
+     * {@link #readViaShellOrWss} 会优先走 shell 读）。
+     *
+     * 逐键独立读：任一键读不到（不存在 / Provider 异常）按「未开启」处理，
+     * 绝不再让单键缺失把整次读取拖垮 —— API<30 没有 adb_wifi_enabled，旧实现一个
+     * getInt 抛 SettingNotFoundException 就整体返回 null，真值永远校准不回来。
+     */
+    private static State readStateWss(Context ctx) {
+        return new State(getInt(ctx, KEY_USB) == 1,
+                wirelessSupported() && getInt(ctx, KEY_WIRELESS) == 1,
+                getInt(ctx, KEY_DEV) == 1);
+    }
+
+    /**
+     * 经授权通道读真值（readViaPrivileged 的统一入口）：
+     *  - 非 WSS 模式：原 shell 读（su / Shizuku）。
+     *  - WSS 模式且 Shizuku 可用：走 Shizuku shell 读（HyperOS 上可靠，避免 ContentResolver 被隐藏）。
+     *  - WSS 模式且无任何 shell 兜底：走 WSS ContentResolver 直读（部分 ROM 可能受隐藏影响，留作真机验证项）。
+     *
+     * WSS 尚未拿到一次性 pm grant 时（getEffectiveMode 会回退到 ROOT），绝不静默 fork su：
+     * 无 root 设备上那是一次 10s 挂起或 Magisk 授权弹窗，且后台校准会自动反复触发——
+     * 与写入口 blockedByMissingGrant 同一立场，直接用 ContentResolver 读。
+     */
+    private static State readViaShellOrWss(Context ctx) {
+        if (AuthManager.getMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
+                && !AuthManager.hasWriteSecureSettings(ctx)) {
+            return readStateWss(ctx);
+        }
+        AuthManager.Mode mode = AuthManager.getEffectiveMode(ctx);
+        if (mode != AuthManager.Mode.SECURE_SETTINGS) {
+            RootUtil.Result r = runPrivileged(ctx, SHELL_READ_CMD);
+            return parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
+        }
+        if (ShizukuUtil.available()) {
+            RootUtil.Result r = ShizukuUtil.run(SHELL_READ_CMD);
+            return parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
+        }
+        return readStateWss(ctx);
+    }
+
+    /** WSS 模式写单个键（含写后回读）；opening 且 Shizuku 可用时先经 Shizuku 杀联动应用 */
+    private static WriteResult writeKeyWss(Context ctx, String key, boolean on, boolean kill) {
+        if (kill) {
+            killLinkageViaShizuku(ctx, on);
+        }
+        putWss(ctx, key, on ? 1 : 0);
+        lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
+        WriteResult w = new WriteResult();
+        w.ok = (lastFailReason == RootUtil.REASON_NONE);
+        // 子开关只有这一个回读（没有 before 读可借），保留同步回读：WSS+Shizuku 设备上它是
+        // 一次 newProcess，但「信任写结果」得用缓存猜另外两个键，反而不可信。
+        w.after = readViaShellOrWss(ctx);
+        return w;
+    }
+
+    /**
+     * WSS 模式主开关合并写。与 shell 版的三点差异：
+     *  1. 只写与 before 不同的键：putInt 即使值不变也是一次完整 Binder 往返（还触发 observer /
+     *     落盘），磁贴 / 快捷方式高频点击时全是无谓开销。before 读失败（null）时不敢 diff，
+     *     退化为两个键都写；
+     *  2. 写后态直接用「期望值」提交，不再同步走一次 shell 回读 —— WSS+Shizuku 设备上那是
+     *     一次 100~500ms 的 newProcess，全压在用户的点击等待上。ROM 静默屏蔽写入（putInt
+     *     不抛错但值没变）的情况由 setMasterBlocking 末尾的 {@link #verifyWssWrite} 复核兜底；
+     *  3. API<30 没有无线键，直接跳过（不写无人读取的无效键）。
+     *
+     * @param knownBefore 调用方刚读到的真值（toggleMaster 已读过一次，不必再读）；null=现读
+     */
+    private static MasterMerge masterMergeWriteWss(Context ctx, boolean on, State knownBefore) {
+        State saved = loadSaved(ctx);
+        State before = knownBefore != null ? knownBefore : readViaShellOrWss(ctx);
+        killLinkageViaShizuku(ctx, on);
+        boolean tUsb = on ? saved.usb : false;
+        boolean tWifi = on && wirelessSupported() ? saved.wireless : false;
+        boolean wroteAny = false;
+        if (before == null || before.usb != tUsb) {
+            putWss(ctx, KEY_USB, tUsb ? 1 : 0);
+            wroteAny = true;
+        }
+        if (before == null || before.wireless != tWifi) {
+            putWss(ctx, KEY_WIRELESS, tWifi ? 1 : 0);
+            wroteAny = true;
+        }
+        if (!wroteAny) {
+            // 两个键都已是目标态（无需写入 = 成功）：别让上一次操作的失败原因污染本次结论
+            lastFailReason = RootUtil.REASON_NONE;
+        }
+        lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
+        MasterMerge m = new MasterMerge();
+        m.before = before;
+        m.wrote = (lastFailReason == RootUtil.REASON_NONE);
+        if (!m.wrote) {
+            // 写入失败：拒绝提交（与 shell 路径同一条不变式——写失败绝不污染状态缓存）
+            m.after = null;
+            return m;
+        }
+        if (before != null) {
+            m.after = new State(tUsb, tWifi, before.dev);
+            // 真写了才需要异步复核；什么都没写时 after==before（刚读回来的真值，无需验证）
+            m.trusted = wroteAny;
+        } else {
+            m.after = readViaShellOrWss(ctx); // before 都读不到，只能回读（旧行为）
+        }
+        return m;
+    }
+
+    /** 从合并 shell 输出里按标记行解析出三个键的真值；标记行缺失返回 null */
     private static State parseState(String out, String pU, String pW, String pD) {
         if (out == null) {
             return null;
@@ -302,7 +449,14 @@ public final class DebugController {
                 d = s.substring(pD.length() + 1).trim();
             }
         }
-        if (!("0".equals(u) || "1".equals(u)) || !("0".equals(w) || "1".equals(w))) {
+        // "null" = settings get 对「从未设置过的键」的返回（不是失败）：adb_enabled /
+        // adb_wifi_enabled 在用户从未开关过调试的设备上就是这个值，按「关」放行。
+        // 若判为无效，整次读取返回 null → 真值永远校准不回来，UI 卡在「正在读取」。
+        // 注意与「标记行整个缺失」（u/w 为 Java null）区分：那才是通道异常，仍返回 null。
+        // dev 键缺失按「关」处理（个别 ROM 没有这个键），只记日志不放行失败。
+        boolean uValid = "0".equals(u) || "1".equals(u) || "null".equals(u);
+        boolean wValid = "0".equals(w) || "1".equals(w) || "null".equals(w);
+        if (!uValid || !wValid) {
             android.util.Log.w(TAG, "privileged read got invalid values: usb=[" + u
                     + "] wireless=[" + w + "]");
             return null;
@@ -370,6 +524,8 @@ public final class DebugController {
                 return ctx.getString(R.string.toast_shizuku_no_perm);
             case RootUtil.REASON_TIMEOUT:
                 return ctx.getString(R.string.toast_auth_timeout);
+            case RootUtil.REASON_NEED_GRANT:
+                return ctx.getString(R.string.toast_wss_need_grant);
             default:
                 return ctx.getString(R.string.toast_root_fail);
         }
@@ -408,25 +564,49 @@ public final class DebugController {
      * 单线程执行器 + 同键去重合并：同一操作键（usb/wireless/dev/master）在途时，
      * 新请求只记「最新一次」，在途任务完成后用最新参数再跑一次，避免快速连点把队列塞满
      * 或在途重复写。不同键之间互不影响（可并行排队，但执行器是单线程，仍串行执行）。
+     *
+     * INFLIGHT / PENDING 的复合操作（add+put、remove+take）必须在同一把锁内完成：
+     * 旧实现在 finally 里先 INFLIGHT.remove 再查 PENDING，两者之间存在窗口期——
+     * 若新请求刚好在该窗口内「add 失败 → 尚未 put」，它的任务就永远不会被拾起，
+     * 表现为开关静默失效一次。加锁后「同键至多一条在途 + 一条待办」是不变量。
      */
     private static final java.util.Set<String> INFLIGHT =
             java.util.Collections.newSetFromMap(new ConcurrentHashMap<>());
     private static final java.util.Map<String, Runnable> PENDING = new ConcurrentHashMap<>();
+    private static final Object ENQUEUE_LOCK = new Object();
 
     private static void enqueue(String key, Runnable task) {
-        if (!INFLIGHT.add(key)) {
-            PENDING.put(key, task); // 覆盖为最新一次请求（丢弃中间态）
-            return;
-        }
         IO.execute(() -> {
-            try {
-                task.run();
-            } finally {
-                INFLIGHT.remove(key);
-                Runnable next = PENDING.remove(key);
-                if (next != null) {
-                    enqueue(key, next); // 用最新参数再跑一次（丢回队列尾部，不抢占刚结束的在途任务）
+            Runnable current = task;
+            while (true) {
+                synchronized (ENQUEUE_LOCK) {
+                    if (!INFLIGHT.add(key)) {
+                        // 同键已有任务在途：只记最新一次（覆盖中间态），由在途任务收尾时拾起
+                        PENDING.put(key, current);
+                        return;
+                    }
                 }
+                Runnable next = null;
+                try {
+                    current.run();
+                } catch (Throwable t) {
+                    // 任务自身的 bug 绝不能把执行器线程搞死、把待办任务永久吞掉：
+                    // 记日志后照常走收尾（清在途标记、拾起最新待办）
+                    android.util.Log.e(TAG, "enqueued task crashed", t);
+                } finally {
+                    synchronized (ENQUEUE_LOCK) {
+                        INFLIGHT.remove(key);
+                        next = PENDING.remove(key);
+                        if (next != null) {
+                            // 锁内把 key 放回在途集，再出锁执行：消除 remove 与拾取之间的窗口
+                            INFLIGHT.add(key);
+                        }
+                    }
+                }
+                if (next == null) {
+                    return;
+                }
+                current = next; // 用最新参数接着跑（不重新入队，避免再多一次调度）
             }
         });
     }
@@ -468,6 +648,10 @@ public final class DebugController {
      */
     public static void setMaster(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
+        if (blockedByMissingGrant(app)) {
+            failWithoutWrite(app, cb);
+            return;
+        }
         enqueue("master", () -> setMasterBlocking(app, on, cb));
     }
 
@@ -480,19 +664,32 @@ public final class DebugController {
      */
     public static void toggleMaster(Context ctx, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
+        if (blockedByMissingGrant(app)) {
+            failWithoutWrite(app, cb);
+            return;
+        }
         enqueue("master", () -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
                 failWithoutWrite(app, cb);
                 return;
             }
-            setMasterBlocking(app, !cur.anyOn(), cb);
+            // 把刚读到的真值传下去：WSS 路径直接复用，不必再走一次 100~500ms 的 shell 读
+            setMasterBlocking(app, !cur.anyOn(), cb, cur);
         });
     }
 
     /** 主开关写入核心：单次 shell 完成「读前态 → 杀联动应用 → 写入 → 回读后态」 */
     private static void setMasterBlocking(Context app, boolean on, ResultCallback cb) {
-        MasterMerge m = masterMergeWrite(app, on);
+        setMasterBlocking(app, on, cb, null);
+    }
+
+    /**
+     * @param knownBefore toggleMaster 刚读到的真值（WSS 路径直接复用，省一次 shell 读）；null=自己读
+     */
+    private static void setMasterBlocking(Context app, boolean on, ResultCallback cb,
+                                          State knownBefore) {
+        MasterMerge m = masterMergeWrite(app, on, knownBefore);
         // 写入或回读失败（未授权 / 通道挂起 / ROM 拦截）：**绝不提交**。
         // 曾有的严重缺陷：after 兜底成 new State(false,false,false) 并无条件进 cache + persistLast，
         // 把「假全关」当成真值渲染、还污染跨启动的「上次确认状态」——表现为关了再也开不回来、
@@ -517,10 +714,29 @@ public final class DebugController {
             final int reason = lastFailReason;
             MAIN.post(() -> cb.onResult(m.wrote, s, reason));
         }
+        // WSS 路径的「写后态」是信任写结果算出的期望值（没走 shell 回读）：shell 兜底可用时
+        // 补一次异步复核。放在回调之后执行——UI 已即时更新，复核耗时不再占用户等待。
+        if (m.trusted) {
+            verifyWssWrite(app, s);
+        }
+    }
+
+    /**
+     * 主开关写入的通道分发点（WSS 直写 ↔ su / Shizuku shell），与 {@link #writeKey} 对称：
+     * 所有主开关写入都经这里，调用点不再写三目。
+     *
+     * @param knownBefore 调用方刚读到的真值（toggleMaster 传，省掉 WSS 路径重复一次 shell 读）；
+     *                    shell 路径忽略它（单条命令自带读前态标记行）
+     */
+    private static MasterMerge masterMergeWrite(Context ctx, boolean on, State knownBefore) {
+        if (wssWriteActive(ctx)) {
+            return masterMergeWriteWss(ctx, on, knownBefore);
+        }
+        return masterMergeWriteShell(ctx, on);
     }
 
     /** 单 shell 完成主开关的「读前态 →（打开时杀联动应用）→ 写入 → 回读后态」 */
-    private static MasterMerge masterMergeWrite(Context ctx, boolean on) {
+    private static MasterMerge masterMergeWriteShell(Context ctx, boolean on) {
         State saved = loadSaved(ctx);
         StringBuilder cmd = new StringBuilder();
         // 1) 写前真值（关闭时用于记忆组合）
@@ -538,8 +754,11 @@ public final class DebugController {
         } else {
             cmd.append(" settings put global ").append(KEY_USB).append(" 0;");
         }
-        cmd.append(" settings put global ").append(KEY_WIRELESS).append(' ')
-                .append(on ? (saved.wireless ? '1' : '0') : '0').append(';');
+        // API<30 没有无线调试键：不写（写了也是个无人读取的无效键），读侧按 "null" 放行
+        if (wirelessSupported()) {
+            cmd.append(" settings put global ").append(KEY_WIRELESS).append(' ')
+                    .append(on ? (saved.wireless ? '1' : '0') : '0').append(';');
+        }
         // 3) 写后真值回读
         cmd.append(" echo ").append(TAG_USB_A).append("=$(settings get global ").append(KEY_USB).append(");");
         cmd.append(" echo ").append(TAG_WIFI_A).append("=$(settings get global ").append(KEY_WIRELESS).append(");");
@@ -583,6 +802,50 @@ public final class DebugController {
         return broadcast(app);
     }
 
+    /**
+     * WSS 信任写后的复核（仅在 MasterMerge.trusted 时调用；运行在 IO 线程）。
+     *
+     * masterMergeWriteWss 为了不把 100~500ms 的 shell 回读压在点击等待上，直接用期望值提交。
+     * 这里补一次同源回读兜底：ROM 静默屏蔽写入（putInt 不抛错但值没变）时纠正缓存并广播。
+     * 纯 WSS 设备没有可信回读通道（ContentResolver 可能被 ROM 隐藏），跳过——做了反而误导。
+     * 调用方把它放在写回调之后执行：UI 已拿到即时反馈，复核耗时不再占用户等待。
+     */
+    private static void verifyWssWrite(Context app, State expected) {
+        if (!ShizukuUtil.available()) {
+            return;
+        }
+        try {
+            State real = readViaShellOrWss(app);
+            if (real != null && (real.usb != expected.usb || real.wireless != expected.wireless
+                    || real.dev != expected.dev)) {
+                android.util.Log.w(TAG, "wss write verify mismatch, corrected: expected usb="
+                        + expected.usb + " wifi=" + expected.wireless + " dev=" + expected.dev
+                        + " -> real usb=" + real.usb + " wifi=" + real.wireless
+                        + " dev=" + real.dev);
+                cache = new Snapshot(real, android.os.SystemClock.uptimeMillis());
+                persistLast(app, real);
+                broadcast(app);
+            }
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "wss write verify failed", t);
+        }
+    }
+
+    /**
+     * WSS 模式下「开启调试前杀联动应用」：借 Shizuku 代跑 am force-stop。
+     * shell 模式已把杀进程合并进同一条命令（省一次 fork），不走这里；
+     * 没有 Shizuku 时静默跳过（纯 WSS 设备没有 shell 能力，见 README「已知限制」）。
+     */
+    private static void killLinkageViaShizuku(Context ctx, boolean opening) {
+        if (!opening || !ShizukuUtil.available()) {
+            return;
+        }
+        String k = killScriptFor(ctx, true);
+        if (k != null && !k.isEmpty()) {
+            ShizukuUtil.run(k);
+        }
+    }
+
     /** 「开启调试自动关闭快捷应用」的杀进程脚本（只在 opening 时构造；默认开启） */
     private static String killScriptFor(Context ctx, boolean opening) {
         if (!opening) {
@@ -598,8 +861,15 @@ public final class DebugController {
         }
         // am force-stop 走系统正常的停止流程（比 kill 更干净，不会留下半死的进程状态）。
         // 合并进同一条命令执行 —— 避免每个 app 单独 fork 一次 su 拖慢「开启调试」。
+        // 包名必须过白名单校验：这些字符串来自 SharedPreferences，一旦被写入含 shell
+        // 元字符（; $() | & ` 等）的值，就会以 root / uid 2000 权限执行任意命令。
+        // 入口（LinkagePrefs.setApps）已挡过一轮，这里作为特权消费侧再兜底一次。
         StringBuilder cmd = new StringBuilder();
         for (String pkg : apps) {
+            if (!LinkagePrefs.isValidPackageName(pkg)) {
+                android.util.Log.w(TAG, "skip invalid linkage package name in kill script");
+                continue;
+            }
             if (cmd.length() > 0) {
                 cmd.append("; ");
             }
@@ -616,6 +886,37 @@ public final class DebugController {
             final int reason = lastFailReason;
             MAIN.post(() -> cb.onResult(false, last, reason));
         }
+    }
+
+    /**
+     * WSS 模式尚未拿到那一次性的 pm grant 时，拒绝把写入静默转去 root / Shizuku 兜底通道。
+     *
+     * getEffectiveMode 在 WSS 未授权时会回落 root / Shizuku（初衷是避免直接失效），后果却是：
+     * 无 root 设备上用户点一下开关，等到一句「未检测到 root」——真正该做的是完成一次性授权，
+     * 却被引导去装 root。故所有写入口统一拦下并回传 REASON_NEED_GRANT：
+     * App 内点击由 UI 弹一次性授权引导；磁贴 / 快捷方式等无界面入口则给对应 Toast。
+     */
+    private static boolean blockedByMissingGrant(Context ctx) {
+        if (AuthManager.getMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
+                && !AuthManager.hasWriteSecureSettings(ctx)) {
+            lastFailReason = RootUtil.REASON_NEED_GRANT;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 子开关写入的通道分发点（WSS 直写 ↔ su / Shizuku shell），与 {@link #masterMergeWrite} 对称：
+     * 六个 set / toggle 入口都走这里，新增写通道只改这一个函数，不必再翻六处三目。
+     *
+     * @param kill 是否允许「开启前杀联动应用」（dev 开关传 false：它不参与调试态）
+     */
+    private static WriteResult writeKey(Context ctx, String key, boolean on, boolean kill) {
+        if (wssWriteActive(ctx)) {
+            return writeKeyWss(ctx, key, on, kill);
+        }
+        return writeKeyReadback(ctx, kill ? killScriptFor(ctx, on) : null,
+                "settings put global " + key + " " + (on ? "1" : "0"));
     }
 
     // —— 统一的 set / toggle 模板（原六个方法同构，现由下面两个底层原语 + enqueue 收口）——
@@ -643,9 +944,12 @@ public final class DebugController {
     /** 单独改 USB 调试（不动 saved） */
     public static void setUsb(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
+        if (blockedByMissingGrant(app)) {
+            failWithoutWrite(app, cb);
+            return;
+        }
         enqueue("usb", () -> {
-            WriteResult w = writeKeyReadback(app, killScriptFor(app, on),
-                    "settings put global " + KEY_USB + " " + (on ? "1" : "0"));
+            WriteResult w = writeKey(app, KEY_USB, on, true);
             finishSubWrite(app, w, cb);
         });
     }
@@ -653,6 +957,10 @@ public final class DebugController {
     /** 单独翻转 USB 调试：先经授权通道读真值再翻，读不到真值则拒绝 */
     public static void toggleUsb(Context ctx, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
+        if (blockedByMissingGrant(app)) {
+            failWithoutWrite(app, cb);
+            return;
+        }
         enqueue("usb", () -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
@@ -660,8 +968,8 @@ public final class DebugController {
                 return;
             }
             boolean on = !cur.usb;
-            WriteResult w = writeKeyReadback(app, killScriptFor(app, on),
-                    "settings put global " + KEY_USB + " " + (on ? "1" : "0"));
+            // kill 传 on：只有「正在打开」才需要杀联动应用
+            WriteResult w = writeKey(app, KEY_USB, on, on);
             finishSubWrite(app, w, cb);
         });
     }
@@ -669,9 +977,12 @@ public final class DebugController {
     /** 单独改无线调试（不动 saved） */
     public static void setWireless(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
+        if (blockedByMissingGrant(app)) {
+            failWithoutWrite(app, cb);
+            return;
+        }
         enqueue("wireless", () -> {
-            WriteResult w = writeKeyReadback(app, killScriptFor(app, on),
-                    "settings put global " + KEY_WIRELESS + " " + (on ? "1" : "0"));
+            WriteResult w = writeKey(app, KEY_WIRELESS, on, true);
             finishSubWrite(app, w, cb);
         });
     }
@@ -679,6 +990,10 @@ public final class DebugController {
     /** 单独翻转无线调试：先读真值再翻；读不到真值则拒绝 */
     public static void toggleWireless(Context ctx, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
+        if (blockedByMissingGrant(app)) {
+            failWithoutWrite(app, cb);
+            return;
+        }
         enqueue("wireless", () -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
@@ -686,8 +1001,7 @@ public final class DebugController {
                 return;
             }
             boolean on = !cur.wireless;
-            WriteResult w = writeKeyReadback(app, killScriptFor(app, on),
-                    "settings put global " + KEY_WIRELESS + " " + (on ? "1" : "0"));
+            WriteResult w = writeKey(app, KEY_WIRELESS, on, on);
             finishSubWrite(app, w, cb);
         });
     }
@@ -698,10 +1012,13 @@ public final class DebugController {
      */
     public static void setDev(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        // 开发者选项不参与调试态、不联动快捷应用，无需杀进程（opening=false）
+        if (blockedByMissingGrant(app)) {
+            failWithoutWrite(app, cb);
+            return;
+        }
+        // 开发者选项不参与调试态、不联动快捷应用，无需杀进程（kill=false）
         enqueue("dev", () -> {
-            WriteResult w = writeKeyReadback(app, null,
-                    "settings put global " + KEY_DEV + " " + (on ? "1" : "0"));
+            WriteResult w = writeKey(app, KEY_DEV, on, false);
             finishSubWrite(app, w, cb);
         });
     }
@@ -745,5 +1062,7 @@ public final class DebugController {
         State before;
         State after;
         boolean wrote;
+        /** after 是「信任写结果」算出的期望值（未经回读验证）时为 true，调用方需异步复核 */
+        boolean trusted;
     }
 }
