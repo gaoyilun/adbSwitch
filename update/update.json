@@ -1,9 +1,9 @@
 {
   "versionCode": 4,
   "versionName": "1.0.3",
-  "notes": "· 新增「免 root 模式」：WRITE_SECURE_SETTINGS 一次性授权，后续开关调试/无线调试不再需要反复开关开发者选项或 adb，授权粘滞（仅卸载重装需重新授权），默认推荐\n· 授权模式支持免 root / root / Shizuku 三种通道一键切换\n· 优化授权交互：首次授权后允许直接切换到 root / Shizuku 模式（不再被锁死在免 root 引导）\n· 安全性：修复 am force-stop 命令注入（包名白名单校验）\n· 稳定性：修复 WSS 读取静默回退 su、FileProvider 下载回退崩溃、HTTP 200 续传损坏 APK、并发写竞态、PFD 泄漏、UTF-8 截断、后台通知状态失步\n· 适配 Android 15 边到边与导航栏配色\n· 优化「快捷打开」列表图标加载，回前台不再重复解码",
+  "notes": "· 新增「免 root 模式」：WRITE_SECURE_SETTINGS 一次性授权，后续开关调试/无线调试不再需要反复开关开发者选项或 adb，授权粘滞（仅卸载重装需重新授权），默认推荐\n· 授权模式支持免 root / root / Shizuku 三种通道一键切换\n· 优化授权交互：首次授权后允许直接切换到 root / Shizuku 模式（不再被锁死在免 root 引导）\n· 安全性：修复 am force-stop 命令注入（包名白名单校验）\n· 稳定性：修复 WSS 读取静默回退 su、FileProvider 下载回退崩溃、HTTP 200 续传损坏 APK、并发写竞态、PFD 泄漏、UTF-8 截断、后台通知状态失步\n· 适配 Android 15 边到边与导航栏配色\n· 优化「快捷打开」列表图标加载，回前台不再重复解码\n· 修复应用内更新：授权「安装未知应用」后返回直接复用已下载的安装包继续安装，不再重新下载",
   "mandatory": false,
   "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.0.3/com.elleng.adbswitch-1.0.3-universal-release.apk",
   "fallbackUrl": "https://github.com/gaoyilun/adbSwitch/releases",
-  "sha256": "9762d3868c443eac862c3ea9c67a9533dacb2f644038b9d16a39457611bca9fe"
+  "sha256": "1824eea6e7dda457debb7c69300f69cd11cdb5b725290140b212c6e23ccbb952"
 }
