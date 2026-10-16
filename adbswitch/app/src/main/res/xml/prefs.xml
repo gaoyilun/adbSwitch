@@ -49,17 +49,6 @@
             android:layout="@layout/pref_row_state"
             android:widgetLayout="@layout/pref_widget_switch" />
 
-        <!-- 双模式授权：模式选择 + 授权状态合并为同一项。
-             标题=授权模式；副标题直接显示「root模式 · 未授权」等（无【】括号）。
-             点击打开模式选择对话框；重试按钮已移到底部 Snackbar。 -->
-        <Preference
-            android:key="auth"
-            android:order="40"
-            android:title="@string/auth_mode_title"
-            android:summary="@string/auth_mode_sum"
-            android:layout="@layout/pref_row" 
-            app:iconSpaceReserved="false" />
-
     </PreferenceCategory>
 
     <PreferenceCategory
@@ -117,6 +106,17 @@
             app:iconSpaceReserved="false" />
 
     </PreferenceCategory>
+
+    <!-- 授权模式（三种：WRITE_SECURE_SETTINGS 推荐 / root / Shizuku）：
+         改为以 WSS 为推荐通道后，授权变成**一次性**动作（粘滞、仅卸载重装需重做），
+         不该再占据「调试开关」分类里的一行 —— 已移到「关于」上方，与设置类条目放在一起。
+         仍按 key="auth" 查找，代码无需改动。 -->
+    <Preference
+        android:key="auth"
+        android:title="@string/auth_mode_title"
+        android:summary="@string/auth_mode_sum"
+        android:layout="@layout/pref_row"
+        app:iconSpaceReserved="false" />
 
     <!-- 关于：点击弹窗展示版本号 / 包名 / 构建时间 / 授权模式 / 签名指纹。
          构建时间原先直接当行摘要显示，改为放进弹窗（摘要位置留给更有价值的信息）。 -->

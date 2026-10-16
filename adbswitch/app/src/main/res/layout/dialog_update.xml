@@ -9,13 +9,21 @@
     android:paddingTop="8dp"
     android:paddingBottom="4dp">
 
-    <TextView
-        android:id="@+id/tv_notes"
+    <!-- 更新说明：长文本必须可滚动。外层 ScrollView（wrap_content）+ 内层 maxHeight
+         钳制高度 —— AlertDialog 不限制自定义视图高度，不钳制会把弹窗撑出屏幕。 -->
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textAppearance="?android:attr/textAppearanceListItem"
-        android:textColor="?attr/colorOnSurface"
-        android:textIsSelectable="true" />
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:id="@+id/tv_notes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxHeight="240dp"
+            android:textAppearance="?android:attr/textAppearanceListItem"
+            android:textColor="?attr/colorOnSurface"
+            android:textIsSelectable="true" />
+    </ScrollView>
 
     <ProgressBar
         android:id="@+id/pb_progress"

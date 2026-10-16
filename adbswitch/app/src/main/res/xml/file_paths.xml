@@ -5,4 +5,9 @@
     <external-files-path
         name="updates"
         path="Download" />
+    <!-- UpdateDownloader.targetDir 的兜底目录：外部存储不可用时退回 cacheDir/download，
+         不声明这条路径时 FileProvider.getUriForFile 会直接抛 IllegalArgumentException 崩溃。 -->
+    <cache-path
+        name="cache_dl"
+        path="download" />
 </paths>

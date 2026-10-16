@@ -7,7 +7,24 @@ plugins {
 // 构建时间戳（epoch millis）：注入 BuildConfig.BUILD_TIME_MS，App 底部格式化显示，
 // 便于确认设备上装的是否为最新版本。此处只取原始毫秒数，格式化放到 App 里做
 // （Gradle Kotlin DSL 顶层无法直接引用 java.text/java.time 做格式化）。
-val buildTimeMs = System.currentTimeMillis()
+//
+// 取「最新提交的 commit 时间」而不是 System.currentTimeMillis()：后者在配置阶段
+// 每次构建都变，会让所有编译任务的 up-to-date 检查恒失效、Gradle 配置缓存完全失效
+// （改一行代码也要全量重编）。commit 时间随源码状态单调变化，同一份代码重复构建
+// 产物一致，缓存才留得住。拿不到 git（非 git 环境）时退回当前时间。
+// 注意：未提交的改动不会推进这个时间戳，此时它以版本号（versionName）为准。
+val buildTimeMs: Long = runCatching {
+    // 用 ProcessBuilder 调 git（不依赖 project.exec，且避免脚本里写 java.* 被解析成 Gradle 的 java 扩展）。
+    // ProcessBuilder 在自动导入的 java.lang 里；读输出走 Kotlin 的 bufferedReader()/readText()，
+    // 全程不显式引用 java.io 类型，规避「脚本顶层 java 被当成工程 java 扩展」的坑。
+    val proc = ProcessBuilder("git", "log", "-1", "--format=%ct")
+        .directory(project.projectDir)
+        .redirectErrorStream(true)
+        .start()
+    val out = proc.inputStream.bufferedReader().readText().trim()
+    proc.waitFor()
+    out.toLong() * 1000L
+}.getOrDefault(System.currentTimeMillis())
 
 // 签名密钥与口令只存 keystore/signing.properties（keystore/ 整个目录在 .gitignore，绝不入库）：
 // 仓库公开，明文口令不能写进 gradle。缺该文件（公开仓库 clone 下来）时不算 release 签名，
@@ -33,8 +50,8 @@ android {
         applicationId = "com.elleng.adbswitch"
         minSdk = 27
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
         buildConfigField("long", "BUILD_TIME_MS", "${buildTimeMs}L")
 
         // 蒲公英备通道密钥：从仓库外 pgyer.properties 注入 BuildConfig，避免明文进源码/公开仓库。

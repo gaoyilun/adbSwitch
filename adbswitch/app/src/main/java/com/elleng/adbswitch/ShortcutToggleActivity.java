@@ -32,9 +32,10 @@ public class ShortcutToggleActivity extends Activity {
                 || ToggleShortcuts.ACTION_TOGGLE_WIRELESS.equals(action)) {
             final boolean wireless = ToggleShortcuts.ACTION_TOGGLE_WIRELESS.equals(action);
             // 先读真值再翻转（toggleUsb/toggleWireless 内部处理），不依赖屏幕缓存
-            DebugController.ResultCallback cb = (ok, s) -> {
+            DebugController.ResultCallback cb = (ok, s, reason) -> {
                 if (!ok) {
-                    Toast.makeText(app, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(app, DebugController.failureMessage(app, reason),
+                            Toast.LENGTH_SHORT).show();
                     return;
                 }
                 ToggleShortcuts.markDirty(app);
@@ -53,9 +54,10 @@ public class ShortcutToggleActivity extends Activity {
         }
 
         // 一键开关：先读真值再翻转（toggleMaster 内部处理）
-        DebugController.toggleMaster(app, (ok, s) -> {
+        DebugController.toggleMaster(app, (ok, s, reason) -> {
             if (!ok) {
-                Toast.makeText(app, R.string.toast_root_fail, Toast.LENGTH_SHORT).show();
+                Toast.makeText(app, DebugController.failureMessage(app, reason),
+                        Toast.LENGTH_SHORT).show();
                 return;
             }
             if (s.anyOn()) {

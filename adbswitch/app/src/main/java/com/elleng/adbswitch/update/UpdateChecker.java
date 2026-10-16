@@ -160,11 +160,19 @@ public final class UpdateChecker {
         throw new IllegalStateException("所有更新通道检查失败");
     }
 
-    /** 给主通道结果补上「备用下载」入口（蒲公英通道没有直链，只能跳页面）。 */
+    /**
+     * 给主通道结果补上「备用下载」入口（蒲公英通道没有直链，只能跳页面）。
+     *
+     * 主通道自带的 fallbackUrl 优先（如蒲公英返回的安装页 appURl），外部传入的只作兜底：
+     * 直接覆写会把「蒲公英有新包」时的安装页丢成 GitHub，两个按钮跳同一处。
+     */
     private static UpdateInfo withFallback(UpdateInfo info, String fallbackUrl) {
-        String fb = (fallbackUrl == null || fallbackUrl.trim().isEmpty()) ? null : fallbackUrl;
+        String fb = (fallbackUrl == null || fallbackUrl.trim().isEmpty()) ? null : fallbackUrl.trim();
+        String own = (info.fallbackUrl == null || info.fallbackUrl.trim().isEmpty())
+                ? null : info.fallbackUrl.trim();
+        String effective = own != null ? own : fb;
         return new UpdateInfo(info.hasUpdate, info.versionCode, info.versionName, info.notes,
-                info.mandatory, info.apkUrl, fb, info.sha256, info.source);
+                info.mandatory, info.apkUrl, effective, info.sha256, info.source);
     }
 
     /**

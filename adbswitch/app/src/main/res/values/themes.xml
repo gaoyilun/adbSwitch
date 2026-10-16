@@ -9,6 +9,11 @@
         <item name="android:statusBarColor">?attr/colorSurface</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">?attr/colorSurface</item>
+        <!-- 导航栏：API<35 时着色为同色 surface（不露出系统默认黑条）；
+             API 35+ 强制 edge-to-edge，颜色被忽略、但亮色标志仍决定导航图标深浅，
+             日间浅底必须给深色图标（windowLightNavigationBar=true）。 -->
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 
     <!-- 顶栏标题：M3 Title Large 基准（22sp），缩小到 18sp -->

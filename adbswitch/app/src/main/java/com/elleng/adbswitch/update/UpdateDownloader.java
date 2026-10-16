@@ -11,6 +11,7 @@ import android.util.Log;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -105,8 +106,15 @@ public final class UpdateDownloader {
             if (code == 206 && resume) {
                 Log.i(TAG, "断点续传，从 " + downloaded + " 字节继续");
             } else if (code == 200) {
-                // 服务端不支持续传（或本来就从头下）：丢弃已下载部分
+                // 服务端不支持续传（或资源已变）：必须丢掉已下载部分重新下。
+                // 关键：resume 也要一并置 false —— 下方 FileOutputStream(part, resume) 是追加模式，
+                // 只重置 downloaded 而留着 append=true，会把完整响应拼在旧 .part 后面，APK 直接损坏。
+                // （截断写入即使 delete 失败也能丢弃旧内容，故 delete 失败只记日志不阻断。）
                 downloaded = 0L;
+                resume = false;
+                if (part.exists() && !part.delete()) {
+                    Log.w(TAG, "丢弃旧 .part 失败（改用截断写入）: " + part);
+                }
             } else {
                 throw new IllegalStateException("HTTP " + code);
             }
@@ -211,6 +219,35 @@ public final class UpdateDownloader {
         try {
             return f != null && f.isFile() && f.length() > 0L;
         } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 校验已下载文件的整体 SHA-256 是否与期望一致（阻塞读全文件；2MB 级 APK 耗时可忽略）。
+     * 用于「复用上次已下载但没装上的 APK」前的完整性确认，防止把陈旧/损坏的旧包装出去。
+     * 期望值为 null 时返回 false —— 没法确认是哪次的包，宁可不复用（调用方应回退重新下载）。
+     */
+    public static boolean sha256Matches(File f, String expectedSha256) {
+        if (f == null || !f.isFile() || expectedSha256 == null) {
+            return false;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream in = new FileInputStream(f)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    digest.update(buf, 0, n);
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest.digest()) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString().equalsIgnoreCase(expectedSha256);
+        } catch (Throwable t) {
+            Log.w(TAG, "SHA-256 校验异常: " + f, t);
             return false;
         }
     }
