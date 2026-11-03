@@ -22,7 +22,9 @@
             android:layout="@layout/pref_row_state"
             android:widgetLayout="@layout/pref_widget_master" />
 
-        <SwitchPreferenceCompat
+        <!-- 调试三行改用 NavSwitchPreference：在 Switch 右侧多一个「›」导航箭头，
+             点击跳系统对应设置项（见 SettingsNav）。开关拨动仍由 bindSubSwitch 收口。 -->
+        <com.elleng.adbswitch.NavSwitchPreference
             android:key="swUsb"
             android:order="10"
             android:title="@string/usb_title"
@@ -30,7 +32,7 @@
             android:layout="@layout/pref_row_state"
             android:widgetLayout="@layout/pref_widget_switch" />
 
-        <SwitchPreferenceCompat
+        <com.elleng.adbswitch.NavSwitchPreference
             android:key="swWireless"
             android:order="20"
             android:title="@string/wireless_title"
@@ -41,7 +43,7 @@
         <!-- 开发者选项入口（独立开关）：只写 Settings.Global.development_settings_enabled，
              与上面两个调试开关互不联动，也不参与主开关的折叠。
              值由 MainActivity 按真值回填（与 usb / wireless 完全一致）。 -->
-        <SwitchPreferenceCompat
+        <com.elleng.adbswitch.NavSwitchPreference
             android:key="swDevOpts"
             android:order="30"
             android:title="@string/devopts_title"
@@ -71,6 +73,7 @@
         <!-- 打开调试前先关闭快捷应用：避免它在调试开启的瞬间读到状态翻转 -->
         <SwitchPreferenceCompat
             android:key="swKillBeforeOpen"
+            android:defaultValue="true"
             android:title="@string/kill_before_open_title"
             android:summary="@string/kill_before_open_sum"
             android:layout="@layout/pref_row"

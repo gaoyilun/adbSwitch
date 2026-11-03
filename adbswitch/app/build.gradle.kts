@@ -50,8 +50,8 @@ android {
         applicationId = "com.elleng.adbswitch"
         minSdk = 27
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
         buildConfigField("long", "BUILD_TIME_MS", "${buildTimeMs}L")
 
         // 蒲公英备通道密钥：从仓库外 pgyer.properties 注入 BuildConfig，避免明文进源码/公开仓库。
@@ -103,6 +103,12 @@ android {
         abortOnError = false
     }
 
+    // 单元测试使用 android.jar 桩：开 returnDefaultValues 让未 stub 的 Android 调用返回默认值，
+    // 本工程单测只覆盖纯逻辑（不调用 Android API），开了更稳妥。
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     // 统一产物命名：包名-版本名-架构-构建类型（如 com.elleng.adbswitch-1.0.0-universal-release.apk）。
     // 架构段固定为 universal（本工程单包）；末段构建类型（release/debug）由 variant.name 决定，不写死。
     applicationVariants.all {
@@ -131,4 +137,7 @@ dependencies {
     implementation("androidx.preference:preference:1.2.1")
     // 标准下拉刷新控件（替代自研的下拉刷新轮子）；1.1.0 已在本机 Gradle 缓存，可离线构建
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+
+    // §3.5：纯逻辑单测护栏（仅 test 源集，不影响 release 产物）
+    testImplementation("junit:junit:4.13.2")
 }

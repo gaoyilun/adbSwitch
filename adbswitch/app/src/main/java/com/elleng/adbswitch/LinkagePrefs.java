@@ -95,13 +95,6 @@ final class LinkagePrefs {
         return pkg != null && pkg.matches("[a-zA-Z0-9_.-]+");
     }
 
-    /** 追加若干应用（去重，保留已有顺序在前）。 */
-    static void addApps(Context c, List<String> toAdd) {
-        List<String> cur = getApps(c);
-        cur.addAll(toAdd);
-        setApps(c, cur);
-    }
-
     static String getDefault(Context c) {
         return sp(c).getString(KEY_DEFAULT, "");
     }

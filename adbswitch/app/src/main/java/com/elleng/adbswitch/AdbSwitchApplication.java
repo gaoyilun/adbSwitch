@@ -14,5 +14,7 @@ public class AdbSwitchApplication extends Application {
     public void onCreate() {
         super.onCreate();
         DynamicColors.applyToActivitiesIfAvailable(this);
+        // §2.5b：冷启动预热上次确认状态进内存缓存，首帧 read() 不再做磁盘 I/O
+        DebugController.warmUp(this);
     }
 }

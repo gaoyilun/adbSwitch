@@ -38,15 +38,13 @@
     public boolean canPostPromotedNotifications();
 }
 
-# ── 在线更新（当前 ENABLED=false，休眠状态）────────────────────
+# ── 在线更新（已启用：ENABLED=true，GitHub 主通道硬编码激活）────────────────────
 # 这个包必须显式 keep，原因不是反射，而是**资源裁剪**：
-#   UpdateConfig.ENABLED 是编译期常量 false，R8 会把 isActive() 折叠成常量，
-#   于是「检查更新 → 弹窗 → 下载」这条链上的调用点被判定为不可达而整段移除，
-#   连带它们对 R.layout/dialog_update、R.string/update_* 的引用也消失；
-#   随后 isShrinkResources 判定这些资源无人引用，直接从 resources.arsc 里裁掉。
-#   实测后果：代码在、dialog_update 布局和 7 个 update_* 字符串没了，
-#   等正式上线把 ENABLED 打开就会 Resources.NotFoundException 崩溃。
-# 保留整包即可让资源引用活下来；等更新功能真正上线并稳定后，可考虑去掉本段。
+#   update 流程对 R.layout/dialog_update、R.string/update_* 的引用，可能被 shrinkResources
+#   判定为"仅在特定条件下可达"而误裁；保留整包可确保这些布局/字符串不被裁掉，
+#   避免运行时 Resources.NotFoundException。
+#   注：旧注释称"ENABLED=false 被 R8 折叠整段不可达"——该前提已随 ENABLED 置 true 失效；
+#   保留本段仅作为资源裁剪的安全网，若将来确认资源引用稳定可达可评估移除。
 -keep class com.elleng.adbswitch.update.** { *; }
 
 # ── 行号与源文件名 ────────────────────────────────────

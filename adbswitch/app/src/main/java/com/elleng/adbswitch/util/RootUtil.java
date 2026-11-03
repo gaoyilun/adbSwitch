@@ -86,9 +86,27 @@ public final class RootUtil {
     private RootUtil() {
     }
 
-    /** 是否拥有 root（su 后能拿到 uid 0） */
-    public static boolean hasRoot() {
-        return probe() == RootStatus.GRANTED;
+    /**
+     * 零成本判据：设备是否存在 su 二进制（不 fork 进程、不弹 Magisk 授权框）。
+     *
+     * 用途：UI 置灰这类「是否可能有 root 能力」的粗判，不能在启动/授权检测路径里直接
+     * {@link #probe()} —— probe 会真实 fork su，未授权设备上弹出 Magisk 授权框，而用户只是
+     * 打开 App「看看选项」不该被这种弹窗打扰（见 MainActivity 的 WSS 分支）。
+     * 真正的授权判定（su 能否拿到 uid 0）必须走 {@link #probe()}，且只在用户实际执行动作时调用。
+     */
+    public static boolean suBinaryExists() {
+        for (String path : new String[]{
+                "/system/bin/su", "/system/xbin/su", "/sbin/su",
+                "/magisk/.core/bin/su", "/data/adb/magisk/su"}) {
+            try {
+                if (new java.io.File(path).exists()) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+                // 个别 ROM 对路径访问抛异常：等同「不存在」，继续看下一个
+            }
+        }
+        return false;
     }
 
     /**

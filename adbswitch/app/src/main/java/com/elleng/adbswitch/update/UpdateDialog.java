@@ -39,7 +39,7 @@ import java.util.Locale;
  *
  * 强制更新（mandatory）：不允许点外部/返回关闭。
  *
- * 当前 {@link UpdateConfig#ENABLED} 为 false，本类不会被调用。
+ * 当前 {@link UpdateConfig#ENABLED} 为 true，发现可更新版本时会由更新流程调用本类弹窗。
  */
 public final class UpdateDialog {
 

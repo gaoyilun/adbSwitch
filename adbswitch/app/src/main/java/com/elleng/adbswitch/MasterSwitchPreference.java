@@ -60,6 +60,8 @@ public class MasterSwitchPreference extends Preference {
     private boolean prefEnabled = true;
     /** 最近一次绑定的 known（首次使用未校准时的置灰维度） */
     private boolean lastKnownAllowed = true;
+    /** §4.7 写入在途冻结：写任务排队期间临时禁用 Switch（仅视觉反馈，不影响 Preference 级 enabled） */
+    private boolean busyFreeze = false;
 
     public MasterSwitchPreference(Context context) {
         super(context);
@@ -87,7 +89,7 @@ public class MasterSwitchPreference extends Preference {
         super.setEnabled(enabled);
         prefEnabled = enabled;
         if (boundSwitch != null) {
-            boundSwitch.setEnabled(enabled && lastKnownAllowed);
+            boundSwitch.setEnabled(enabled && lastKnownAllowed && !busyFreeze);
         }
     }
 
@@ -103,8 +105,16 @@ public class MasterSwitchPreference extends Preference {
         lastKnownAllowed = enabled;
         syncing = true;
         boundSwitch.setChecked(on);
-        boundSwitch.setEnabled(enabled && prefEnabled);
+        boundSwitch.setEnabled(enabled && prefEnabled && !busyFreeze);
         syncing = false;
+    }
+
+    /** §4.7：写任务在途时冻结 / 解冻主开关 Switch（仅视觉反馈）；解冻复用最近一次 known 态 */
+    public void setBusyFreeze(boolean b) {
+        busyFreeze = b;
+        if (boundSwitch != null) {
+            boundSwitch.setEnabled(prefEnabled && lastKnownAllowed && !busyFreeze);
+        }
     }
 
     /** 更新折叠箭头指向（MainActivity 折叠/展开两个子开关行后调用）；已绑定行立即生效 */
@@ -154,8 +164,8 @@ public class MasterSwitchPreference extends Preference {
         sw.setOnCheckedChangeListener(null);
         syncing = true;
         sw.setChecked(on);
-        // 双重门禁：known（首次未校准置灰）&& Preference 级 enabled（未授权置灰）
-        sw.setEnabled(known && isEnabled());
+        // 双重门禁：known（首次未校准置灰）&& Preference 级 enabled（未授权置灰）&& 写入在途冻结
+        sw.setEnabled(known && isEnabled() && !busyFreeze);
         syncing = false;
         sw.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (syncing) {

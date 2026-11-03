@@ -1,4 +1,4 @@
-package com.elleng.adbswitch;
+package com.elleng.adbswitch.util;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -15,13 +15,13 @@ import android.graphics.drawable.Drawable;
  *   - Drawable 不能跨线程用，Bitmap 可以 —— 选择器/快捷方式都在后台线程构图标，必须转 Bitmap。
  * 失败返回 null，由调用方决定回退（默认图标 / 占位）。
  */
-final class DrawableUtils {
+public final class DrawableUtils {
 
     private DrawableUtils() {
     }
 
     /** 把任意 Drawable 渲染成 size×size 的方形 Bitmap；size<=0 或失败返回 null。 */
-    static Bitmap toBitmap(Drawable d, int size) {
+    public static Bitmap toBitmap(Drawable d, int size) {
         if (d == null || size <= 0) {
             return null;
         }

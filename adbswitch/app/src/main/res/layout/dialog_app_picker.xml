@@ -72,6 +72,9 @@
         android:layout_width="match_parent"
         android:layout_height="500dp">
 
+        <!-- 这里的高度只是占位：真正的值由 AppListDialog 按「屏幕高度比例」动态设置，
+             并对齐到整数行（见 AppListDialog.LIST_HEIGHT_RATIO）。
+             不要再给列表加垂直 padding：末尾多出半个行高会把最后一行顶出视口。 -->
         <ListView
             android:id="@+id/lvApps"
             android:layout_width="match_parent"

@@ -1,5 +1,7 @@
 package com.elleng.adbswitch;
 
+import com.elleng.adbswitch.util.DrawableUtils;
+
 import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -47,7 +49,6 @@ public class AppListDialog {
     private final Context context;
     private final boolean multi;
     private final List<String> preselected;
-    private final OnAppChosenListener singleListener;
     private final OnAppsChosenListener multiListener;
     private final PackageManager pm;
 
@@ -68,6 +69,12 @@ public class AppListDialog {
     private AlertDialog dialog;
     private final Handler main = new Handler(Looper.getMainLooper());
     private int iconSizePx;
+    /** 列表区占屏幕高度的比例（响应式：手机 / 平板按同一比例缩放） */
+    private static final float LIST_HEIGHT_RATIO = 0.5f;
+    /** 列表高度校正次数上限：防止反复布局抖动（正常 1 次就收敛） */
+    private int fixAttempts;
+    /** 是否已排了一次「布局后校正」任务，避免同一帧重复排队 */
+    private boolean fixScheduled;
     /**
      * 图标解码的共享后台线程。
      * 原先 getView 里每行 new Thread：快速滑动会瞬间起几十上百个线程（解码图标是重活），
@@ -75,10 +82,6 @@ public class AppListDialog {
      */
     private final java.util.concurrent.ExecutorService iconLoader =
             java.util.concurrent.Executors.newSingleThreadExecutor();
-
-    public interface OnAppChosenListener {
-        void onAppChosen(String pkg);
-    }
 
     /** 多选模式的回调：返回最终勾选的包名集合（顺序即列表顺序）。 */
     public interface OnAppsChosenListener {
@@ -106,23 +109,27 @@ public class AppListDialog {
 
     /**
      * 图标跨会话缓存：Bitmap 解码较重，选择器反复打开时复用已解码的图标，
-     * 避免每次都重新 loadIcon + 缩放。按包名索引，上限 200 个，按内存占用（KB）计。
-     * 静态字段 → 跨对话框实例（多次打开「管理快捷应用」）共享，进程存活期间有效。
+     * 避免每次都重新 loadIcon + 缩放。按包名索引，上限 200 个（按条数计），进程存活期间有效。
+     * 静态字段 → 跨对话框实例（多次打开「管理快捷应用」）共享。
+     *
+     * 修正：sizeOf 必须返回「计入总量的单位数」，LruCache 的 maxSize 才是总量。旧实现
+     * sizeOf 返回 KB、maxSize=200 ⇒ 总容量仅 200KB（48dp@3x 约 80KB/张，只容 2 张），
+     * 命中率≈0，与「回前台不再重复解码」初衷相悖。现 sizeOf 返回 1（每条 1 个），
+     * maxSize=200 ⇒ 真正缓存 200 个图标。
      */
     private static final android.util.LruCache<String, Bitmap> ICON_CACHE =
             new android.util.LruCache<String, Bitmap>(200) {
                 @Override
                 protected int sizeOf(String key, Bitmap value) {
-                    return value.getAllocationByteCount() / 1024;
+                    return 1; // 按条数计，上限 200 个
                 }
             };
 
     private AppListDialog(Context context, boolean multi, List<String> preselected,
-                          OnAppChosenListener singleListener, OnAppsChosenListener multiListener) {
+                          OnAppsChosenListener multiListener) {
         this.context = context;
         this.multi = multi;
         this.preselected = preselected;
-        this.singleListener = singleListener;
         this.multiListener = multiListener;
         this.pm = context.getPackageManager();
         if (multi && preselected != null) {
@@ -130,22 +137,11 @@ public class AppListDialog {
         }
     }
 
-    /** 单选：点列表项即选定并关闭。 */
-    public static void show(Context context, OnAppChosenListener listener) {
-        try {
-            new AppListDialog(context, false, null, listener, null).build();
-        } catch (Throwable t) {
-            // 兜底：绝不让选择器静默失败（表现为「点了没反应」）
-            android.util.Log.e("AppListDialog", "show failed", t);
-            Toast.makeText(context, R.string.picker_load_fail, Toast.LENGTH_LONG).show();
-        }
-    }
-
     /** 多选：预勾 {@code preselected} 中的包名，确认后回传勾选集合（用于管理联动应用）。 */
     public static void showMulti(Context context, List<String> preselected,
                                  OnAppsChosenListener listener) {
         try {
-            new AppListDialog(context, true, preselected, null, listener).build();
+            new AppListDialog(context, true, preselected, listener).build();
         } catch (Throwable t) {
             android.util.Log.e("AppListDialog", "showMulti failed", t);
             Toast.makeText(context, R.string.picker_load_fail, Toast.LENGTH_LONG).show();
@@ -158,13 +154,22 @@ public class AppListDialog {
 
         View root = LayoutInflater.from(context).inflate(R.layout.dialog_app_picker, null);
         swipeRefresh = root.findViewById(R.id.swipeRefresh);
-        // 布局里列表区固定 500dp：AlertDialog 不会自动限制自定义视图高度，小屏 / 横屏 /
-        // 分屏下弹窗会被窗口裁掉、底部按钮够不着。按屏幕高度钳制（仍保留 500dp 上限）。
-        int maxListPx = (int) (context.getResources().getDisplayMetrics().heightPixels * 0.6f);
-        int wantListPx = (int) (500 * density + 0.5f);
+        // 列表区高度按「屏幕高度的比例」定，不写死 dp：手机 / 平板按同一比例缩放，
+        // 大屏自然更长。弹窗里还要放标题、搜索框和底部按钮，比例过大就会顶出窗口被裁掉
+        // （实测比例 0.6 时列表高 1500px、而可视区只有 1363px，最后一行被切掉）。
+        // 取整到整数行，底部不会露出半行。
+        int listPx = (int) (context.getResources().getDisplayMetrics().heightPixels
+                * LIST_HEIGHT_RATIO);
+        int initPitch = measureRowPitch(density);
+        if (initPitch > 1) {
+            int rows0 = listPx / initPitch;
+            if (rows0 >= 2) {
+                listPx = rows0 * initPitch;
+            }
+        }
         ViewGroup.LayoutParams listLp = swipeRefresh.getLayoutParams();
         if (listLp != null) {
-            listLp.height = Math.min(wantListPx, maxListPx);
+            listLp.height = listPx;
             swipeRefresh.setLayoutParams(listLp);
         }
         loadingView = root.findViewById(R.id.tvLoading);
@@ -200,13 +205,6 @@ public class AppListDialog {
                 }
                 updateRowCheckbox(view, info.pkg);
                 updateTitle();
-            } else {
-                if (singleListener != null) {
-                    singleListener.onAppChosen(info.pkg);
-                }
-                if (dialog != null) {
-                    dialog.dismiss();
-                }
             }
         });
 
@@ -251,8 +249,161 @@ public class AppListDialog {
         // 点击后界面会长时间无响应。
         loadingView.setVisibility(View.VISIBLE);
         dialog.show();
+        // 布局完再按「真实可视高度」收拾列表：不能在此之前算，原因见 alignListAfterLayout
+        alignListAfterLayout();
 
         scanAppsAsync();
+    }
+
+    /**
+     * 列表高度兜底校正：布局完成后确认 ListView 的高度没有超出「真正能看到的高度」。
+     *
+     * <p>为什么要兜底：屏幕比例只是估算，小屏 / 横屏 / 分屏 / 大字体下弹窗留给列表的空间
+     * 可能比估算值更小。而 SwipeRefreshLayout 会把自身的测量规格直接传给子视图
+     * （measureChild），{@code match_parent} 的 ListView 因此会被量成「比可视区更高」：
+     * 多出来的部分被父容器裁掉，但 ListView 自己以为还有那么高，于是滚动范围缩水，
+     * 表现就是「能滚，但滚到头最后一行仍然缺一截」，怎么滑都出不来。
+     * 所以布局后把 ListView 与 SwipeRefreshLayout 的高度一起钉成真实可用高度，
+     * 滚动范围才与可视区域一致，滚到底最后一行才会完整贴底。
+     */
+    private void alignListAfterLayout() {
+        if (listView == null) {
+            return;
+        }
+        listView.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                scheduleListHeightFix();
+            }
+        });
+    }
+
+    /** 布局期间算不出祖先高度（此刻还是 0），推迟到本次布局遍历结束再算；同一时间只排一次 */
+    private void scheduleListHeightFix() {
+        if (listView == null || fixScheduled) {
+            return;
+        }
+        fixScheduled = true;
+        listView.post(() -> {
+            fixScheduled = false;
+            fixListHeightToVisible(listView == null ? 0 : listView.getHeight());
+        });
+    }
+
+    private void fixListHeightToVisible(int listHeight) {
+        if (swipeRefresh == null || listView == null || listHeight <= 0) {
+            return;
+        }
+        int avail = availableListHeight();
+        if (avail <= 0 || fixAttempts >= 4) {
+            return;
+        }
+        float density = context.getResources().getDisplayMetrics().density;
+        int pitch = measureRowPitch(density);
+        int target = avail;
+        if (pitch > 1) {
+            int rows = avail / pitch;
+            if (rows >= 2) {
+                target = rows * pitch;
+            }
+        }
+        // 只有明显放不下（超出整整一行）才收：布局早期拿到的可用高度可能是瞬时值，
+        // 差一行以内不动，避免把本来放得下的列表无故压矮。
+        if (listHeight <= avail + (pitch > 1 ? pitch : 0)) {
+            return;
+        }
+        fixAttempts++;
+        // 放到下一帧再改，避免在 layout 过程中触发 requestLayout
+        final int t = target;
+        listView.post(() -> {
+            if (listView == null || swipeRefresh == null) {
+                return;
+            }
+            ViewGroup.LayoutParams llp = listView.getLayoutParams();
+            if (llp != null && llp.height != t) {
+                llp.height = t;
+                listView.setLayoutParams(llp);
+            }
+            ViewGroup.LayoutParams slp = swipeRefresh.getLayoutParams();
+            if (slp != null && slp.height != t) {
+                slp.height = t;
+                swipeRefresh.setLayoutParams(slp);
+            }
+        });
+    }
+
+    /**
+     * 列表真正能用的高度：向上遍历祖先，取「各层容器底部到列表顶部」的最小距离。
+     *
+     * <p>不能只看直接父容器：AlertDialog 的自定义区内嵌了 custom → customPanel →
+     * parentPanel 几层，其中内层会跟着内容一起被撑高，真正把内容裁掉的是更外层。
+     * 只看父容器会算出偏大的值，等于没修。取各层最小值就不会漏掉真正裁剪的那层。
+     *
+     * <p>坐标统一用 getLocationInWindow，嵌套层级多也不会算偏。
+     */
+    private int availableListHeight() {
+        if (listView == null) {
+            return 0;
+        }
+        int[] lvLoc = new int[2];
+        listView.getLocationInWindow(lvLoc);
+        int lvTop = lvLoc[1];
+        int best = Integer.MAX_VALUE;
+        View v = listView;
+        while (v != null) {
+            int[] loc = new int[2];
+            v.getLocationInWindow(loc);
+            int space = loc[1] + v.getHeight() - lvTop;
+            if (v.getHeight() > 0 && space > 0 && space < best) {
+                best = space;
+            }
+            android.view.ViewParent p = v.getParent();
+            v = (p instanceof View) ? (View) p : null;
+        }
+        // 再和窗口可视区域取小，避免弹窗比屏幕还高
+        if (dialog != null && dialog.getWindow() != null) {
+            android.graphics.Rect r = new android.graphics.Rect();
+            dialog.getWindow().getDecorView().getWindowVisibleDisplayFrame(r);
+            int space = r.bottom - lvTop;
+            if (space > 0 && space < best) {
+                best = space;
+            }
+        }
+        if (best == Integer.MAX_VALUE || best <= 0) {
+            return swipeRefresh == null ? 0 : swipeRefresh.getHeight();
+        }
+        return best;
+    }
+
+    /**
+     * 实测一行的「行距」= 行高 + 1dp 分隔线，用于把列表视口高度对齐到整数行。
+     *
+     * <p>行高不是写死的：取决于 40dp 图标、两行文字、以及多选时 48dp 的勾选框谁更高
+     * （+ 上下各 10dp 内边距），还会随系统字体缩放变化，所以这里真的把 item_app 量一遍，
+     * 而不是用常量估算。多选模式要先把勾选框置为可见，否则量出来的是单选行的行高。
+     */
+    private int measureRowPitch(float density) {
+        try {
+            View probe = LayoutInflater.from(context)
+                    .inflate(R.layout.item_app, null, false);
+            CheckBox cb = probe.findViewById(R.id.cbCheck);
+            if (cb != null) {
+                cb.setVisibility(multi ? View.VISIBLE : View.GONE);
+            }
+            // 行宽：弹窗宽度（屏宽减两侧外边距）再减列表左右各 8dp 内边距，取个偏保守的值即可
+            int width = context.getResources().getDisplayMetrics().widthPixels
+                    - (int) (96 * density + 0.5f);
+            probe.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int h = probe.getMeasuredHeight();
+            if (h <= 0) {
+                return 0;
+            }
+            return h + Math.max(1, (int) (density + 0.5f));
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     /** 多选模式：标题数量随勾选实时更新（如「管理快捷应用（2个）」） */

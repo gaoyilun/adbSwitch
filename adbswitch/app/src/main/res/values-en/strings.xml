@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- English localization (§4.7). Format specifiers (%1$s, %1$d, %2$s, %3$s) and \n are preserved verbatim. -->
+    <string name="app_name">Debug Switch</string>
+    <string name="tile_label">Debug Switch</string>
+
+    <!-- Desktop shortcuts -->
+    <string name="sc_open_home_short">Open Home</string>
+    <string name="sc_open_home_long">Open settings home directly without triggering quick-launch</string>
+    <string name="sc_toggle_short">Toggle</string>
+    <string name="sc_toggle_long">Toggle debug on/off without opening the UI</string>
+    <string name="sc_toggle_usb_short">USB Debugging</string>
+    <string name="sc_toggle_usb_long">Toggle USB debugging only, without opening the UI</string>
+    <string name="sc_toggle_wireless_short">Wireless Debugging</string>
+    <string name="sc_toggle_wireless_long">Toggle wireless debugging only, without opening the UI</string>
+
+    <string name="header_subtitle">One-tap toggle for USB &amp; wireless debugging</string>
+
+    <string name="card_debug_title">Debug Switch</string>
+
+    <string name="master_title">Master Switch</string>
+    <string name="master_expand_desc">Expand sub-switches</string>
+    <string name="master_collapse_desc">Collapse sub-switches</string>
+    <string name="master_on">On · adbd running</string>
+    <string name="master_off">Off · detectable</string>
+    <string name="master_partial">Partially on · adbd still running</string>
+    <string name="master_checking">Reading current state…</string>
+
+    <string name="usb_title">USB Debugging</string>
+    <string name="usb_on">On</string>
+    <string name="usb_off">Off</string>
+
+    <string name="wireless_title">Wireless Debugging</string>
+    <string name="wireless_on">On · adbd running</string>
+    <string name="wireless_off">Off</string>
+
+    <string name="devopts_title">Developer Options</string>
+    <string name="devopts_on">On</string>
+    <string name="devopts_off">Off</string>
+
+    <string name="card_linkage_title">Quick Launch</string>
+    <string name="linkage_switch">Auto-open default app when enabled</string>
+    <string name="linkage_sum">On launch, turn off debugging and open the default app</string>
+
+    <string name="linkage_manage_title">Manage Quick Apps</string>
+    <string name="linkage_manage_sum">Select apps to quick-launch</string>
+    <string name="linkage_apps_empty">No quick apps added yet</string>
+
+    <string name="linkage_default_title">Default Quick App</string>
+    <string name="linkage_default_none">Not set</string>
+    <string name="linkage_no_default">Set a default quick app first</string>
+    <string name="linkage_apps_empty_toast">Add a quick app first</string>
+
+    <string name="quick_hint">Tap to quick-launch, long-press to create shortcut</string>
+
+    <string name="kill_before_open_title">Auto-close quick app when enabling debug</string>
+    <string name="kill_before_open_sum">Prevent the quick app from seeing debug during the switch</string>
+    <string name="kill_before_open_sum_last_failed">Last auto-close failed; check root / Shizuku authorization</string>
+    <string name="kill_before_open_sum_nocap">No root or Shizuku available; can\'t auto-close quick app</string>
+    <string name="kill_unavailable_toast">Can\'t auto-close quick app in this mode (needs root or Shizuku)</string>
+    <string name="kill_denied_toast">Couldn\'t auto-close quick app: root or Shizuku authorization was denied or revoked</string>
+
+    <string name="linkage_skipped">Auto-jumped at launch; opened app home this time</string>
+    <string name="linkage_auto_jumped">Auto-jumped. Return to this app to disable auto-jump</string>
+    <string name="linkage_app_uninstalled">Quick app uninstalled; removed from list</string>
+    <string name="linkage_app_unlaunchable">Quick app disabled; can\'t open</string>
+    <string name="linkage_need_notif">Quick launch needs notification permission; grant it first</string>
+
+    <string name="linkage_hint_title">Launch will jump to app after enabling</string>
+    <string name="linkage_hint_body">After enabling, tapping this app\'s icon will turn off debugging and open the target app. Open home via:\n\n· Long-press the app icon → \'Open Home\' in the shortcut menu\n· Tap \'App Settings\' in the notification\n· After the jump, reopen this app to return home</string>
+
+    <string name="create_shortcut_ok">Created and added to home screen</string>
+    <string name="create_shortcut_fail">Not created; check if permission was granted</string>
+    <string name="create_shortcut_done">Request sent; if it doesn\'t appear, add it manually</string>
+
+    <string name="card_notify_title">Notification</string>
+    <string name="btn_temp_close">Show notification when off</string>
+    <string name="temp_close_sum">Show a persistent notification to restore with one tap when debug is off</string>
+    <string name="live_update_title">Test Live Focus Notification</string>
+    <string name="live_update_sum">Check permission and send a test notification</string>
+    <string name="live_update_grant">Live Focus notifications not allowed yet. Grant permission?</string>
+    <string name="live_update_test_sent">Test sent; check from home or lock screen</string>
+    <string name="live_update_test_sent_plain">Sent; without permission, shown as a normal notification</string>
+    <string name="live_update_test_title">Live Focus Notification Test</string>
+    <string name="live_update_test_text">A pill in the status bar means it\'s active</string>
+    <string name="live_update_unsupported">Unsupported on this device (needs Android 16+)</string>
+    <string name="live_update_channel_name">Debug Switch Test Notification</string>
+
+    <string name="toast_root_fail">Execution failed; check authorization mode</string>
+    <string name="toast_write_not_effective">Write ineffective; check authorization mode</string>
+    <string name="toast_devopts_hidden">Developer options hidden; tap build number 7 times to restore</string>
+    <string name="toast_devopts_off_hint">Developer options off; tap build number 7 times in \'About phone\'</string>
+    <string name="toast_wireless_fallback">Can\'t open wireless debugging directly; tap \'Wireless debugging\' in Developer options</string>
+    <string name="nav_chevron_desc">Open corresponding settings</string>
+
+    <string name="about_title">About</string>
+    <string name="about_summary">Version info</string>
+    <string name="about_summary_update">%1$s update available%2$s</string>
+    <string name="about_build_time_label">Build time: </string>
+    <string name="about_credit">@伦Ellen</string>
+    <string name="about_info_desc">Project repo</string>
+    <string name="about_open_failed">Can\'t open link</string>
+
+    <string name="update_check">Check for updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_found">New version v%1$s found</string>
+    <string name="update_now">Update now</string>
+    <string name="update_backup">Backup download</string>
+    <string name="update_open_page">Go to download</string>
+    <string name="update_preparing">Preparing download…</string>
+    <string name="update_downloading">Downloading…</string>
+    <string name="update_progress">%1$s / %2$s · %3$s/s</string>
+    <string name="update_download_failed">Download failed; check network and retry</string>
+    <string name="update_need_install_permission">Unknown-app install not permitted; settings opened, grant then retry</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_check_failed">Update check failed; try later</string>
+    <string name="update_not_configured">Update check not configured (pending activation)</string>
+    <string name="update_already_latest">Already up to date</string>
+    <string name="update_toast_new">New version %1$s available</string>
+
+    <string name="picker_title">Select quick app</string>
+    <string name="picker_title_multi_count">Manage Quick Apps (%1$d)</string>
+    <string name="picker_confirm">OK</string>
+    <string name="picker_hint">Search app name / package</string>
+    <string name="picker_loading">Reading installed apps…</string>
+    <string name="picker_load_fail">Failed to get app list; check permission</string>
+    <string name="picker_need_permission">No app list; grant app-list permission in system settings</string>
+    <string name="picker_retry">Refresh and retry</string>
+    <string name="notify_settings">App Settings</string>
+
+    <string name="notify_channel_name">Status Bar Quick Switch</string>
+    <string name="notify_channel_desc">Persistent control notification after debug is temporarily off</string>
+    <string name="notify_title_on">adb debugging on</string>
+    <string name="notify_title_off">adb debugging off</string>
+    <string name="notify_action_close">Temp off</string>
+    <string name="notify_action_open">Restore</string>
+    <string name="notify_sub_safe">adbd stopped, detectable</string>
+    <string name="notify_sub_running">adbd still running</string>
+    <string name="notify_sub_usb_on">USB on</string>
+    <string name="notify_sub_usb_off">USB off</string>
+    <string name="notify_sub_wifi_on">Wireless on</string>
+    <string name="notify_sub_wifi_off">Wireless off</string>
+    <string name="promoted_text_on">Debugging</string>
+    <string name="promoted_text_off">Off</string>
+    <string name="tile_off">Debug: Off</string>
+    <string name="tile_all_on">Debug: All on</string>
+    <string name="tile_partial">Debug: Partial</string>
+
+    <string name="auth_mode_title">Authorization Mode</string>
+    <string name="auth_mode_sum">Tap to choose mode (rootless recommended)</string>
+    <string name="auth_mode_root">root</string>
+    <string name="auth_mode_shizuku">Shizuku</string>
+    <string name="auth_mode_wss">Rootless mode (recommended)</string>
+    <string name="auth_retry">Retry</string>
+    <string name="auth_status_root_ok">root mode · authorized</string>
+    <string name="auth_status_root_no">root mode · not authorized</string>
+    <string name="auth_status_shizuku_ok">Shizuku mode · authorized</string>
+    <string name="auth_status_shizuku_no">Shizuku mode · not authorized</string>
+    <string name="auth_choose_title">Choose authorization mode</string>
+    <string name="auth_toast_shizuku_no">Shizuku mode not authorized</string>
+    <string name="auth_toast_root_no">root mode not authorized; allow this app in your root manager</string>
+    <string name="auth_need_start">Start the service in Shizuku app first</string>
+    <string name="auth_no_priv">Not authorized; can\'t write debug switch</string>
+    <string name="auth_need_grant">Complete authorization first (rootless / root / Shizuku)</string>
+    <string name="toast_no_su">No root detected (su unavailable)</string>
+    <string name="toast_root_denied">root not authorized; allow this app in Magisk then retry</string>
+    <string name="toast_shizuku_not_running">Shizuku service not started; start it then retry</string>
+    <string name="toast_shizuku_no_perm">Shizuku hasn\'t authorized this app; authorize in Shizuku</string>
+    <string name="toast_auth_timeout">Authorization channel timed out; confirm the prompt then retry</string>
+    <string name="toast_shizuku_denied_forever">If Shizuku shows no prompt, manually allow this app in Shizuku\'s authorized list</string>
+    <string name="auth_status_wss_ok">rootless mode · authorized</string>
+    <string name="auth_status_wss_no">rootless mode · not authorized</string>
+    <string name="auth_bootstrap_title">Complete one-time authorization</string>
+    <string name="auth_bootstrap_body">Rootless mode needs a one-time WRITE_SECURE_SETTINGS grant. This permission can\'t be granted by tapping in system settings; run pm grant once via any of:\n\n· Manual adb: run in a terminal after connecting to a PC\n· Via Shizuku: no PC needed\n· Via root: no PC needed\n\nTakes effect immediately after grant, persists across reboot / soft reboot; only a clean reinstall requires re-authorization.</string>
+    <string name="auth_bootstrap_cmd_label">Authorization command</string>
+    <string name="auth_bootstrap_copy">Copy adb command</string>
+    <string name="auth_copy_done">Authorization command copied</string>
+    <string name="auth_bootstrap_via_shizuku">Run via Shizuku</string>
+    <string name="auth_bootstrap_via_root">Run via root</string>
+    <string name="auth_grant_ok">Authorization succeeded</string>
+    <string name="auth_grant_fail">Authorization failed; check and retry</string>
+    <string name="toast_wss_no_perm">Rootless mode not authorized; tap \'Authorization Mode\' above to authorize</string>
+    <string name="toast_wss_need_grant">Rootless mode not authorized; open the app to authorize</string>
+    <string name="toast_wss_write_dropped">Write ineffective: the system rejected this setting (possibly restricted)</string>
+
+    <string name="nav_confirm_title">Developer options required</string>
+    <string name="nav_confirm_msg">Opening this page requires enabling Developer options (writes a system setting). Continue?</string>
+</resources>

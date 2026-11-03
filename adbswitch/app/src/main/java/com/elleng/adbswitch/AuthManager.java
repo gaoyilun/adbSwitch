@@ -1,5 +1,7 @@
 package com.elleng.adbswitch;
 
+import com.elleng.adbswitch.util.ShizukuUtil;
+
 import android.content.Context;
 import android.content.pm.PackageManager;
 
@@ -89,11 +91,6 @@ public final class AuthManager {
             return Mode.SECURE_SETTINGS;
         }
         return getMode(ctx) == Mode.SHIZUKU ? Mode.SHIZUKU : Mode.ROOT;
-    }
-
-    /** 是否为默认推荐通道（WSS）可用状态 */
-    public static boolean isWssRecommended(Context ctx) {
-        return hasWriteSecureSettings(ctx);
     }
 
     /** 一次性授权命令（手动 adb 场景给用户复制执行） */

@@ -1,4 +1,4 @@
-package com.elleng.adbswitch;
+package com.elleng.adbswitch.util;
 
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;

@@ -1,5 +1,7 @@
 package com.elleng.adbswitch;
 
+import com.elleng.adbswitch.util.ShizukuUtil;
+
 import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -91,6 +93,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_NOTIFY = "notify_on_close";
     /** 「打开调试前先杀掉联动应用」开关（DebugController 读取同一份 cfg） */
     private static final String PREF_KILL_BEFORE_OPEN = "kill_before_open";
+    /** 用户是否手动关闭过「自动关闭快捷应用」（仅在具备 kill 权限时由用户手动关闭才记，
+     *  用于「有 kill 权限时默认开、仅用户手动关才记住」的体验，见 updateKillPrefState） */
+    private static final String PREF_KILL_USER_DISABLED = "kill_before_open_user_disabled";
     /** 动态 shortcut：启动快捷应用 */
     private static final String SC_ID_LAUNCH_APP = "launch_linkage_app";
 
@@ -100,17 +105,17 @@ public class MainActivity extends AppCompatActivity {
     // 必须初始化为 true：prefs.xml 里它们本来就写在 catDebug 内，
     // 初始化成 false 会导致首次刷新时「关闭态 want=false == 当前 false」而跳过 remove，折叠失效。
     private boolean subSwitchesShown = true;
-    private SwitchPreferenceCompat swUsbPref;
+    private NavSwitchPreference swUsbPref;
     private SwitchPreferenceCompat swLinkagePref;
     private SwitchPreferenceCompat swNotifyPref;
-    private SwitchPreferenceCompat swWirelessPref;
+    private NavSwitchPreference swWirelessPref;
     /**
      * 无线调试行是否可用（adb_wifi_enabled 键自 API 30 才存在）。
      * false 时该行已从 catDebug 摘掉、折叠逻辑也不再把它加回来，主开关只管理 USB。
      */
     private boolean wirelessSupported = true;
     /** 开发者选项入口开关：独立开关，不与主开关联动、不参与折叠（始终挂在 catDebug 里） */
-    private SwitchPreferenceCompat swDevOptsPref;
+    private NavSwitchPreference swDevOptsPref;
     private SwitchPreferenceCompat swKillPref;
     /** 「测试灵动焦点通知」行当前是否挂在分类里（显隐联动见 updateLiveUpdateState） */
     private boolean liveUpdateShown = true;
@@ -122,44 +127,41 @@ public class MainActivity extends AppCompatActivity {
     private boolean syncing = false;          // 防止 setChecked 触发回环
     /** 当前授权模式是否可用（即能否真实写入调试开关）。乐观假定可用，后台双检测纠正 */
     private boolean privilegedAvailable = true;
+    /** 用户是否手动关闭过「自动关闭快捷应用」（见 updateKillPrefState / PREF_KILL_USER_DISABLED） */
+    private boolean killUserDisabled = false;
+    /** 是否刚从后台返回前台（用于 onResume 时强制重测授权，识别 root/Shizuku 授权变化） */
+    private boolean cameFromBackground = false;
+    /**
+     * 本会话是否已拿到过授权探测结论。
+     *
+     * <p>冷启动到「授权探测回来」之间 {@code privilegedAvailable} 仍是初始值、{@code isRootCapable()}
+     * 还是 false，此时 updateKillPrefState 会算出 canKill=false，把「开启调试自动关闭快捷应用」
+     * 先强制关掉并置灰，等探测回来才变回开——用户看到的就是「一进来是关的、过一会儿自己变开」。
+     * 有这个标志就等结论回来再接管显示，首帧用布局声明的默认值（开）。
+     */
+    private boolean authProbeDone = false;
     private boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
     /** 上次重建「快捷打开」列表的内容指纹（配置没变就不重建，见 rebuildLinkageList） */
     private String lastLinkageSignature = null;
     /** 联动应用图标缓存：按包名缓存已解码的 Drawable，rebuildLinkageList 复用，避免每次回前台重复跨进程 getApplicationIcon 解码 */
     private final Map<String, Drawable> linkageIconCache = new HashMap<>();
-    /** 本启动周期是否已成功确认过授权：确认过则不再重复检测（切模式 / 执行失败会重置重测） */
-    private boolean authCheckedThisSession = false;
     /** WSS 引导中「用 Shizuku 代跑」：Shizuku 授权弹窗返回结果后，是否接着跑一次 pm grant */
     private boolean pendingWssGrantAfterShizuku = false;
     /** WSS 未授权的一次性授权引导是否已自动弹过（每次会话只自动弹一次，见 performAuthCheck） */
     private boolean wssBootstrapShown = false;
     /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
     private com.google.android.material.snackbar.Snackbar authSnackbar = null;
+    /** §4.7 写入在途冻结：写任务排队期间把主开关置灰，给出明确反馈（不再停在旧值无所适从） */
+    private final Runnable busyListener = () -> runOnUiThread(this::applyBusyState);
     /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
     private long lastShizukuRequestAt = 0;
-    /**
-     * 上次跑授权探测的时间戳。
-     *
-     * 为什么要节流：root 探测是一次真实的 su fork，未授权时最坏要等满 10s 超时。
-     * 旧实现「只有成功才缓存」，失败就每次进页面重跑一遍——在一个没 root 的设备上，
-     * 来回切页面等于反复 fork su 干等。失败也记时间戳，30s 内不重跑；
-     * 用户主动动作（切模式 / 点重试 / 授权结果回调）走 force 绕开节流。
-     */
-    private long lastAuthProbeAt = 0;
-    private static final long AUTH_PROBE_MIN_INTERVAL_MS = 30_000;
-    /** 进程级：本次进程内是否已自动跳转过联动应用（static 保证 Activity 重建后仍记得） */
-    private static boolean sLinkageLaunched = false;
-    /** 上一次跳转是否为「启动自动跳转」：决定回到设置页时提示什么（手动跳转不该说「启动时已自动跳转」） */
-    private static boolean sAutoJumped = false;
-    /** 「开了快捷打开但没设默认」的提示每进程只弹一次 */
+    /** 「开了快捷打开但没设默认」的提示每进程只弹一次（其余联动跳转状态见 LinkageLauncher） */
     private static boolean sNoDefaultToasted = false;
     private long lastPickerOpenAt = 0;        // 打开选择器防抖：行点击与 preference click 可能同时触发
     private long lastLiveOpenAt = 0;          // 同上，实时动态弹窗防抖
     private boolean settingsObserverRegistered = false; // Settings 监听是否已注册（防重复注册/泄漏）
     /** 主线程 Handler：去抖与所有 post 都复用它，否则每次 new 一个 Handler 都拿不到上次的 callback，去抖等于失效 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    /** 状态圆点 Drawable 缓存（key=colorRes）：每次 refresh 都会取多个，复用避免重复分配 */
-    private final android.util.SparseArray<GradientDrawable> stateIconCache = new android.util.SparseArray<>();
 
     /** 关于弹窗外链：署名按钮 → elleng.eu.org；信息图标 → 项目仓库 */
     private static final String ABOUT_CREDIT_URL = "https://elleng.eu.org";
@@ -170,13 +172,20 @@ public class MainActivity extends AppCompatActivity {
         if (isDestroyed()) {
             return;
         }
+        // 开启调试时若没能杀联动应用，给一次性提示（不再静默失效）。
+        // 两类原因分开提示：授权被拒 / 被撤销 → 去补授权；根本没有通道 → 只能换模式或装 root。
+        if (DebugController.consumeKillDenied()) {
+            Toast.makeText(MainActivity.this, R.string.kill_denied_toast, Toast.LENGTH_LONG).show();
+        } else if (DebugController.consumeKillSkipped()) {
+            Toast.makeText(MainActivity.this, R.string.kill_unavailable_toast, Toast.LENGTH_LONG).show();
+        }
         refresh(s);
     };
 
     /**
      * 监听 Settings.Global 里两个调试键的外部变化。
      *
-     * 为什么必须监听：stateReceiver 只覆盖「本 App 自己写的」情况（ACTION_STATE）。
+     * 为什么必须监听：App 内部状态推送（addStateListener）只覆盖本 App 自己写出的变化
      * 但调试状态还可能被本 App 之外的东西改掉 —— 用户手动改系统开发者选项、
      * 系统按场景自动收无线调试、其他 App 改设置等。此时 App 不知情，
      * 界面会一直停在旧值上，出现「明明 adbd 已停、界面却显示已开启」的骗人状态。
@@ -197,7 +206,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         // 必须把缓存作废再校准：HyperOS 会向第三方 App 隐藏这两个键，直接回读拿到的仍是缓存，
-        // 不作废就永远刷不出「外部改了设置」的新状态。校准完成后会广播，UI 由 stateReceiver 更新。
+        // 不作废就永远刷不出「外部改了设置」的新状态。校准完成后由状态 listener 推送新状态，UI 经 addStateListener 回调刷新。
         DebugController.invalidateAndRefresh(this);
     };
 
@@ -224,6 +233,15 @@ public class MainActivity extends AppCompatActivity {
         if (pendingPrefsInit) {
             pendingPrefsInit = false;
             runPrefsInit();
+        }
+        // §4.7：注册「写入在途」监听，写任务排队期间冻结主开关；Activity 销毁时需移除（静态表会持有引用）。
+        DebugController.addBusyListener(busyListener);
+    }
+
+    /** §4.7：写任务在途（busy）时冻结主开关，结束后解冻；解冻会复用最近一次已渲染的 known 态 */
+    private void applyBusyState() {
+        if (swMasterPref != null) {
+            swMasterPref.setBusyFreeze(DebugController.isBusy());
         }
     }
 
@@ -257,7 +275,7 @@ public class MainActivity extends AppCompatActivity {
                             return;
                         }
                         // 服务没了：本周期的「已确认」结论必须作废，否则下次进页面不再重测
-                        authCheckedThisSession = false;
+                        AuthCoordinator.resetSession();
                         if (AuthManager.getMode(MainActivity.this) == AuthManager.Mode.SHIZUKU) {
                             privilegedAvailable = false;
                             applyRootState();
@@ -326,8 +344,10 @@ public class MainActivity extends AppCompatActivity {
     private boolean handleEntry(Intent in) {
         SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
 
-        // 动态 shortcut「启动快捷应用」：直接跳目标应用（不触发关调试/常驻通知等动作），
-        // 故不依赖快捷打开开关，开没开都能用。
+        // 动态 shortcut「启动快捷应用」：与桌面快捷方式（ACTION_DESKTOP_LINKAGE）同语义——
+        // 先关调试、再打开目标应用，故不依赖「快捷打开」总开关，开没开都能用。
+        // 1.0.4 曾把这条简化成「只启动应用、不关调试」，导致用户从长按菜单拖到桌面后
+        // 使用时调试没被关掉（用户反馈：只会跳转、不触发关闭总开关）。改为统一走 runLinkage。
         if (SC_ID_LAUNCH_APP.equals(in.getAction())) {
             String pkg = LinkagePrefs.getDefault(this);
             if (pkg.isEmpty()) {
@@ -335,12 +355,7 @@ public class MainActivity extends AppCompatActivity {
                 finish();
                 return true;
             }
-            if (!launchApp(pkg)) {
-                // 默认目标已失效：提示并落到设置页（已卸载的顺手清掉），不再静默闪回桌面
-                handleLinkageTargetGone(pkg);
-                return false;
-            }
-            finish();
+            runLinkage(pkg, false);
             return true;
         }
 
@@ -353,7 +368,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 桌面快捷方式「创建桌面快捷方式」：先打开本 App，关掉调试后联动启动目标应用。
         // 这是显式触发（用户点了快捷方式），故不走 PREF_LINKAGE 开关、也不受
-        // sLinkageLaunched 守卫限制——每次点都应重新关调试并跳目标应用。
+        // LinkageLauncher 守卫限制——每次点都应重新关调试并跳目标应用。
         if (ACTION_DESKTOP_LINKAGE.equals(in.getAction())) {
             String pkg = in.getStringExtra(EXTRA_LINKAGE_PKG);
             // 桌面快捷方式始终带包名（见 createDesktopShortcutFor），缺包名的场景已废弃；
@@ -393,10 +408,9 @@ public class MainActivity extends AppCompatActivity {
                 // 否则从联动应用返回本 App（或再次点图标）时会被反复弹回去，
                 // 用的人根本来不及用设置页。需要再跳时用动态快捷方式手动触发。
                 // 只在上一次是「启动自动跳转」时提示，且只提示一次（手动跳转回来不必说
-                // 「启动时已自动跳转」，反复打开也不该反复弹）。
-                if (sLinkageLaunched) {
-                    if (sAutoJumped) {
-                        sAutoJumped = false;
+                // 「启动时已自动跳转」，反复打开也不该反复弹）。状态机见 LinkageLauncher。
+                if (LinkageLauncher.hasLaunched()) {
+                    if (LinkageLauncher.consumeAutoJumpHint()) {
                         Toast.makeText(this, R.string.linkage_skipped, Toast.LENGTH_LONG).show();
                     }
                     return false;
@@ -427,7 +441,7 @@ public class MainActivity extends AppCompatActivity {
      *   主页「关于」行随即显示「可更新」；绝不强弹 UpdateDialog。
      * 真正的新版下载入口只在「关于」弹窗的手动「检查更新」里。
      *
-     * 当前 {@link UpdateConfig#ENABLED} 为 false，本方法第一行就返回，一次网络请求都不会发。
+     * 当前 {@link UpdateConfig#ENABLED} 为 true（GitHub 主通道硬编码激活）；未达节流间隔或网络失败时不发请求。
      * 启用后的行为：成功拿到结果才写节流时间戳，网络失败不写，避免弱网用户被节流 3 天。
      */
     private void checkUpdateOnStart() {
@@ -557,17 +571,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 双模式授权检测（替换原 probeRoot）。
+     * 双模式授权检测（探测逻辑见 {@link AuthCoordinator}：模式探测 + 30s 节流 + 会话闸门）。
+     * 本方法只负责把 {@link AuthCoordinator.AuthResult} 应用到 UI：刷新授权状态行 / 控件可用性，
+     * 并按模式弹引导（WSS 首次进入一次性引导）/ 请求 Shizuku 授权。
      *
-     * 与旧实现的三点差异：
-     *  1. **只探测当前模式对应的后端**。Shizuku 模式下不再 fork su —— 用户根本没打算用 root
-     *     时，那次 su 可能弹出 Magisk 授权弹窗、最坏还要等满 10s 超时；
-     *     Shizuku 侧是纯 binder 调用（微秒级），两种模式都可以顺带探。
-     *  2. **失败也节流**（见 {@link #lastAuthProbeAt}）：旧实现只有成功才缓存，
-     *     失败就每次进页面重跑一遍 su。
-     *  3. 探测结论区分「没有 su」与「有 su 未授权」（RootUtil.probe），文案据此分流。
+     * 与旧实现的三点差异（已沉淀到 AuthCoordinator）：
+     *  1. **只探测当前模式对应的后端**：Shizuku 模式不再 fork su；
+     *  2. **失败也节流**：失败不反复 fork su 干等；
+     *  3. 探测结论区分「没有 su」与「有 su 未授权」，文案据此分流。
      *
-     * @param force true=忽略「本周期已确认」与节流，立即重测（切模式 / 点重试 / 授权结果回调）
+     * @param force true=忽略会话闸门与节流，立即重测（切模式 / 点重试 / 授权结果回调）
      */
     private void performAuthCheck() {
         performAuthCheck(false);
@@ -577,80 +590,39 @@ public class MainActivity extends AppCompatActivity {
         if (!prefsLoaded) {
             return;
         }
-        // 本启动周期已成功确认过授权：不重复 fork su。
-        // 授权一旦拿到不会凭空消失，重复检测纯属浪费（root 检测每次都是一次 su 等待）。
-        // 例外：切模式（chooseAuthMode）、执行失败、binder 死亡时会重置本标志，重新检测；
-        // 用户主动动作（force）一律重测。
-        if (authCheckedThisSession && !force) {
-            return;
-        }
-        long now = android.os.SystemClock.uptimeMillis();
-        if (!force && now - lastAuthProbeAt < AUTH_PROBE_MIN_INTERVAL_MS) {
-            return; // 节流：失败也不反复 fork su 干等
-        }
-        lastAuthProbeAt = now;
-        // 探测线程只用 application context：probe 最坏阻塞 10s（su 等授权），
-        // 匿名线程持有 Activity 强引用期间实例无法回收。回主线程的 post 已有
-        // isDestroyed/isFinishing 守卫，不碰已销毁的 UI。
-        final Context app = getApplicationContext();
-        new Thread(() -> {
-            final AuthManager.Mode mode = AuthManager.getMode(app);
-            // WSS（默认推荐）模式：只查本应用是否已持有 WRITE_SECURE_SETTINGS。
-            // 这是纯 checkSelfPermission，零成本、不 fork su、不会惊动 Magisk ——
-            // 遵循「只探当前模式对应的后端」，不要在 Shizuku/root 模式下去探不相干的后端。
-            if (mode == AuthManager.Mode.SECURE_SETTINGS) {
-                final boolean granted = AuthManager.hasWriteSecureSettings(app);
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    if (isDestroyed() || isFinishing()) {
-                        return; // Activity 已销毁，避免 UI/窗口泄漏
-                    }
-                    privilegedAvailable = granted;
-                    if (granted) {
-                        authCheckedThisSession = true;
-                    }
-                    applyRootState();
-                    updateAuthStatusUI();
-                    if (!granted) {
-                        // 首次进入且未授权：自动弹出一次性授权引导 —— 用户不必先去点
-                        // 「授权模式」那一行才知道要做什么（全新安装默认就是 WSS 模式）。
-                        // 只自动弹一次（按会话计）：否则每次回前台 / 每次重测都会糊一个弹窗；
-                        // 用户取消后仍保留底部 Snackbar（带「重试」）作为常驻入口。
-                        if (!wssBootstrapShown) {
-                            wssBootstrapShown = true;
-                            showWssBootstrapDialog();
-                        }
-                        showAuthNotice(mode, false, RootUtil.RootStatus.DENIED);
-                    }
-                });
-                return;
+        AuthCoordinator.check(this, force, result -> {
+            if (isDestroyed() || isFinishing()) {
+                return; // Activity 已销毁，避免 UI/窗口泄漏
             }
-            // Shizuku 模式不 fork su（代价高且会惊动 Magisk），root 模式才探
-            final RootUtil.RootStatus rootStatus = mode == AuthManager.Mode.ROOT
-                    ? RootUtil.probe() : RootUtil.RootStatus.DENIED;
-            final boolean rootOk = rootStatus == RootUtil.RootStatus.GRANTED;
-            final boolean shizukuRunning = ShizukuUtil.running();
-            final boolean shizukuOk = shizukuRunning && ShizukuUtil.permissionGranted();
-            final boolean ok = (mode == AuthManager.Mode.SHIZUKU) ? shizukuOk : rootOk;
-            new Handler(Looper.getMainLooper()).post(() -> {
-                if (isDestroyed() || isFinishing()) {
-                    return; // Activity 已销毁，避免 UI/窗口泄漏
+            authProbeDone = true;
+            privilegedAvailable = result.available;
+            // 确认成功才记到本启动周期：失败不缓存，下次仍会重测（授权可能稍后补上）
+            if (result.available) {
+                AuthCoordinator.markSessionChecked();
+            }
+            applyRootState();
+            updateAuthStatusUI();
+            updateKillPrefState();
+            if (!result.available) {
+                // 未授权按模式给出引导。WSS 首次进入自动弹一次性授权引导（每会话一次，避免叠层）；
+                // Shizuku 模式且服务在跑却没授权：主动弹 Shizuku 授权对话框。
+                if (result.mode == AuthManager.Mode.SECURE_SETTINGS) {
+                    // WSS 分支的 shizukuRunning 恒按 false 传（与旧实现一致：该模式不依赖 Shizuku 文案）
+                    if (!wssBootstrapShown) {
+                        wssBootstrapShown = true;
+                        // 弹窗关闭后由默认回调恢复底部常驻「重试」提示
+                        showWssBootstrapDialog();
+                    } else {
+                        showAuthNotice(result.mode, false, RootUtil.RootStatus.DENIED);
+                    }
+                } else {
+                    if (result.mode == AuthManager.Mode.SHIZUKU) {
+                        maybeRequestShizukuPermission(false);
+                    }
+                    showAuthNotice(result.mode, result.shizukuRunning, result.rootStatus);
                 }
-                privilegedAvailable = ok;
-                // 确认成功才记到本启动周期：失败不缓存，下次仍会重测（授权可能稍后补上）
-                if (ok) {
-                    authCheckedThisSession = true;
-                }
-                applyRootState();
-                updateAuthStatusUI();
-                // Shizuku 模式且服务在跑却没授权：主动弹 Shizuku 授权对话框
-                if (!ok && mode == AuthManager.Mode.SHIZUKU) {
-                    maybeRequestShizukuPermission(false);
-                }
-                if (!ok) {
-                    showAuthNotice(mode, shizukuRunning, rootStatus);
-                }
-            });
-        }, "auth-probe").start();
+            }
+        });
     }
 
     /** M3 顶栏（MaterialToolbar）：标题 + 副标题，Surface 底色（无图标，左端留白）。 */
@@ -855,13 +827,17 @@ public class MainActivity extends AppCompatActivity {
         // 主开关：一键开/关。关闭时记住两个子开关的组合，打开时原样还原。
         // 行内 Switch 由 MasterSwitchPreference 绑定时接线；整行点击（androidx 原生触发）在此接线。
         // 启动窗口期（真值尚未读回）屏蔽操作：点击不执行，但给一次性轻提示（见 P1.1）
-        swMasterPref.setOnPreferenceClickListener(p -> {
-            if (swallowIfUnconfirmed()) {
+        // null 守卫：与上方 setOnToggleListener / setOnExpandListener 同一防御口径——
+        // 极端时序下 preference 树未就绪时跳过接线（宁可主开关整行点击不动也不闪退）。
+        if (swMasterPref != null) {
+            swMasterPref.setOnPreferenceClickListener(p -> {
+                if (swallowIfUnconfirmed()) {
+                    return true;
+                }
+                toggleMaster();
                 return true;
-            }
-            toggleMaster();
-            return true;
-        });
+            });
+        }
 
         // 三个子开关（USB / 无线 / 开发者选项）的监听逻辑同构，统一由 bindSubSwitch 收口：
         // 启动窗口期（真值未读回）吞掉点击并给一次性轻提示；写完后按回读真值刷新并提示写入是否生效。
@@ -874,14 +850,36 @@ public class MainActivity extends AppCompatActivity {
                     s -> s.dev, R.string.toast_write_not_effective, R.string.toast_devopts_hidden);
         }
 
+        // 调试三行右侧「›」箭头：点击跳系统对应设置项（开发者选项未开启时回退关于 + Toast，见 SettingsNav）。
+        // 箭头点击与开关拨动互不干扰：箭头是独立 ImageButton，消费自身点击、不触发整行/开关切换。
+        if (swUsbPref != null) {
+            swUsbPref.setOnNavClickListener(() -> SettingsNav.navigate(this, SettingsNav.Target.USB));
+        }
+        if (swWirelessPref != null) {
+            swWirelessPref.setOnNavClickListener(() -> SettingsNav.navigate(this, SettingsNav.Target.WIRELESS));
+        }
+        if (swDevOptsPref != null) {
+            swDevOptsPref.setOnNavClickListener(() -> SettingsNav.navigate(this, SettingsNav.Target.DEV_OPTIONS));
+        }
+
         // 「打开调试前先杀掉联动应用」：真正的执行在 DebugController 里（所有打开调试的入口统一处理）
         if (swKillPref != null) {
-            // 默认开启：首次安装即勾选（与 DebugController 读取的默认值一致）
-            swKillPref.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .getBoolean(PREF_KILL_BEFORE_OPEN, true));
+            SharedPreferences ksp = getSharedPreferences(PREFS, MODE_PRIVATE);
+            // 只认「用户显式关闭过」这一个信号（PREF_KILL_USER_DISABLED），默认 = 开。
+            // 不从旧键 kill_before_open 反推「以前手动关过」：旧版本在无 kill 权限时会把这个键
+            // 强制写成 false（置灰关掉），反推会把「被强制关」误判成用户意愿，导致升级后
+            // 明明有 root/Shizuku 授权、开关却一直是关的（1.0.4 实测踩到）。
+            killUserDisabled = ksp.getBoolean(PREF_KILL_USER_DISABLED, false);
             swKillPref.setOnPreferenceChangeListener((Preference p, Object v) -> {
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                        .putBoolean(PREF_KILL_BEFORE_OPEN, (Boolean) v).apply();
+                boolean on = (Boolean) v;
+                // 仅在具备 kill 权限（开关可用）时记录用户的手动选择；无权限时开关被强制关闭、
+                // 显示值由 updateKillPrefState 接管，不应把「被强制关」误记成用户意愿。
+                if (swKillPref.isEnabled()) {
+                    killUserDisabled = !on;
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putBoolean(PREF_KILL_USER_DISABLED, killUserDisabled)
+                            .putBoolean(PREF_KILL_BEFORE_OPEN, on).apply();
+                }
                 return true;
             });
         }
@@ -987,7 +985,7 @@ public class MainActivity extends AppCompatActivity {
             final boolean want = (Boolean) v;
             writer.write(want, (ok, s, reason) -> {
                 if (!ok) {
-                    authCheckedThisSession = false;
+                    AuthCoordinator.resetSession();
                     handleWriteFailure(reason);
                 } else if (s == null || field.get(s) != want) {
                     // 命令退出码 0 却没写进去（个别 ROM 会屏蔽该键）：界面只会无声弹回，必须明确告知
@@ -1020,7 +1018,7 @@ public class MainActivity extends AppCompatActivity {
                 // 让主开关与联动项灰掉并显示「未授权」+「重试」，而不是停在旧的「已授权」假象；
                 // 同时提示用户重试或切换授权模式。
                 privilegedAvailable = false;
-                authCheckedThisSession = false;
+                AuthCoordinator.resetSession();
                 applyRootState();
                 handleWriteFailure(reason);
             }
@@ -1092,7 +1090,7 @@ public class MainActivity extends AppCompatActivity {
                 // 而不是停在旧的「已授权」假象，让用户误以为操作成功了。
                 // 同时清掉本周期的授权缓存，下次操作前重新检测（权限可能稍后恢复）。
                 privilegedAvailable = false;
-                authCheckedThisSession = false;
+                AuthCoordinator.resetSession();
                 applyRootState();
                 handleWriteFailure(reason);
             }
@@ -1109,10 +1107,6 @@ public class MainActivity extends AppCompatActivity {
      * @param autoJump 是否为「开启快捷打开后启动本 App」的自动跳转（决定是否弹跳转提示）
      */
     private void runLinkage(String pkg, boolean autoJump) {
-        sLinkageLaunched = true; // 任意来源跳转都记一笔：回来时不再自动跳，避免反复弹回
-        if (autoJump) {
-            sAutoJumped = true; // 区分来源：回设置页时只有自动跳转才提示「启动时已自动跳转」
-        }
         // 从快捷方式冷启动时 onCreate 不会构建设置页（handleEntry 已判定为「自行处理」而跳过 showSettings），
         // 而 setMaster 是异步的、未授权时最坏要等满超时（10s）。若不先建好设置页，这段等待期间界面就是
         // 一个只有 toolbar、内容区空白的主页——表现就是「卡住 / 白屏」。
@@ -1126,23 +1120,30 @@ public class MainActivity extends AppCompatActivity {
             if (!ok) {
                 // 与 toggleMaster / applyMasterState 同规则：写入失败大概率授权失效，立即置灰并重测
                 privilegedAvailable = false;
-                authCheckedThisSession = false;
+                AuthCoordinator.resetSession();
                 applyRootState();
                 Toast.makeText(this, DebugController.failureMessage(this, reason),
                         Toast.LENGTH_SHORT).show();
                 // 未授权：保留已建好的设置页（显示「未授权，无法写入」+ 重试按钮），
                 // 不再静默跳目标应用 / 关掉本页——否则用户既没关成调试、又看不到任何说明（白屏或闪走）。
+                // 注意：本分支未实际跳转，LinkageLauncher 未 markLaunched，下次进页仍可触发自动跳转。
                 return;
             }
             AdbToggleService.syncCloseNotification(this);
             if (!launchApp(pkg)) {
-                // 目标应用已失效（卸载 / 停用）：提示并留在设置页，而不是静默闪回桌面
+                // 目标应用已失效（卸载 / 停用）：提示并留在设置页，而不是静默闪回桌面。
+                // 同样未实际跳转，LinkageLauncher 未 markLaunched，下次进页仍可触发自动跳转。
                 handleLinkageTargetGone(pkg);
                 if (!prefsLoaded) {
                     showSettings();
                 }
                 return;
             }
+            // 仅当「确实成功跳转」后才记一笔：回来时不再自动跳，避免反复弹回。
+            // 旧实现在入口即 markLaunched(true)，写入/启动任一失败时也不回滚，
+            // 导致授权过期这类常见失败会让本进程内自动跳转永久失效（只能杀进程恢复）。
+            // 状态机（含失败不回滚问题的根因消除）已抽到 LinkageLauncher。
+            LinkageLauncher.markLaunched(autoJump);
             if (autoJump) {
                 Toast.makeText(this, R.string.linkage_auto_jumped, Toast.LENGTH_LONG).show();
             }
@@ -1179,6 +1180,59 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable t) {
             return true;
         }
+    }
+
+    // §2.5a：已卸载的快捷应用清理移到后台线程，避免每次 onResume 在主线程做 PM IPC。
+    private static final Object CLEAN_LOCK = new Object();
+    private static final java.util.concurrent.Executor CLEAN_EXEC =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+    private volatile long lastCleanAt = 0;
+
+    /**
+     * 后台线程检测并清理已卸载的快捷应用（§2.5a）。
+     * PM IPC（getApplicationInfo）在后台线程执行，不卡 UI；清理结果回主线程写配置 + 重建列表。
+     * 节流（每 2s 最多一次）+ 生命周期守卫（Activity 销毁后不回主线程操作）。
+     */
+    private void maybeCleanUninstalled() {
+        long now = android.os.SystemClock.uptimeMillis();
+        synchronized (CLEAN_LOCK) {
+            if (now - lastCleanAt < 2000) {
+                return;
+            }
+            lastCleanAt = now;
+        }
+        final List<String> apps = LinkagePrefs.getApps(this);
+        if (apps.isEmpty()) {
+            return;
+        }
+        CLEAN_EXEC.execute(() -> {
+            List<String> removed = new ArrayList<>();
+            for (String p : apps) {
+                if (isAppUninstalled(this, p)) {
+                    removed.add(p);
+                }
+            }
+            if (removed.isEmpty()) {
+                return;
+            }
+            final List<String> finalRemoved = new ArrayList<>(removed);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                for (String r : finalRemoved) {
+                    linkageIconCache.remove(r);
+                }
+                List<String> alive = new ArrayList<>(apps);
+                alive.removeAll(finalRemoved);
+                LinkagePrefs.setApps(this, alive);
+                ToggleShortcuts.markDirty(this); // 默认目标可能随之清掉，动态快捷方式同步
+                if (prefsLoaded) {
+                    rebuildLinkageList();
+                }
+                Toast.makeText(this, R.string.linkage_app_uninstalled, Toast.LENGTH_LONG).show();
+            });
+        });
     }
 
     /**
@@ -1328,6 +1382,12 @@ public class MainActivity extends AppCompatActivity {
             if (swDevOptsPref != null) {
                 swDevOptsPref.setEnabled(true);
             }
+            // 已授权：调试三行恢复为「拨动开关」模式（整行点击切开关）
+            swUsbPref.setNavigateMode(false);
+            swWirelessPref.setNavigateMode(false);
+            if (swDevOptsPref != null) {
+                swDevOptsPref.setNavigateMode(false);
+            }
             // 联动分类下（开关 + 动态填充的默认/应用/管理行）一并启用
             setLinkageEnabled(true);
             // 授权恢复：把主开关行从「未授权，无法写入」改回真实状态文案。
@@ -1337,17 +1397,29 @@ public class MainActivity extends AppCompatActivity {
             swMasterPref.setSummary(R.string.auth_no_priv);
             swMasterPref.setIcon(stateIcon(R.color.error));
             swMasterPref.setEnabled(false);
-            swUsbPref.setEnabled(false);
-            swNotifyPref.setEnabled(false);
-            swWirelessPref.setEnabled(false);
+            // §4.1：「关闭调试后是否弹常驻通知」是纯本地偏好，不依赖写权限，未授权时也不禁用，
+            // 让用户能先把配置配好（执行点击时才会按现有逻辑提示授权）。
+            // 未授权/未激活：调试三行改为「导航模式」——整行点击进入相应设置菜单，开关禁用。
+            // 注意：行本身保持 enabled（可点），仅禁用其中的 Switch 控件；若整行 setEnabled(false)
+            // 会被 framework 屏蔽触摸事件，导致「整行点击」收不到（见 NavSwitchPreference）。
+            swUsbPref.setEnabled(true);
+            swWirelessPref.setEnabled(true);
             if (swDevOptsPref != null) {
-                swDevOptsPref.setEnabled(false);
+                swDevOptsPref.setEnabled(true);
+            }
+            swUsbPref.setNavigateMode(true);
+            swWirelessPref.setNavigateMode(true);
+            if (swDevOptsPref != null) {
+                swDevOptsPref.setNavigateMode(true);
             }
             // 联动分类下所有项一并禁用（无授权则无法写入调试开关，联动也失去意义）
             setLinkageEnabled(false);
         }
         // 实时动态项的可用性只跟系统版本有关，不受授权模式影响
         updateLiveUpdateState();
+        // §3.3：kill 开关可用性由 updateKillPrefState 独占，确保本刷新路径下也被正确置灰/启用
+        // （setLinkageEnabled 已不再触碰 swKillPref）。
+        updateKillPrefState();
     }
 
     /** 联动分类下所有项（开关 + 动态填充的默认 / 应用 / 管理行）一并启用或禁用 */
@@ -1356,8 +1428,14 @@ public class MainActivity extends AppCompatActivity {
         if (cat == null) {
             return;
         }
+        // §3.3：「开启调试自动关闭快捷应用」(swKillPref) 的可用性由 updateKillPrefState 独占判定，
+        // 不该被本批量循环覆盖——否则 Shizuku 可用但 WSS 尚未授权时会出现「整类灰、唯独 kill 可点」。
         for (int i = 0; i < cat.getPreferenceCount(); i++) {
-            cat.getPreference(i).setEnabled(enabled);
+            Preference p = cat.getPreference(i);
+            if (p == swKillPref) {
+                continue;
+            }
+            p.setEnabled(enabled);
         }
     }
 
@@ -1373,27 +1451,9 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         List<String> apps = LinkagePrefs.getApps(this);
-        // 已卸载的快捷应用自动清掉：图标/标签都取不到，留着只会在每次跳转时失败。
-        // 每次回到前台都会走到这里（onResume），故卸载后无需手动整理；
-        // 停用的应用不算（可随时恢复），只在跳转失败时提示。
-        List<String> alive = new ArrayList<>();
-        for (String p : apps) {
-            if (!isAppUninstalled(this, p)) {
-                alive.add(p);
-            }
-        }
-        if (alive.size() != apps.size()) {
-            // 卸载的包从图标缓存里清掉，避免缓存持有已不存在应用的 Drawable
-            for (String removed : apps) {
-                if (!alive.contains(removed)) {
-                    linkageIconCache.remove(removed);
-                }
-            }
-            LinkagePrefs.setApps(this, alive);
-            apps = alive;
-            ToggleShortcuts.markDirty(this); // 默认目标可能随之清掉，动态快捷方式同步
-            Toast.makeText(this, R.string.linkage_app_uninstalled, Toast.LENGTH_LONG).show();
-        }
+        // §2.5a：已卸载的快捷应用清理已移到后台线程（见 maybeCleanUninstalled），此处不再在主线程
+        // 做 PM IPC（getApplicationInfo）。卸载的应用由后台清理异步移除；清理到达前 UI 用
+        // loadAppDrawable / getApplicationLabel 的兜底层显示（图标=本应用、标签=包名），不会崩。
         String def = LinkagePrefs.getDefault(this);
         // 只有一个快捷应用时自动选它为默认（兼容旧数据：早先版本不会自动设默认）
         if (apps.size() == 1 && def.isEmpty()) {
@@ -1578,15 +1638,16 @@ public class MainActivity extends AppCompatActivity {
 
     /** 状态圆点图标（实心圆，随状态变色）；显示尺寸由 pref_row_state 的 20dp 图标框决定，约等于一行文字高。
      *  按 colorRes 缓存复用：refresh 每次都会取多个同色圆点，避免重复 new Drawable。 */
+    /**
+     * 状态圆点：每次返回一个新的 GradientDrawable 实例。
+     * §4.7：旧实现按 colorRes 缓存并跨多行复用同一个 Drawable，多 View 共享会互相覆盖
+     * setBounds，可能导致某行圆点尺寸异常。圆点极小、创建成本可忽略，不复用更稳妥。
+     */
     private GradientDrawable stateIcon(int colorRes) {
-        GradientDrawable d = stateIconCache.get(colorRes);
-        if (d == null) {
-            d = new GradientDrawable();
-            d.setShape(GradientDrawable.OVAL);
-            d.setColor(getResources().getColor(colorRes, getTheme()));
-            d.setSize(40, 40);
-            stateIconCache.put(colorRes, d);
-        }
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.OVAL);
+        d.setColor(getResources().getColor(colorRes, getTheme()));
+        d.setSize(40, 40);
         return d;
     }
 
@@ -1615,15 +1676,37 @@ public class MainActivity extends AppCompatActivity {
         // 设置界面尚未构建（例如调试入口只用 postDelayed 延迟构建）时，
         // 偏好项字段都还是 null，下面的刷新会 NPE，必须先跳过。
         if (!prefsLoaded) {
+            cameFromBackground = false;
             return;
         }
-        // 当前模式未授权时，每次回到前台都重新双检测：用户在别处授权（superuser / Shizuku）后回到本 App 可即时恢复
-        if (!privilegedAvailable) {
-            performAuthCheck();
+        boolean fromBg = cameFromBackground;
+        cameFromBackground = false;
+        // 授权：从后台返回时**一律强制重测**（两个方向都要覆盖，缺一不可）
+        //  (a) 以为未授权 → 用户在 root 管理器 / Shizuku 里刚授了权，回来必须立刻生效。
+        //  (b) 以为已授权 → 授权可能在后台被撤销（root 被关掉、Magisk 里取消授权、
+        //      Shizuku 服务被停 / 撤销授权、pm grant 被 revoke）。旧实现只在 (a) 时重测，
+        //      于是 (b) 会一直显示「已授权」，要等下一次写入失败才被动发现，用户毫无反馈。
+        // 非强制调用会被 AuthCoordinator 的 30s 节流与「本会话已确认」闸门挡住，必须 force。
+        // 代价可控：WSS 仅 checkSelfPermission（零成本）、Shizuku 仅 binder 调用、
+        // root 才 fork 一次 su（已授权时通常瞬间返回；被撤销时正好触发系统授权提示，用户可见）。
+        // 探测在后台线程执行，不阻塞 UI；结果经 AuthResult 回主线程刷新状态与提示。
+        if (fromBg || !privilegedAvailable) {
+            AuthCoordinator.resetSession();
+            performAuthCheck(true);
         }
-        // 每次回到前台都回读真值：可能在别处（通知/磁贴/adb）被改过
+        // 状态（bug4：在系统里关了调试、回到应用却仍显示开启；首次回常错、再回才对）：
+        // 从后台返回时作废缓存、强制用授权通道重读。此前只 refresh(read())——read 命中仍在
+        // 有效期内的缓存（shell 通道 5s）就直接返回旧值，不会重读；而 settingsObserver 在后台
+        // 已被反注册，错过的外部改动无人补偿。invalidateAndRefresh 会把缓存标记为「未校准」、
+        // 清掉节流并立即后台重读，读完经 stateListener 推送 → refresh() 更新 UI。
+        if (fromBg) {
+            DebugController.invalidateAndRefresh(this);
+        }
+        // 先按当前缓存即时渲染（可能仍是旧值），真值读回后由 stateListener 再刷新一次
         refresh(DebugController.read(this));
         rebuildLinkageList();
+        // §2.5a：已卸载快捷应用清理移到后台线程，避免在主线程做 PM IPC
+        maybeCleanUninstalled();
         updateLiveUpdateState();
         // 关于行可能已在后台自动检查后更新（可更新提示），回到前台即时同步
         refreshAboutSummary();
@@ -1634,6 +1717,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        // 记下「离开过前台」：下次 onResume 据此强制重测授权 / 重读状态，
+        // 补偿在后台期间（observer 已反注册）错过的外部改动与授权变化。
+        cameFromBackground = true;
         observeSettings(false);
     }
 
@@ -1720,7 +1806,9 @@ public class MainActivity extends AppCompatActivity {
                             // 不作废的话，切换后 UI 仍按旧缓存渲染，且校准可能被节流挡住导致卡在旧值。
                             DebugController.invalidateAndRefresh(MainActivity.this);
                             // 切换模式后授权状态必变，重置缓存、强制重新检测
-                            authCheckedThisSession = false;
+                            AuthCoordinator.resetSession();
+                            // 旧通道的「杀应用能力」结论对新通道无意义（root 与 Shizuku 是否授权各自独立）
+                            DebugController.clearKillCapability(MainActivity.this);
                             // 重新武装「WSS 未授权自动引导」：切到 WSS 时应当再自动弹一次
                             wssBootstrapShown = false;
                             d.dismiss();
@@ -1757,6 +1845,16 @@ public class MainActivity extends AppCompatActivity {
         }
         Toast.makeText(this, DebugController.failureMessage(this, reason),
                 Toast.LENGTH_SHORT).show();
+        // 授权类失败（没有 su / su 被拒 / Shizuku 没起 / Shizuku 没授权）：说明之前探测到的
+        // 「已授权」已经失效（后台被撤销、root 被关掉、Shizuku 被杀）。此时只弹一句 Toast 不够——
+        // 「授权模式」那一行仍显示已授权、底部也没有常驻重试入口，用户不知道要去重新授权。
+        // 强制重测一次，让状态行变红并恢复底部「重试」提示，与真实授权态对齐。
+        if (reason == RootUtil.REASON_NO_SU || reason == RootUtil.REASON_DENIED
+                || reason == RootUtil.REASON_NO_BINDER
+                || reason == RootUtil.REASON_NO_PERMISSION) {
+            AuthCoordinator.resetSession();
+            performAuthCheck(true);
+        }
     }
 
     /**
@@ -1767,6 +1865,34 @@ public class MainActivity extends AppCompatActivity {
      * 授权粘滞：跨重启 / 软重启保留，仅卸载重装会撤销，故无需重复引导。
      */
     private void showWssBootstrapDialog() {
+        // 默认在弹窗关闭后恢复底部常驻「重试」提示（仍处于未授权时）。
+        // 1.0.4 的 bug：旧 no-arg 版本 onDismiss=null，用户从「重试」重开弹窗后再次关闭，
+        // 既不弹新提示、也没有任何恢复入口，界面彻底静默。改为统一挂恢复回调后，
+        // 「关弹窗 → 出现常驻重试提示 → 点重试 → 重开弹窗」形成闭环，直到授权成功才消失。
+        showWssBootstrapDialog(this::restoreAuthNoticeIfStillUnauthorized);
+    }
+
+    /**
+     * 一次性授权引导弹窗关闭后，若仍处于「WSS 未授权」：恢复底部常驻提示（带「重试」）。
+     * 任何弹窗关闭路径（取消 / 代跑失败 / 从重试重开）都走这里，保证用户始终有恢复入口。
+     * 已授权 / 非 WSS 模式不做事——授权成功后由 {@link #updateAuthStatusUI()} 收起提示。
+     */
+    private void restoreAuthNoticeIfStillUnauthorized() {
+        if (isDestroyed() || isFinishing()) {
+            return;
+        }
+        if (AuthManager.getMode(this) == AuthManager.Mode.SECURE_SETTINGS
+                && !AuthManager.hasWriteSecureSettings(this)) {
+            showAuthNotice(AuthManager.Mode.SECURE_SETTINGS, false, RootUtil.RootStatus.DENIED);
+        }
+    }
+
+    /**
+     * 弹出一次性授权引导弹窗。
+     * @param onDismiss 弹窗消失后的回调（用于 §4.4：弹窗优先，消失后再显示底部 Snackbar 常驻入口）；
+     *                  为 null 时（如代跑失败重显）不额外做事。
+     */
+    private void showWssBootstrapDialog(Runnable onDismiss) {
         final String cmd = AuthManager.grantCommand(this);
         android.view.View v = getLayoutInflater()
                 .inflate(R.layout.dialog_auth_bootstrap, null);
@@ -1800,6 +1926,9 @@ public class MainActivity extends AppCompatActivity {
         }
         v.findViewById(R.id.btn_wss_copy).setOnClickListener(x -> copyToClipboard(cmd));
         v.findViewById(R.id.btn_wss_cancel).setOnClickListener(x -> dialog.dismiss());
+        if (onDismiss != null) {
+            dialog.setOnDismissListener(d -> onDismiss.run());
+        }
         dialog.show();
     }
 
@@ -1837,7 +1966,7 @@ public class MainActivity extends AppCompatActivity {
                     // 用户没有补救入口——直接重显引导弹窗，换一条路或取消。
                     showWssBootstrapDialog();
                 }
-                authCheckedThisSession = false;
+                AuthCoordinator.resetSession();
                 DebugController.invalidateAndRefresh(MainActivity.this);
                 performAuthCheck(true);
                 updateAuthStatusUI();
@@ -1875,6 +2004,53 @@ public class MainActivity extends AppCompatActivity {
                             getResources().getColor(R.color.error, getTheme())),
                     0, sp.length(), SpannableString.SPAN_INCLUSIVE_INCLUSIVE);
             authPref.setSummary(sp);
+        }
+        updateKillPrefState();
+    }
+
+    /**
+     * 「开启调试自动关闭快捷应用」开关的可用性判定与展示（§3.3 + 1.0.4 修正）：
+     * 能否真正关闭其他应用 = 「可写调试开关」(privilegedAvailable) 且「可杀进程（Shizuku 或 root）」。
+     * 体验（按用户澄清的口径）：
+     *  - 有 kill 权限：默认开启；仅当用户此前手动关闭过（{@code killUserDisabled}）才保持关闭。
+     *    免 root 模式下若同时具备 root/Shizuku 授权，同样可以关闭——旧文案错写成「免 root 模式不行」。
+     *  - 无 kill 权限（纯免 root 且 root/Shizuku 皆不可用）：直接关掉并置灰，文案说明原因；
+     *    显示值由本方法接管，不写用户偏好，以便权限回来后恢复默认开。
+     */
+    private void updateKillPrefState() {
+        if (swKillPref == null) {
+            return;
+        }
+        // 授权结论还没回来：保持布局默认值（开），不要先按「无权限」关掉再变回来
+        if (!authProbeDone) {
+            return;
+        }
+        boolean shizukuOk = ShizukuUtil.available();
+        boolean canKill = privilegedAvailable
+                && (shizukuOk || DebugController.isRootCapable());
+        if (canKill) {
+            swKillPref.setEnabled(true);
+            boolean wantOn = !killUserDisabled;
+            swKillPref.setChecked(wantOn);
+            // 显示值必须与实际执行值一致：DebugController 只认 kill_before_open。
+            // 若历史数据残留 false 而界面显示「开」，就会出现「开关开着却不杀应用」的错位
+            // （控件 persistent=false 不会自己落盘，只能在这里显式对齐）。
+            SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+            if (sp.getBoolean(PREF_KILL_BEFORE_OPEN, true) != wantOn) {
+                sp.edit().putBoolean(PREF_KILL_BEFORE_OPEN, wantOn).apply();
+            }
+            // 免 root 模式不 fork su 探测（避免弹 Magisk 授权框），root 侧能力靠「上次真实执行结果」
+            // 判定：上次被拒过就在这里明说，而不是继续显示一切正常、实际静默失败。
+            // 开关保持可拨：用户补好授权后下次开调试会重试，成功即自动恢复为正常文案。
+            boolean rootDenied = !shizukuOk
+                    && DebugController.killCapability(this) == DebugController.KILL_CAP_DENIED;
+            swKillPref.setSummary(rootDenied
+                    ? R.string.kill_before_open_sum_last_failed
+                    : R.string.kill_before_open_sum);
+        } else {
+            swKillPref.setEnabled(false);
+            swKillPref.setChecked(false);
+            swKillPref.setSummary(R.string.kill_before_open_sum_nocap);
         }
     }
 
@@ -2239,6 +2415,11 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         try {
             DebugController.removeStateListener(stateListener);
+        } catch (Throwable ignored) {
+        }
+        // §4.7：移除「写入在途」监听，避免静态表持有旧 Activity 实例
+        try {
+            DebugController.removeBusyListener(busyListener);
         } catch (Throwable ignored) {
         }
         // Shizuku 监听成对移除：其监听表是静态的，桌面快捷方式（CLEAR_TASK）会反复重建本 Activity，

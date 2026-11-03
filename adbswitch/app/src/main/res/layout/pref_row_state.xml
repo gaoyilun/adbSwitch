@@ -56,6 +56,24 @@
 
     </LinearLayout>
 
+    <!-- 导航箭头「›」：位于开关左侧。点击（或长按整行）跳转到系统对应设置项
+         （USB/无线/开发者选项深链）。默认 gone —— 仅调试三行用的 NavSwitchPreference
+         在注入导航监听后才显示并接线，主开关行（MasterSwitchPreference 复用本布局）不会出现多余箭头。 -->
+    <ImageButton
+        android:id="@+id/nav_chevron"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="8dp"
+        android:layout_gravity="center_vertical"
+        android:background="?android:attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_chevron_right"
+        android:tint="?attr/colorOnSurfaceVariant"
+        android:contentDescription="@string/nav_chevron_desc"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@android:id/widget_frame"
         android:layout_width="wrap_content"

@@ -29,7 +29,7 @@ import java.nio.charset.StandardCharsets;
  *   两个通道都成功且无更新 → 返回 hasUpdate=false，调用方写入节流时间戳；
  *   两个通道都失败 → 抛异常，调用方**不写**节流，下次启动重试（弱网用户不该被节流 3 天）。
  *
- * 当前 {@link UpdateConfig#ENABLED} 为 false，本类一次网络请求都不会发。
+ * 当前 {@link UpdateConfig#ENABLED} 为 true，GitHub 主通道已硬编码激活；仅在 {@link #isActive()} 判定通道就绪时才发请求。
  */
 public final class UpdateChecker {
 

@@ -1,5 +1,7 @@
 package com.elleng.adbswitch;
 
+import com.elleng.adbswitch.util.ShizukuUtil;
+
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -45,7 +47,7 @@ import java.util.concurrent.Executors;
  *    合并后响应快数倍，也顺带把通知/磁贴 goAsync 的 8s 窗口压力降到最低。
  *  - 单线程 IO 执行器按操作键去重合并：同一键在途时，新请求只记「最新一次」，
  *    在途任务完成后用最新参数再跑一次，避免快速连点把队列塞满或在途重复写。
- *  - 状态变化改用进程内 listener 注册表（App 单进程，隐式广播纯开销），不再发 ACTION_STATE。
+ *  - 状态变化改用进程内 listener 注册表（App 单进程，隐式广播纯开销）。
  */
 public final class DebugController {
 
@@ -55,15 +57,6 @@ public final class DebugController {
     public interface StateListener {
         void onStateChanged(State s);
     }
-
-    /** 状态变化广播的遗留 action（仅供外部兼容参考，App 内已改用 {@link #addStateListener}） */
-    public static final String ACTION_STATE = "com.elleng.adbswitch.ACTION_STATE";
-    public static final String EXTRA_USB = "extra_usb";
-    public static final String EXTRA_WIRELESS = "extra_wireless";
-    /** 开发者选项入口是否开启（独立开关，不参与 EXTRA_ON 的判定） */
-    public static final String EXTRA_DEV = "extra_dev";
-    /** 聚合状态：usb || wireless，即 adbd 是否在跑 */
-    public static final String EXTRA_ON = "extra_on";
 
     /** 三个被管理的 Settings.Global 键（监听 URI 与读写都复用，避免散落字符串字面量） */
     public static final String KEY_USB = "adb_enabled";
@@ -100,6 +93,17 @@ public final class DebugController {
     private static final String LAST_USB = "last_usb";
     private static final String LAST_WIRELESS = "last_wireless";
     private static final String LAST_DEV = "last_dev";
+    /**
+     * 「开启调试自动关闭快捷应用」的**真实执行结果**（三态持久化）：
+     * 无此键 = 从未执行过（未知）；true = 上次执行成功；false = 上次因授权问题失败。
+     *
+     * <p>为什么缓存执行结果、而不是缓存「su 是否已授权」这个探测结论：探测结论必须 fork 一次
+     * su 才知道，而免 root 是默认模式、绝大多数用户根本没有 root —— 为了这个开关的置灰状态
+     * 就在启动 / 回前台 fork su，会在装了 Magisk 但没给本应用授权的设备上弹授权框、最坏阻塞
+     * 10s（这是 1.0.4 明确修掉的打扰）。而「自动关闭快捷应用」本来就要真跑一次 su / Shizuku，
+     * 顺手把这个结果记下来零额外成本，且它就是用户实际关心的那个结论。
+     */
+    private static final String KILL_CAPABLE = "kill_capable";
     /** 本会话是否已确认过真值（缓存失效不清它）：用于「启动窗口期屏蔽操作」 */
     private static volatile boolean confirmedThisSession = false;
 
@@ -127,6 +131,24 @@ public final class DebugController {
         /** 两个都关 → adbd stopped → 通过检测（不含 dev） */
         public boolean allOff() {
             return !usb && !wireless;
+        }
+
+        /** §2.4：状态比较用于「无变化不重复广播」，避免 UI 重绘 / 快捷方式重发 / 通知重绘 */
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof State)) return false;
+            State s = (State) o;
+            return usb == s.usb && wireless == s.wireless && dev == s.dev;
+        }
+
+        @Override
+        public int hashCode() {
+            int h = 17;
+            h = 31 * h + (usb ? 1 : 0);
+            h = 31 * h + (wireless ? 1 : 0);
+            h = 31 * h + (dev ? 1 : 0);
+            return h;
         }
     }
 
@@ -186,10 +208,28 @@ public final class DebugController {
         return c.state;
     }
 
-    /** 当前通道的缓存有效期：WSS 直读亚毫秒，可用更短阈值（磁贴连点时状态更跟手） */
+    /**
+     * 冷启动预热（§2.5b）：把「上次经授权通道确认过的状态」先读进内存缓存，
+     * 使首帧 {@link #read} 直接命中缓存、不再做 SharedPreferences 磁盘 I/O。
+     * 只做本地读（{@link #lastKnownState}），不触发后台 fork 校准，避免 Application.onCreate
+     * 早期副作用；首屏仍会由 triggerRefresh 正常校准。
+     */
+    public static void warmUp(Context ctx) {
+        if (cache == null) {
+            cache = new Snapshot(lastKnownState(ctx.getApplicationContext()), 0);
+        }
+    }
+
+    /**
+     * 当前通道的缓存有效期：按「本次读是否会 fork 进程」取阈值，而不是按配置的模式名（§2.2）。
+     * 非 WSS 模式必然走 su / Shizuku shell（fork）；WSS 模式下只有 Shizuku 可用时才走 shell 读，
+     * 否则走 ContentResolver 直读（亚毫秒、不 fork）。旧实现只按 getEffectiveMode==SECURE_SETTINGS
+     * 给短阈值，让 WSS+Shizuku 设备用 STALE_MS_WSS 短阈值却付 shell 代价，校准频率虚高 3 倍多。
+     */
     private static long staleMs(Context ctx) {
-        return AuthManager.getEffectiveMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
-                ? STALE_MS_WSS : STALE_MS_SHELL;
+        boolean willFork = AuthManager.getEffectiveMode(ctx) != AuthManager.Mode.SECURE_SETTINGS
+                || ShizukuUtil.available();
+        return willFork ? STALE_MS_SHELL : STALE_MS_WSS;
     }
 
     /** 后台用授权通道校准真值并通知 listener（主线程安全，内部已节流） */
@@ -205,6 +245,7 @@ public final class DebugController {
             return; // 节流
         }
         lastRefreshReqAt = now;
+        // §2.1：校准读走独立执行器 CALIBRATE，不再与写入共用单线程 IO（见 CALIBRATE 注释）。
         // 纯 WSS 无 shell 兜底：ContentResolver 回读被 ROM 隐藏/欺骗（HyperOS 上尤甚），
         // 若跑授权通道校准，会用假值污染本地持久化状态（lastKnownState）与缓存，导致 UI
         // 与写入自相矛盾（读显示错、写后又被假回读打回）。这种模式下信任「上次确认状态」
@@ -213,7 +254,7 @@ public final class DebugController {
             confirmedThisSession = true;
             return;
         }
-        IO.execute(() -> {
+        CALIBRATE.execute(() -> {
             State s = readViaPrivileged(app);
             if (s != null) {
                 cache = new Snapshot(s, android.os.SystemClock.uptimeMillis());
@@ -340,21 +381,29 @@ public final class DebugController {
      * 应用写 adb_enabled / adb_wifi_enabled 直接静默丢弃且不抛错，putInt 的 void 返回会
      * 让调用方误以为写成功了。返回 false → 标记 REASON_WRITE_DROPPED（如实告知而非静默弹回）。
      */
-    private static void putWss(Context ctx, String key, int val) {
+    /**
+     * WSS 直写单个键（无需 root / Shizuku）。
+     * 返回本次写入的失败原因（RootUtil.REASON_*，成功为 REASON_NONE）；§3.2 起 reason
+     * 随返回值走，不再经全局 lastFailReason 传递。为兼容诊断接口 lastFailReason() 仍同步写一次全局。
+     */
+    private static int putWss(Context ctx, String key, int val) {
+        int reason;
         try {
             boolean written = Settings.Global.putString(
                     ctx.getContentResolver(), key, Integer.toString(val));
             if (!written) {
                 android.util.Log.w(TAG, "wss put " + key + "=" + val
                         + " not written (dropped by ROM)");
-                lastFailReason = RootUtil.REASON_WRITE_DROPPED;
+                reason = RootUtil.REASON_WRITE_DROPPED;
             } else {
-                lastFailReason = RootUtil.REASON_NONE;
+                reason = RootUtil.REASON_NONE;
             }
         } catch (Throwable t) {
             android.util.Log.w(TAG, "wss put " + key + " failed", t);
-            lastFailReason = RootUtil.REASON_EXEC;
+            reason = RootUtil.REASON_EXEC;
         }
+        lastFailReason = reason; // 诊断保留：lastFailReason() 仍可反映最近一次
+        return reason;
     }
 
     /**
@@ -404,15 +453,16 @@ public final class DebugController {
     /** WSS 模式写单个键（含写后回读）；opening 且 Shizuku 可用时先经 Shizuku 杀联动应用 */
     private static WriteResult writeKeyWss(Context ctx, String key, boolean on, boolean kill) {
         if (kill) {
-            killLinkageViaShizuku(ctx, on);
+            killLinkageIfNeeded(ctx, on);
         }
         boolean trustOnly = wssTrustWriteOnly(ctx);
         // 纯 WSS 无 shell 兜底时，before 也用本地持久化的「上次确认状态」（回读被隐藏不可信）
         State before = trustOnly ? lastKnownState(ctx) : readViaShellOrWss(ctx);
-        putWss(ctx, key, on ? 1 : 0);
+        int reason = putWss(ctx, key, on ? 1 : 0);
         lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
         WriteResult w = new WriteResult();
-        w.ok = (lastFailReason == RootUtil.REASON_NONE);
+        w.ok = (reason == RootUtil.REASON_NONE);
+        w.reason = reason;
         if (trustOnly) {
             // 纯 WSS 无 shell 兜底：ContentResolver 回读被 ROM 隐藏/欺骗，写后不回读，直接信任写入。
             // putString 返回 true（且未抛错）→ 按期望值提交；返回 false（静默丢弃）/ 抛错 → 拒绝提交，
@@ -447,26 +497,34 @@ public final class DebugController {
         boolean trustOnly = wssTrustWriteOnly(ctx);
         State before = trustOnly ? lastKnownState(ctx)
                 : (knownBefore != null ? knownBefore : readViaShellOrWss(ctx));
-        killLinkageViaShizuku(ctx, on);
+        killLinkageIfNeeded(ctx, on);
         boolean tUsb = on ? saved.usb : false;
         boolean tWifi = on && wirelessSupported() ? saved.wireless : false;
         boolean wroteAny = false;
-        if (before == null || before.usb != tUsb) {
-            putWss(ctx, KEY_USB, tUsb ? 1 : 0);
+        int reason = RootUtil.REASON_NONE;
+        // 关闭（!on）时**强制写两个键为 0**，不参与「与 before 相同就跳过」的 diff 优化：
+        // 纯 WSS 无 shell 兜底时 before 来自持久化的「上次确认状态」，可能已过期（例如调试在别处
+        // 被打开、或上次写入被 ROM 静默丢弃后又记为成功）。若按过期 before 判定「已是目标态」而
+        // 跳过写入，就会出现「关调试成功」（回调 ok=true、界面/快捷方式照常跳转）但系统里调试其实
+        // 还开着——正是用户反馈的「桌面快捷方式只跳转、不关调试」。关闭不是高频操作，多写一次
+        // Binder 的代价可忽略，换来的是「关就必须真关」的确定性。
+        if (!on || before == null || before.usb != tUsb) {
+            reason = putWss(ctx, KEY_USB, tUsb ? 1 : 0);
             wroteAny = true;
         }
-        if (before == null || before.wireless != tWifi) {
-            putWss(ctx, KEY_WIRELESS, tWifi ? 1 : 0);
+        if (!on || before == null || before.wireless != tWifi) {
+            reason = putWss(ctx, KEY_WIRELESS, tWifi ? 1 : 0);
             wroteAny = true;
         }
         if (!wroteAny) {
             // 两个键都已是目标态（无需写入 = 成功）：别让上一次操作的失败原因污染本次结论
-            lastFailReason = RootUtil.REASON_NONE;
+            reason = RootUtil.REASON_NONE;
         }
         lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
         MasterMerge m = new MasterMerge();
         m.before = before;
-        m.wrote = (lastFailReason == RootUtil.REASON_NONE);
+        m.reason = reason;
+        m.wrote = (reason == RootUtil.REASON_NONE);
         if (!m.wrote) {
             // 写入失败：拒绝提交（与 shell 路径同一条不变式——写失败绝不污染状态缓存）
             m.after = null;
@@ -482,8 +540,8 @@ public final class DebugController {
         return m;
     }
 
-    /** 从合并 shell 输出里按标记行解析出三个键的真值；标记行缺失返回 null */
-    private static State parseState(String out, String pU, String pW, String pD) {
+    /** 从合并 shell 输出里按标记行解析出三个键的真值；标记行缺失返回 null。包级可见以便纯逻辑单测（§3.5） */
+    static State parseState(String out, String pU, String pW, String pD) {
         if (out == null) {
             return null;
         }
@@ -553,10 +611,10 @@ public final class DebugController {
     /**
      * 最近一次经授权通道执行的失败原因（RootUtil.REASON_*，成功时为 REASON_NONE）。
      *
-     * 只在单线程 IO 执行器里写、在紧随其后的回调里读，因此不需要额外同步：
-     * 写路径是「runPrivileged → 解析 → 回调」一条直线，中间不会再跑别的通道调用。
-     * 用途是把「没装 su / root 未授权 / Shizuku 没启动 / Shizuku 没授权 / 超时 / 命令失败」
-     * 区分开传给 UI，而不是让所有失败都显示同一句「执行失败」。
+     * 诊断用途（§3.2 起）：失败原因已改为随 WriteResult / MasterMerge 返回值走，并在回调签名
+     * {@link #ResultCallback#onResult} 里显式带出，不再依赖这个跨线程全局静态 —— 否则 §2.1
+     * 把校准读拆到独立执行器后会放大线程归属问题，且两次快操作间 UI 可能读到上一次失败的 reason。
+     * 本字段仅保留作「最近一次」诊断，由 putWss / runPrivileged 同步写入。
      */
     private static volatile int lastFailReason = RootUtil.REASON_NONE;
 
@@ -616,7 +674,21 @@ public final class DebugController {
         void onResult(boolean ok, State state, int reason);
     }
 
+    /**
+     * 写入执行器：单线程串行，配合同键去重合并（enqueue），保证一条 su / 一次 Shizuku shell
+     * 在途期间不会再有第二条同键写插进来把队列塞满；不同键之间虽然各自排队，但单线程下仍串行执行。
+     */
     private static final Executor IO = Executors.newSingleThreadExecutor();
+    /**
+     * §2.1：后台校准读专用执行器，与写入执行器（IO）分离。
+     *
+     * 旧实现校准读与写入共用同一条单线程 IO：一次 su 挂到 10s 超时期间，所有后台状态校准任务
+     * 排在写任务后面，导致磁贴 / 通知 / 设置页的状态显示整体滞后（而校准本身是 UI 反馈的来源）。
+     * 现把校准读单独放到 CALIBRATE，写入仍走 IO 单线程串行。两者都是单线程，cache 的 Snapshot
+     * 更新是原子赋值（volatile）、无并发撕裂；校准与写入并发读写的内容解析器/进程彼此独立，
+     * 没有需要互斥的共享可变状态（lastFailReason 仅诊断用途，见 §3.2）。
+     */
+    private static final Executor CALIBRATE = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     /**
@@ -624,28 +696,73 @@ public final class DebugController {
      * 新请求只记「最新一次」，在途任务完成后用最新参数再跑一次，避免快速连点把队列塞满
      * 或在途重复写。不同键之间互不影响（可并行排队，但执行器是单线程，仍串行执行）。
      *
-     * INFLIGHT / PENDING 的复合操作（add+put、remove+take）必须在同一把锁内完成：
-     * 旧实现在 finally 里先 INFLIGHT.remove 再查 PENDING，两者之间存在窗口期——
-     * 若新请求刚好在该窗口内「add 失败 → 尚未 put」，它的任务就永远不会被拾起，
-     * 表现为开关静默失效一次。加锁后「同键至多一条在途 + 一条待办」是不变量。
+     * 关键修正：去重判定必须在**提交侧（调用线程）**完成，而不是写在 IO 任务体内——
+     * 旧实现把 INFLIGHT.add 放在 IO.execute 的任务体里，而执行器是单线程，第二个同键任务
+     * 提交后只是排队，等第一个跑完（finally 已 INFLIGHT.remove）才开始执行，此时 add 必然
+     * 成功、PENDING 分支永远不可达，结果「连点 N 次 = N 次串行 shell 往返」，去重完全失效。
+     * 现改为：提交侧 synchronized 内先查 INFLIGHT，命中就把最新 Runnable 记进 PENDING 并直接
+     * return（不提交新任务）；未命中才加锁占有 INFLIGHT 并提交一次 IO 任务。真正执行只在持有
+     * INFLIGHT 的那一条 IO 任务里发生，收尾时拾取 PENDING 的最新参数接着跑。
      */
     private static final java.util.Set<String> INFLIGHT =
             java.util.Collections.newSetFromMap(new ConcurrentHashMap<>());
     private static final java.util.Map<String, Runnable> PENDING = new ConcurrentHashMap<>();
     private static final Object ENQUEUE_LOCK = new Object();
 
+    /**
+     * §4.7 写入在途冻结：单线程 IO 执行器下，busy = INFLIGHT 非空。
+     * UI 订阅 {@link #addBusyListener} 后在写任务排队期间冻结主开关，给出明确反馈
+     * （不再停在旧值、连发 Toast 无所适从）。busy 只在「由空变非空 / 由非空变空」时通知，
+     * 避免每次提交都刷 UI。
+     */
+    private static volatile boolean sBusy = false;
+    private static final java.util.List<Runnable> BUSY_LISTENERS =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public static boolean isBusy() {
+        return sBusy;
+    }
+
+    public static void addBusyListener(Runnable r) {
+        BUSY_LISTENERS.add(r);
+    }
+
+    public static void removeBusyListener(Runnable r) {
+        BUSY_LISTENERS.remove(r);
+    }
+
+    private static void setBusy(boolean b) {
+        if (sBusy != b) {
+            sBusy = b;
+            for (Runnable r : BUSY_LISTENERS) {
+                try {
+                    r.run();
+                } catch (Throwable ignored) {
+                    // 单个监听抛错不影响其它消费者
+                }
+            }
+        }
+    }
+
     private static void enqueue(String key, Runnable task) {
+        boolean submit;
+        synchronized (ENQUEUE_LOCK) {
+            if (INFLIGHT.contains(key)) {
+                // 同键已有任务在途：只记最新一次（覆盖中间态），由在途任务收尾时拾起，不再提交
+                PENDING.put(key, task);
+                return;
+            }
+            INFLIGHT.add(key);
+            submit = true;
+        }
+        if (!submit) {
+            return;
+        }
+        // §4.7：有任务在途，立刻冻结 UI 开关（仅在由空变非空时通知）
+        setBusy(!INFLIGHT.isEmpty());
         IO.execute(() -> {
             Runnable current = task;
             while (true) {
-                synchronized (ENQUEUE_LOCK) {
-                    if (!INFLIGHT.add(key)) {
-                        // 同键已有任务在途：只记最新一次（覆盖中间态），由在途任务收尾时拾起
-                        PENDING.put(key, current);
-                        return;
-                    }
-                }
-                Runnable next = null;
                 try {
                     current.run();
                 } catch (Throwable t) {
@@ -654,18 +771,24 @@ public final class DebugController {
                     android.util.Log.e(TAG, "enqueued task crashed", t);
                 } finally {
                     synchronized (ENQUEUE_LOCK) {
-                        INFLIGHT.remove(key);
-                        next = PENDING.remove(key);
-                        if (next != null) {
-                            // 锁内把 key 放回在途集，再出锁执行：消除 remove 与拾取之间的窗口
-                            INFLIGHT.add(key);
+                        Runnable next = PENDING.remove(key);
+                        if (next == null) {
+                            // 没有待办：释放在途标记，当前任务线结束
+                            INFLIGHT.remove(key);
+                            current = null;
+                            // 全空则解除 busy 冻结（仅在由非空变空时通知）
+                            if (INFLIGHT.isEmpty()) {
+                                setBusy(false);
+                            }
+                        } else {
+                            // 有最新待办：用最新参数接着跑（不重新入队，避免再多一次调度）
+                            current = next;
                         }
                     }
                 }
-                if (next == null) {
+                if (current == null) {
                     return;
                 }
-                current = next; // 用最新参数接着跑（不重新入队，避免再多一次调度）
             }
         });
     }
@@ -683,9 +806,21 @@ public final class DebugController {
         LISTENERS.remove(l);
     }
 
-    /** 广播当前完整状态（读真值，不传参，保证各消费者看到的都是最新），并通知各 listener */
+    /** 上一次广播出去的状态（用于「无变化不重复通知」，见 §2.4） */
+    private static volatile State lastBroadcast = null;
+
+    /**
+     * 广播当前完整状态（读真值，不传参，保证各消费者看到的都是最新），并通知各 listener。
+     * §2.4：状态没变则不重复通知——UI 重绘、快捷方式重发、通知重绘都省。
+     * 首次（lastBroadcast==null）必定通知；写回弹 / 校准等场景若状态未变，跳过无害
+     * （UI 本就显示该值）。消费者首帧由各自主线程 read() 渲染，不依赖 broadcast。
+     */
     public static State broadcast(Context ctx) {
         State s = read(ctx);
+        if (lastBroadcast != null && lastBroadcast.equals(s)) {
+            return s;
+        }
+        lastBroadcast = s;
         final State fs = s;
         MAIN.post(() -> {
             for (StateListener l : new java.util.ArrayList<>(LISTENERS)) {
@@ -707,8 +842,9 @@ public final class DebugController {
      */
     public static void setMaster(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        if (blockedByMissingGrant(app)) {
-            failWithoutWrite(app, cb);
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
             return;
         }
         enqueue("master", () -> setMasterBlocking(app, on, cb));
@@ -723,14 +859,15 @@ public final class DebugController {
      */
     public static void toggleMaster(Context ctx, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        if (blockedByMissingGrant(app)) {
-            failWithoutWrite(app, cb);
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
             return;
         }
         enqueue("master", () -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
-                failWithoutWrite(app, cb);
+                failWithoutWrite(app, cb, lastFailReason());
                 return;
             }
             // 把刚读到的真值传下去：WSS 路径直接复用，不必再走一次 100~500ms 的 shell 读
@@ -759,7 +896,7 @@ public final class DebugController {
                     + " (write failed or readback invalid)");
             broadcast(app); // 让各消费者按未污染状态回弹
             if (cb != null) {
-                final int reason = lastFailReason;
+                final int reason = m.reason;
                 MAIN.post(() -> cb.onResult(false, last, reason));
             }
             return;
@@ -770,7 +907,7 @@ public final class DebugController {
         }
         State s = commitAfter(app, m.after);
         if (cb != null) {
-            final int reason = lastFailReason;
+            final int reason = m.reason;
             MAIN.post(() -> cb.onResult(m.wrote, s, reason));
         }
         // WSS 路径的「写后态」是信任写结果算出的期望值（没走 shell 回读）：shell 兜底可用时
@@ -828,6 +965,7 @@ public final class DebugController {
         m.before = parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
         m.after = parseState(r.out, TAG_USB_A, TAG_WIFI_A, TAG_DEV_A);
         m.wrote = r.ok();
+        m.reason = r.reason;
         return m;
     }
 
@@ -848,6 +986,7 @@ public final class DebugController {
         lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
         WriteResult w = new WriteResult();
         w.ok = r.ok();
+        w.reason = r.reason;
         w.after = parseState(r.out, TAG_USB_A, TAG_WIFI_A, TAG_DEV_A);
         return w;
     }
@@ -893,17 +1032,110 @@ public final class DebugController {
     }
 
     /**
-     * WSS 模式下「开启调试前杀联动应用」：借 Shizuku 代跑 am force-stop。
-     * shell 模式已把杀进程合并进同一条命令（省一次 fork），不走这里；
-     * 没有 Shizuku 时静默跳过（纯 WSS 设备没有 shell 能力，见 README「已知限制」）。
+     * 「开启调试前杀联动应用」的可用通道能力（由 MainActivity 在授权检测时填充）。
+     * 免 root 模式下 UI 线程不能 fork su，故 root 可用性由后台线程的 performAuthCheck
+     * 探测后写到这里；Shizuku 可用性则运行时现查（廉价、线程安全）。
      */
-    private static void killLinkageViaShizuku(Context ctx, boolean opening) {
-        if (!opening || !ShizukuUtil.available()) {
+    private static volatile boolean sRootCapable = false;
+    static void setRootCapable(boolean v) { sRootCapable = v; }
+    static boolean isRootCapable() { return sRootCapable; }
+
+    /** 杀应用能力缓存的三态取值 */
+    static final int KILL_CAP_UNKNOWN = 0;
+    static final int KILL_CAP_OK = 1;
+    static final int KILL_CAP_DENIED = 2;
+
+    /** 上次「自动关闭快捷应用」的真实结果（未知 / 成功 / 授权失败），跨启动保留。 */
+    static int killCapability(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!sp.contains(KILL_CAPABLE)) {
+            return KILL_CAP_UNKNOWN;
+        }
+        return sp.getBoolean(KILL_CAPABLE, true) ? KILL_CAP_OK : KILL_CAP_DENIED;
+    }
+
+    /** 记录一次真实执行结果（成功 / 授权失败），供免 root 模式下把开关显示与实际对齐。 */
+    static void setKillCapable(Context ctx, boolean ok) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(KILL_CAPABLE, ok).apply();
+    }
+
+    /** 切换授权模式后旧结论作废（另一条通道的能力与是否授权都不同）。 */
+    static void clearKillCapability(Context ctx) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .remove(KILL_CAPABLE).apply();
+    }
+
+    /** 最近一次「开启调试」是否因 Shizuku/root 皆不可用而未能杀联动应用（供 UI 一次性提示） */
+    private static volatile boolean sKillSkipped = false;
+    static boolean consumeKillSkipped() {
+        boolean v = sKillSkipped;
+        sKillSkipped = false;
+        return v;
+    }
+
+    /**
+     * 最近一次杀应用是否「有通道但授权被拒 / 已撤销」（区别于 {@link #sKillSkipped} 的「根本没有通道」）。
+     * 两类失败的处理办法不同：前者要回到 root 管理器 / Shizuku 里补授权，后者只能换模式或装 root，
+     * 所以提示文案必须分开，否则用户不知道该往哪走。
+     */
+    private static volatile boolean sKillDenied = false;
+    static boolean consumeKillDenied() {
+        boolean v = sKillDenied;
+        sKillDenied = false;
+        return v;
+    }
+
+    /**
+     * 「开启调试前杀联动应用」：按可用通道代跑 am force-stop。
+     *  - Shizuku 可用：借 Shizuku（shell uid 2000）；
+     *  - 否则若设备有 root（sRootCapable）：借 su；
+     *  - 两者皆无（纯免 root 模式、Shizuku/root 均不可用）：杀不掉，置 sKillSkipped 让 UI 告知，
+     *    不再像旧实现那样静默吞掉（用户完全不知情）。
+     * shell 模式把杀进程合并进同一条命令（省一次 fork），不走这里。
+     */
+    private static void killLinkageIfNeeded(Context ctx, boolean opening) {
+        if (!opening) {
             return;
         }
         String k = killScriptFor(ctx, true);
-        if (k != null && !k.isEmpty()) {
-            ShizukuUtil.run(k);
+        if (k == null || k.isEmpty()) {
+            return;
+        }
+        if (ShizukuUtil.available()) {
+            recordKillResult(ctx, ShizukuUtil.run(k));
+        } else if (sRootCapable) {
+            recordKillResult(ctx, RootUtil.su(k));
+        } else {
+            android.util.Log.w(TAG, "kill linkage skipped: neither Shizuku nor root available");
+            sKillSkipped = true;
+        }
+    }
+
+    /**
+     * 记录「自动关闭快捷应用」的真实执行结果（见 {@link #KILL_CAPABLE}）。
+     *
+     * <p>旧实现把 {@code su / ShizukuUtil.run} 的返回值直接丢弃，于是免 root 模式下
+     * 「su 二进制存在但从未授权」时：开关按 {@link RootUtil#suBinaryExists()} 乐观显示为可用，
+     * 真到开调试却静默失败——快捷应用照样读到调试态，用户毫不知情。这里把授权类失败
+     * 也接到 {@link #sKillSkipped} 上，让 UI 明确提示；成功则记住，之后显示就是准的。
+     *
+     * <p>EXEC / TIMEOUT 不是授权问题（ROM 拦截 / 卡住），不动缓存，避免把偶发故障记成「没权限」。
+     */
+    private static void recordKillResult(Context ctx, RootUtil.Result r) {
+        if (r == null) {
+            return;
+        }
+        if (r.ok()) {
+            setKillCapable(ctx, true);
+            return;
+        }
+        if (r.reason == RootUtil.REASON_DENIED || r.reason == RootUtil.REASON_NO_SU
+                || r.reason == RootUtil.REASON_NO_BINDER
+                || r.reason == RootUtil.REASON_NO_PERMISSION) {
+            android.util.Log.w(TAG, "kill linkage denied (reason=" + r.reason + ")");
+            setKillCapable(ctx, false);
+            sKillDenied = true;
         }
     }
 
@@ -939,12 +1171,11 @@ public final class DebugController {
         return cmd.toString();
     }
 
-    /** 读不到真值、拒绝执行时统一收口：回传失败 + 当前缓存，让 UI 提示重试/切换模式并保持一致 */
-    private static void failWithoutWrite(Context app, ResultCallback cb) {
+    /** 读不到真值、拒绝执行时统一收口：回传失败原因 + 当前缓存，让 UI 提示重试/切换模式并保持一致 */
+    private static void failWithoutWrite(Context app, ResultCallback cb, int reason) {
         State last = read(app);
         android.util.Log.w(TAG, "privileged read failed, refuse to act (auth lost or channel hung)");
         if (cb != null) {
-            final int reason = lastFailReason;
             MAIN.post(() -> cb.onResult(false, last, reason));
         }
     }
@@ -954,16 +1185,18 @@ public final class DebugController {
      *
      * getEffectiveMode 在 WSS 未授权时会回落 root / Shizuku（初衷是避免直接失效），后果却是：
      * 无 root 设备上用户点一下开关，等到一句「未检测到 root」——真正该做的是完成一次性授权，
-     * 却被引导去装 root。故所有写入口统一拦下并回传 REASON_NEED_GRANT：
-     * App 内点击由 UI 弹一次性授权引导；磁贴 / 快捷方式等无界面入口则给对应 Toast。
+     * 却被引导去装 root。故所有写入口统一拦下并回传 REASON_NEED_GRANT（§3.2：reason 随返回值走，
+     * 不再写全局 lastFailReason）：App 内点击由 UI 弹一次性授权引导；磁贴 / 快捷方式等无界面入口
+     * 则给对应 Toast。
+     *
+     * @return 阻塞原因（REASON_NONE 表示未阻塞）
      */
-    private static boolean blockedByMissingGrant(Context ctx) {
+    private static int blockedByMissingGrant(Context ctx) {
         if (AuthManager.getMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
                 && !AuthManager.hasWriteSecureSettings(ctx)) {
-            lastFailReason = RootUtil.REASON_NEED_GRANT;
-            return true;
+            return RootUtil.REASON_NEED_GRANT;
         }
-        return false;
+        return RootUtil.REASON_NONE;
     }
 
     /**
@@ -990,14 +1223,14 @@ public final class DebugController {
             android.util.Log.w(TAG, "sub write refused to commit (write failed or readback invalid)");
             broadcast(app);
             if (cb != null) {
-                final int reason = lastFailReason;
+                final int reason = w.reason;
                 MAIN.post(() -> cb.onResult(false, last, reason));
             }
             return;
         }
         State s = commitAfter(app, w.after);
         if (cb != null) {
-            final int reason = lastFailReason;
+            final int reason = w.reason;
             MAIN.post(() -> cb.onResult(w.ok, s, reason));
         }
     }
@@ -1005,8 +1238,9 @@ public final class DebugController {
     /** 单独改 USB 调试（不动 saved） */
     public static void setUsb(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        if (blockedByMissingGrant(app)) {
-            failWithoutWrite(app, cb);
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
             return;
         }
         enqueue("usb", () -> {
@@ -1018,14 +1252,15 @@ public final class DebugController {
     /** 单独翻转 USB 调试：先经授权通道读真值再翻，读不到真值则拒绝 */
     public static void toggleUsb(Context ctx, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        if (blockedByMissingGrant(app)) {
-            failWithoutWrite(app, cb);
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
             return;
         }
         enqueue("usb", () -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
-                failWithoutWrite(app, cb);
+                failWithoutWrite(app, cb, lastFailReason());
                 return;
             }
             boolean on = !cur.usb;
@@ -1038,8 +1273,9 @@ public final class DebugController {
     /** 单独改无线调试（不动 saved） */
     public static void setWireless(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        if (blockedByMissingGrant(app)) {
-            failWithoutWrite(app, cb);
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
             return;
         }
         enqueue("wireless", () -> {
@@ -1051,14 +1287,15 @@ public final class DebugController {
     /** 单独翻转无线调试：先读真值再翻；读不到真值则拒绝 */
     public static void toggleWireless(Context ctx, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        if (blockedByMissingGrant(app)) {
-            failWithoutWrite(app, cb);
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
             return;
         }
         enqueue("wireless", () -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
-                failWithoutWrite(app, cb);
+                failWithoutWrite(app, cb, lastFailReason());
                 return;
             }
             boolean on = !cur.wireless;
@@ -1073,8 +1310,9 @@ public final class DebugController {
      */
     public static void setDev(Context ctx, final boolean on, final ResultCallback cb) {
         final Context app = ctx.getApplicationContext();
-        if (blockedByMissingGrant(app)) {
-            failWithoutWrite(app, cb);
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
             return;
         }
         // 开发者选项不参与调试态、不联动快捷应用，无需杀进程（kill=false）
@@ -1112,18 +1350,20 @@ public final class DebugController {
 
     // —— 合并写操作的结果载体 ——
 
-    /** 单键写入结果：是否成功 + 写入后回读真值 */
+    /** 单键写入结果：是否成功 + 写入后回读真值 + 失败原因（随返回值走，见 §3.2） */
     private static final class WriteResult {
         boolean ok;
         State after;
+        int reason = RootUtil.REASON_NONE;
     }
 
-    /** 主开关合并写结果：写前态（关时记忆用）+ 写后态 + 是否成功写过 */
+    /** 主开关合并写结果：写前态（关时记忆用）+ 写后态 + 是否成功写过 + 失败原因（见 §3.2） */
     private static final class MasterMerge {
         State before;
         State after;
         boolean wrote;
         /** after 是「信任写结果」算出的期望值（未经回读验证）时为 true，调用方需异步复核 */
         boolean trusted;
+        int reason = RootUtil.REASON_NONE;
     }
 }

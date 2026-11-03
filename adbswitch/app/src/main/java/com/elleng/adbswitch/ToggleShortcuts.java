@@ -1,5 +1,7 @@
 package com.elleng.adbswitch;
 
+import com.elleng.adbswitch.util.DrawableUtils;
+
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -13,6 +15,8 @@ import com.elleng.adbswitch.LinkagePrefs;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * 本应用动态快捷方式的唯一发布器，一次全量发布（长按菜单条目全部由这里控制）：
@@ -56,50 +60,60 @@ final class ToggleShortcuts {
     private static volatile String lastSignature = null;
 
     static void publish(Context ctx) {
-        try {
-            ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
-            if (sm == null) {
-                return;
-            }
-            DebugController.State s = DebugController.read(ctx);
-            SharedPreferences sp = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE);
-            boolean linkage = sp.getBoolean("linkage_enabled", false);
-            // 动态「启动联动应用」快捷方式 = 启动「默认跳转应用」（自动跳转也用同一个目标）
-            String pkg = LinkagePrefs.getDefault(ctx);
-
-            // 指纹覆盖一切会影响发布结果的因素；进程重启后 lastSignature 归零，必定重发一次
-            String sig = (s.usb ? "1" : "0") + (s.wireless ? "1" : "0") + '|' + linkage + '|' + pkg;
-            if (sig.equals(lastSignature)) {
-                return;
-            }
-
-            List<ShortcutInfo> list = new ArrayList<>();
-            list.add(buildToggle(ctx, s));
-            int rank = 1;
-            if (linkage) {
-                // 联动开着：给出「打开主页」绕开自动跳转，子开关放不下、不发布
-                list.add(buildHome(ctx, rank++));
-            } else {
-                list.add(buildSub(ctx, ID_USB, ACTION_TOGGLE_USB,
-                        R.string.sc_toggle_usb_short, R.string.sc_toggle_usb_long,
-                        s.usb, rank++));
-                list.add(buildSub(ctx, ID_WIRELESS, ACTION_TOGGLE_WIRELESS,
-                        R.string.sc_toggle_wireless_short, R.string.sc_toggle_wireless_long,
-                        s.wireless, rank++));
-            }
-            if (!pkg.isEmpty()) {
-                list.add(buildLaunch(ctx, pkg, rank++));
-            }
-            // 只有发布成功才记指纹：setDynamicShortcuts 被系统限流/拒绝时返回 false，
-            // 若先记指纹，之后指纹相同就永远不再重试，长按菜单的状态灯会长期失真。
-            if (!sm.setDynamicShortcuts(list)) {
-                android.util.Log.w("AdbSwitch", "setDynamicShortcuts rejected, will retry on next publish");
-                return;
-            }
-            lastSignature = sig;
-        } catch (Throwable t) {
-            android.util.Log.w("AdbSwitch", "shortcut publish failed", t);
+        ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
+        if (sm == null) {
+            return;
         }
+        DebugController.State s = DebugController.read(ctx);
+        SharedPreferences sp = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE);
+        boolean linkage = sp.getBoolean("linkage_enabled", false);
+        // 动态「启动联动应用」快捷方式 = 启动「默认跳转应用」（自动跳转也用同一个目标）
+        String pkg = LinkagePrefs.getDefault(ctx);
+
+        // 指纹覆盖一切会影响发布结果的因素；进程重启后 lastSignature 归零，必定重发一次。
+        // 指纹比较在主线程（廉价字符串拼接），无变化直接返回，避免高频广播连发重建。
+        String sig = (s.usb ? "1" : "0") + (s.wireless ? "1" : "0") + '|' + linkage + '|' + pkg;
+        if (sig.equals(lastSignature)) {
+            return;
+        }
+
+        // §2.3：构建 ShortcutInfo 列表（含 PM IPC 取标签/图标 + 位图化）移到后台线程，
+        // 只把 setDynamicShortcuts 这个发布调用切回主线程（PUBLISH_HANDLER 绑主线程 Looper），
+        // 避免主线程做若干次 IPC + 位图拷贝而掉帧。
+        final String fsig = sig;
+        final Context app = ctx.getApplicationContext();
+        BUILD_EXEC.execute(() -> {
+            try {
+                List<ShortcutInfo> list = new ArrayList<>();
+                list.add(buildToggle(app, s));
+                int rank = 1;
+                if (linkage) {
+                    // 联动开着：给出「打开主页」绕开自动跳转，子开关放不下、不发布
+                    list.add(buildHome(app, rank++));
+                } else {
+                    list.add(buildSub(app, ID_USB, ACTION_TOGGLE_USB,
+                            R.string.sc_toggle_usb_short, R.string.sc_toggle_usb_long,
+                            s.usb, rank++));
+                    list.add(buildSub(app, ID_WIRELESS, ACTION_TOGGLE_WIRELESS,
+                            R.string.sc_toggle_wireless_short, R.string.sc_toggle_wireless_long,
+                            s.wireless, rank++));
+                }
+                if (!pkg.isEmpty()) {
+                    list.add(buildLaunch(app, pkg, rank++));
+                }
+                // 只有发布成功才记指纹：setDynamicShortcuts 被系统限流/拒绝时返回 false，
+                // 若先记指纹，之后指纹相同就永远不再重试，长按菜单的状态灯会长期失真。
+                PUBLISH_HANDLER.post(() -> {
+                    if (!sm.setDynamicShortcuts(list)) {
+                        android.util.Log.w("AdbSwitch", "setDynamicShortcuts rejected, will retry on next publish");
+                        return;
+                    }
+                    lastSignature = fsig;
+                });
+            } catch (Throwable t) {
+                android.util.Log.w("AdbSwitch", "shortcut build failed", t);
+            }
+        });
     }
 
     private static ShortcutInfo buildToggle(Context ctx, DebugController.State s) {
@@ -176,6 +190,8 @@ final class ToggleShortcuts {
 
     private static final android.os.Handler PUBLISH_HANDLER =
             new android.os.Handler(android.os.Looper.getMainLooper());
+    /** 后台构建快捷方式列表（PM IPC + 图标位图化）的执行器，避免主线程掉帧（§2.3） */
+    private static final Executor BUILD_EXEC = Executors.newSingleThreadExecutor();
     private static volatile Context pendingCtx = null;
     private static final Runnable PUBLISH_RUN = () -> {
         Context ctx = pendingCtx;

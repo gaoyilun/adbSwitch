@@ -31,8 +31,6 @@ public class AdbToggleService extends Service {
     public static final String ACTION_OPEN = "com.elleng.adbswitch.ACTION_OPEN";
     public static final String ACTION_CLOSE = "com.elleng.adbswitch.ACTION_CLOSE";
     public static final String ACTION_SETTINGS = "com.elleng.adbswitch.ACTION_SETTINGS";
-    /** Live Update「取消置顶」：撤掉常驻通知（不改 adb_enabled 真值） */
-    public static final String ACTION_DISMISS = "com.elleng.adbswitch.ACTION_DISMISS";
     /** 启动时由调用方告知「当前应为关闭态」，避免在服务里做阻塞 su 读状态导致通知延迟 */
     public static final String EXTRA_STATE_ON = "state_on";
 
@@ -77,7 +75,7 @@ public class AdbToggleService extends Service {
                 @Override
                 public void onChange(boolean selfChange) {
                     // 只做一件事：作废缓存并后台重新校准。
-                    // 校准完成后会广播，stateReceiver 才是判断「该不该退场」的唯一地方 ——
+                    // 校准完成后由状态 listener 推送新状态，stateListener 回调才是判断「该不该退场」的唯一地方 ——
                     // 在这里同步 read() 拿到的是作废前的旧缓存（服务存续期间必然是「两个都关」），
                     // 判断永远为假，等于白判。
                     DebugController.invalidateAndRefresh(AdbToggleService.this);
