@@ -51,6 +51,25 @@
             android:layout="@layout/pref_row_state"
             android:widgetLayout="@layout/pref_widget_switch" />
 
+        <!-- 第三方无障碍服务：开关=一键关/还原第三方服务（列表级）；箭头跳系统无障碍设置。
+             是否跟随主开关由「管理开关项」配置（默认不跟随）。 -->
+        <com.elleng.adbswitch.NavSwitchPreference
+            android:key="swA11y"
+            android:order="40"
+            android:title="@string/a11y_title"
+            android:summary="@string/a11y_off"
+            android:layout="@layout/pref_row_state"
+            android:widgetLayout="@layout/pref_widget_switch" />
+
+        <!-- 管理开关项：配置每项是否显示（=功能启用）/ 是否跟随主开关。始终可见、不参与折叠。 -->
+        <Preference
+            android:key="manageItems"
+            android:order="50"
+            android:icon="@drawable/ic_edit"
+            android:title="@string/manage_items_title"
+            android:summary="@string/manage_items_sum"
+            android:layout="@layout/pref_row_state" />
+
     </PreferenceCategory>
 
     <PreferenceCategory

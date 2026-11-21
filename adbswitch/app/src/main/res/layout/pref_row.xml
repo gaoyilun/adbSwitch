@@ -13,10 +13,14 @@
     android:paddingBottom="8dp"
     android:background="?android:attr/selectableItemBackground">
 
+    <!-- 图标左缘对齐：paddingStart 12dp + 本 margin 10dp = 22dp，
+         与无图标行的文字左缘（12+10=22dp）落在同一条竖线上——快捷应用的图标
+         不再比页面其它内容突出，整列视觉基线一致。 -->
     <FrameLayout
         android:id="@android:id/icon_frame"
         android:layout_width="40dp"
         android:layout_height="40dp"
+        android:layout_marginStart="10dp"
         android:layout_gravity="center_vertical">
 
         <ImageView

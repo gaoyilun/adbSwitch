@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adbswitch
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # 仓库不带 gradlew（本机构建走缓存发行版，见 build-all.sh），CI 固定同一版本
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      # runner 预装 Android SDK，但 compileSdk 36 / buildTools 36.0.0 需补装
+      - name: Install Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+
+      # 纯逻辑单测护栏（4 个测试类 / 15 用例）+ debug 编译
+      # release 签名密钥不在仓库内（keystore/ 被忽略），CI 不做 assembleRelease
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon --console=plain
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: adbswitch/app/build/reports/tests/testDebugUnitTest

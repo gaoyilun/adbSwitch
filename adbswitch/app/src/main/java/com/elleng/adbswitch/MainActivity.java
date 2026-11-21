@@ -1,7 +1,5 @@
 package com.elleng.adbswitch;
 
-import com.elleng.adbswitch.util.ShizukuUtil;
-
 import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -13,27 +11,23 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.content.pm.ShortcutInfo;
-import android.content.pm.ShortcutManager;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.Icon;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.MessageQueue;
-import android.util.Log;
-import android.text.SpannableString;
-import android.text.style.ForegroundColorSpan;
 import android.provider.Settings;
+import android.util.Log;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.TextView;
+import android.widget.CheckBox;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
@@ -41,23 +35,19 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
-import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.SwitchPreferenceCompat;
-
-import com.elleng.adbswitch.util.RootUtil;
+import androidx.recyclerview.widget.ItemTouchHelper;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import com.elleng.adbswitch.update.UpdateChecker;
 import com.elleng.adbswitch.update.UpdateDialog;
-import com.elleng.adbswitch.update.UpdateInfo;
+import com.elleng.adbswitch.util.RootUtil;
 
 import rikka.shizuku.Shizuku;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
-import com.google.android.material.snackbar.Snackbar;
 
 /**
  * 主界面：Material 3 架构（AppCompatActivity + MaterialToolbar 顶栏
@@ -69,10 +59,13 @@ public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_SETTINGS = "extra_settings";
     /** 静态 shortcut「打开主页」的 action：见到它就跳过联动自动跳转 */
     private static final String ACTION_OPEN_HOME = "com.elleng.adbswitch.action.OPEN_HOME";
+    /** 控制中心磁贴长按的系统 action：由 manifest 的 QS_TILE_PREFERENCES intent-filter 接住 */
+    private static final String ACTION_QS_TILE_PREFERENCES =
+            "android.service.quicksettings.action.QS_TILE_PREFERENCES";
     /** 桌面快捷方式「快捷打开」：先打开本 App，关掉调试后启动目标应用 */
-    private static final String ACTION_DESKTOP_LINKAGE = "com.elleng.adbswitch.action.DESKTOP_LINKAGE";
+    static final String ACTION_DESKTOP_LINKAGE = "com.elleng.adbswitch.action.DESKTOP_LINKAGE";
     private static final String TAG = "AdbSwitch";
-    private static final String PREFS = "cfg";
+    static final String PREFS = "cfg";
     /**
      * 需要监听外部改动的 Settings 键（与 DebugController 写入的是同一组，三个都不能少）。
      * 少一个就会出现「那一行不随外部改动刷新」——例如开发者选项被别处恢复后，
@@ -82,17 +75,12 @@ public class MainActivity extends AppCompatActivity {
     private static final String[] OBSERVED_KEYS = {DebugController.KEY_USB, DebugController.KEY_WIRELESS,
             DebugController.KEY_DEV};
     private static final String PREF_LINKAGE = "linkage_enabled";
-    /** 动态联动应用行的 key 前缀：完整 key = 前缀 + 包名（rebuildLinkageList 据此重建、识别包名） */
-    private static final String LINKAGE_APP_KEY_PREFIX = "linkage_app:";
-    /** 默认跳转应用行 / 管理联动应用行的固定 key（动态填充，不在 prefs.xml 写死） */
-    private static final String LINKAGE_KEY_DEFAULT = "linkage_default";
-    private static final String LINKAGE_KEY_MANAGE = "linkage_manage";
     /** 桌面快捷方式意图里携带「要联动哪个 app」的包名（每个 app 的桌面图标各不相同） */
-    private static final String EXTRA_LINKAGE_PKG = "extra_linkage_pkg";
+    static final String EXTRA_LINKAGE_PKG = "extra_linkage_pkg";
     /** 「临时关闭时弹通知」开关 */
     private static final String PREF_NOTIFY = "notify_on_close";
     /** 「打开调试前先杀掉联动应用」开关（DebugController 读取同一份 cfg） */
-    private static final String PREF_KILL_BEFORE_OPEN = "kill_before_open";
+    static final String PREF_KILL_BEFORE_OPEN = "kill_before_open";
     /** 用户是否手动关闭过「自动关闭快捷应用」（仅在具备 kill 权限时由用户手动关闭才记，
      *  用于「有 kill 权限时默认开、仅用户手动关才记住」的体验，见 updateKillPrefState） */
     private static final String PREF_KILL_USER_DISABLED = "kill_before_open_user_disabled";
@@ -116,56 +104,68 @@ public class MainActivity extends AppCompatActivity {
     private boolean wirelessSupported = true;
     /** 开发者选项入口开关：独立开关，不与主开关联动、不参与折叠（始终挂在 catDebug 里） */
     private NavSwitchPreference swDevOptsPref;
-    private SwitchPreferenceCompat swKillPref;
+    /** 第三方无障碍服务开关：是否跟随主开关由「管理开关项」配置（默认不跟随） */
+    private NavSwitchPreference swA11yPref;
+    /** 「管理开关项」入口行（配置每项是否显示 / 是否跟随主开关） */
+    private Preference manageItemsPref;
+    SwitchPreferenceCompat swKillPref;
     /** 「测试灵动焦点通知」行当前是否挂在分类里（显隐联动见 updateLiveUpdateState） */
     private boolean liveUpdateShown = true;
     private Preference liveUpdatePref;
     /** 「关于」行：点击弹窗展示版本/构建时间/授权模式（原「构建时间」行） */
     private Preference buildInfoPref;
-    private Preference authPref;              // 授权模式（root / Shizuku）与授权状态合并项
+    Preference authPref;              // 授权模式（root / Shizuku）与授权状态合并项
 
     private boolean syncing = false;          // 防止 setChecked 触发回环
-    /** 当前授权模式是否可用（即能否真实写入调试开关）。乐观假定可用，后台双检测纠正 */
-    private boolean privilegedAvailable = true;
+    /**
+     * 当前授权模式是否可用（即能否真实写入调试开关）。
+     * 不再无条件乐观假定 true：本进程若尚未确认过授权，先按「不可用」渲染——否则重建 /
+     * 首帧会在探测结果回来前闪现假「已授权」（root 探测最坏 10s），期间用户可能误点写入。
+     * 只有确认成功才被 AuthCoordinator 标记，故重建后复用该结论既不自欺也不闪假未授权。
+     */
+    boolean privilegedAvailable = AuthCoordinator.hasSessionChecked();
     /** 用户是否手动关闭过「自动关闭快捷应用」（见 updateKillPrefState / PREF_KILL_USER_DISABLED） */
-    private boolean killUserDisabled = false;
+    boolean killUserDisabled = false;
     /** 是否刚从后台返回前台（用于 onResume 时强制重测授权，识别 root/Shizuku 授权变化） */
     private boolean cameFromBackground = false;
-    /**
-     * 本会话是否已拿到过授权探测结论。
-     *
-     * <p>冷启动到「授权探测回来」之间 {@code privilegedAvailable} 仍是初始值、{@code isRootCapable()}
-     * 还是 false，此时 updateKillPrefState 会算出 canKill=false，把「开启调试自动关闭快捷应用」
-     * 先强制关掉并置灰，等探测回来才变回开——用户看到的就是「一进来是关的、过一会儿自己变开」。
-     * 有这个标志就等结论回来再接管显示，首帧用布局声明的默认值（开）。
-     */
-    private boolean authProbeDone = false;
-    private boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
-    /** 上次重建「快捷打开」列表的内容指纹（配置没变就不重建，见 rebuildLinkageList） */
-    private String lastLinkageSignature = null;
-    /** 联动应用图标缓存：按包名缓存已解码的 Drawable，rebuildLinkageList 复用，避免每次回前台重复跨进程 getApplicationIcon 解码 */
-    private final Map<String, Drawable> linkageIconCache = new HashMap<>();
-    /** WSS 引导中「用 Shizuku 代跑」：Shizuku 授权弹窗返回结果后，是否接着跑一次 pm grant */
-    private boolean pendingWssGrantAfterShizuku = false;
-    /** WSS 未授权的一次性授权引导是否已自动弹过（每次会话只自动弹一次，见 performAuthCheck） */
-    private boolean wssBootstrapShown = false;
-    /** 底部 Snackbar（未授权提示，带「重试」按钮）；同一时刻只保留一个 */
-    private com.google.android.material.snackbar.Snackbar authSnackbar = null;
+    boolean prefsLoaded = false;      // 设置界面是否已构建（onNewIntent 复用实例时避免重复加载）
+    /** 在线更新检查与「关于」行摘要（自动/手动检查、节流、更新弹窗入口） */
+    private final UpdateCheckDelegate updateCheck = new UpdateCheckDelegate(this);
+    /** 「快捷打开」列表 / 选择器 / 桌面快捷方式 / 图标缓存 / 卸载清理 */
+    private final LinkageController linkage = new LinkageController(this);
+    /** 授权 UI：探测结论落地、模式选择、WSS 引导、Shizuku 授权请求与底部提示 */
+    private final AuthUiController auth = new AuthUiController(this);
     /** §4.7 写入在途冻结：写任务排队期间把主开关置灰，给出明确反馈（不再停在旧值无所适从） */
     private final Runnable busyListener = () -> runOnUiThread(this::applyBusyState);
-    /** 上次请求 Shizuku 授权的时间戳（防抖，避免请求->结果->重测->请求的循环） */
-    private long lastShizukuRequestAt = 0;
     /** 「开了快捷打开但没设默认」的提示每进程只弹一次（其余联动跳转状态见 LinkageLauncher） */
     private static boolean sNoDefaultToasted = false;
-    private long lastPickerOpenAt = 0;        // 打开选择器防抖：行点击与 preference click 可能同时触发
     private long lastLiveOpenAt = 0;          // 同上，实时动态弹窗防抖
     private boolean settingsObserverRegistered = false; // Settings 监听是否已注册（防重复注册/泄漏）
+    /** Wi-Fi 连接变化监听是否已注册：无线行「未激活」判据是当前网络，必须在 Wi-Fi 断开/连回时即时刷新 */
+    private boolean wifiCallbackRegistered = false;
+    /** 默认网络变化回调：Wi-Fi 连上/断开时重绘（只刷 UI，不动任何 Settings 键） */
+    private final ConnectivityManager.NetworkCallback wifiCallback =
+            new ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onAvailable(Network network) {
+                    refreshWirelessFromWifi();
+                }
+
+                @Override
+                public void onLost(Network network) {
+                    refreshWirelessFromWifi();
+                }
+            };
+
+    /** 网络变化时只重绘无线行摘要/图标，不触发 Settings 重读（key 未变，无谓开销） */
+    private void refreshWirelessFromWifi() {
+        if (swWirelessPref == null || !prefsLoaded || isDestroyed()) {
+            return;
+        }
+        mainHandler.post(() -> refresh(DebugController.read(this)));
+    }
     /** 主线程 Handler：去抖与所有 post 都复用它，否则每次 new 一个 Handler 都拿不到上次的 callback，去抖等于失效 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-
-    /** 关于弹窗外链：署名按钮 → elleng.eu.org；信息图标 → 项目仓库 */
-    private static final String ABOUT_CREDIT_URL = "https://elleng.eu.org";
-    private static final String ABOUT_REPO_URL = "https://github.com/gaoyilun/AdbSwitch";
 
     /** 状态变化 listener（替代原进程内广播）：任何写入/校准后刷新界面 */
     private final DebugController.StateListener stateListener = s -> {
@@ -238,10 +238,10 @@ public class MainActivity extends AppCompatActivity {
         DebugController.addBusyListener(busyListener);
     }
 
-    /** §4.7：写任务在途（busy）时冻结主开关，结束后解冻；解冻会复用最近一次已渲染的 known 态 */
+    /** §4.7：写任务在途（仅主开关自身写入）时冻结主开关，结束后解冻；解冻会复用最近一次已渲染的 known 态 */
     private void applyBusyState() {
         if (swMasterPref != null) {
-            swMasterPref.setBusyFreeze(DebugController.isBusy());
+            swMasterPref.setBusyFreeze(DebugController.isMasterBusy());
         }
     }
 
@@ -279,7 +279,7 @@ public class MainActivity extends AppCompatActivity {
                         if (AuthManager.getMode(MainActivity.this) == AuthManager.Mode.SHIZUKU) {
                             privilegedAvailable = false;
                             applyRootState();
-                            updateAuthStatusUI();
+                            auth.updateAuthStatusUI();
                         }
                     });
                 }
@@ -290,9 +290,9 @@ public class MainActivity extends AppCompatActivity {
                 public void onBinderReceived() {
                     android.util.Log.i(TAG, "Shizuku binder received");
                     // 服务就绪：Shizuku 模式且未授权时主动弹授权（force=false 走防抖）
-                    maybeRequestShizukuPermission(false);
+                    auth.maybeRequestShizukuPermission(false);
                     // 无论是否已授权都重测一次，刷新授权状态行与控件可用性
-                    performAuthCheck();
+                    auth.check();
                 }
             };
             Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener);
@@ -302,17 +302,12 @@ public class MainActivity extends AppCompatActivity {
                     if (requestCode == AuthManager.SHIZUKU_PERM_REQUEST) {
                         android.util.Log.i(TAG, "Shizuku permission result=" + grantResult);
                         // force：用户刚刚在弹窗里做了选择，必须立刻重测，不能被节流挡住
-                        performAuthCheck(true);
+                        auth.check(true);
                         // WSS 引导里「用 Shizuku 代跑」：只有拿到授权才接着跑 pm grant，
                         // 否则清掉挂起标记（用户拒绝 → 就此结束，不要残留状态下次误触发）
                         boolean granted = grantResult
                                 == android.content.pm.PackageManager.PERMISSION_GRANTED;
-                        if (pendingWssGrantAfterShizuku) {
-                            pendingWssGrantAfterShizuku = false;
-                            if (granted) {
-                                runGrantAsync(true);
-                            }
-                        }
+                        auth.onShizukuPermissionResult(granted);
                     }
                 }
             };
@@ -359,11 +354,14 @@ public class MainActivity extends AppCompatActivity {
             return true;
         }
 
-        // 打开主页的两种入口：通知栏「应用设置」传来的 EXTRA_SETTINGS(boolean)，
-        // 或「打开主页」shortcut 携带的自定义 action。
+        // 打开主页的三种入口：通知栏「应用设置」传来的 EXTRA_SETTINGS(boolean)、
+        // 「打开主页」shortcut 的自定义 action、控制中心磁贴长按的 QS_TILE_PREFERENCES。
+        // 磁贴长按必须也算进来：否则开了「快捷打开」且设了默认应用时长按会被当成桌面冷启动，
+        // 直接弹到第三方应用，而不是用户期望的本应用主页。
         // 注意不能用 <extra> 传标记：shortcuts 解析会把 "1" 存成 Integer，
         // getStringExtra() 内部吞掉 ClassCastException 返回 null，判定永远失效。
         boolean openSettings = ACTION_OPEN_HOME.equals(in.getAction())
+                || ACTION_QS_TILE_PREFERENCES.equals(in.getAction())
                 || in.getBooleanExtra(EXTRA_SETTINGS, false);
 
         // 桌面快捷方式「创建桌面快捷方式」：先打开本 App，关掉调试后联动启动目标应用。
@@ -428,203 +426,6 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    // —— 在线更新 ——
-
-    /**
-     * 启动后自动检测更新（3 天节流，最低优先级）。
-     *
-     * 触发时机：主线程空闲时（{@link MessageQueue#IdleHandler}）才真正发起，不阻塞启动与主要功能；
-     * 磁贴 / 桌面快捷方式开关走独立路径、不打开本 Activity，因此天然不会触发本检查。
-     *
-     * 弱提示策略（对开关类 App 不友好的是强弹窗，这里改成）：
-     *   发现新版本 → 仅一次性 Toast（按版本号去重，不重复打扰）+ 把远端版本记下来，
-     *   主页「关于」行随即显示「可更新」；绝不强弹 UpdateDialog。
-     * 真正的新版下载入口只在「关于」弹窗的手动「检查更新」里。
-     *
-     * 当前 {@link UpdateConfig#ENABLED} 为 true（GitHub 主通道硬编码激活）；未达节流间隔或网络失败时不发请求。
-     * 启用后的行为：成功拿到结果才写节流时间戳，网络失败不写，避免弱网用户被节流 3 天。
-     */
-    private void checkUpdateOnStart() {
-        if (!UpdateChecker.isActive() || !UpdateChecker.shouldCheck(this)) {
-            return;
-        }
-        // 主线程空闲后再跑：不抢启动与主要功能，符合「优先级最低」的设定
-        Looper.getMainLooper().getQueue().addIdleHandler(new MessageQueue.IdleHandler() {
-            @Override
-            public boolean queueIdle() {
-                runAutoCheck();
-                return false; // 一次性，不常驻
-            }
-        });
-    }
-
-    private void runAutoCheck() {
-        // 后台线程只用 application context：网络检查最长十几秒，匿名线程持有 Activity
-        // 强引用期间（旋转屏幕/退出）实例无法回收（历史教训：弱化一切跨线程的 Activity 引用）。
-        final Context app = getApplicationContext();
-        new Thread(() -> {
-            UpdateInfo info = null;
-            try {
-                info = UpdateChecker.check(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME);
-            } catch (Throwable t) {
-                android.util.Log.w("AdbSwitch", "update check failed", t);
-            }
-            if (info == null) {
-                return; // 所有通道失败：不写节流，下次启动重试
-            }
-            UpdateChecker.markChecked(app);
-            if (info.hasUpdate) {
-                // 记下远端版本，关于行离线也能显示「可更新」
-                UpdateChecker.saveLatestKnown(app, info.versionCode, info.versionName);
-                // 仅对「未提示过的新版本」弹一次 Toast，不弹窗、不打扰
-                if (info.versionCode != UpdateChecker.toastedVersion(app)) {
-                    final String name = info.versionName;
-                    runOnUiThread(() -> Toast.makeText(app,
-                            getString(R.string.update_toast_new, name), Toast.LENGTH_LONG).show());
-                    UpdateChecker.markToasted(app, info.versionCode);
-                }
-            }
-            // 无论是否有更新，都刷新关于行（可能刚记下了可更新版本）
-            runOnUiThread(() -> {
-                if (isDestroyed()) {
-                    return;
-                }
-                refreshAboutSummary();
-            });
-        }, "update-check").start();
-    }
-
-    /**
-     * 刷新主页「关于」行的摘要：默认显示当前版本号（如 1.0.0）；
-     * 存在已知新版本时改为「1.0.0 可更新1.0.1」，离线也可见。
-     */
-    private void refreshAboutSummary() {
-        if (buildInfoPref == null) {
-            return;
-        }
-        String cur = BuildConfig.VERSION_NAME;
-        if (UpdateChecker.hasKnownUpdate(this, BuildConfig.VERSION_CODE)) {
-            String latest = UpdateChecker.getLatestVersionName(this);
-            if (latest == null || latest.trim().isEmpty()) {
-                latest = String.valueOf(UpdateChecker.getLatestVersionCode(this));
-            }
-            buildInfoPref.setSummary(getString(R.string.about_summary_update, cur, latest));
-        } else {
-            buildInfoPref.setSummary(cur);
-        }
-    }
-
-    /** 「关于」弹窗里的手动检查入口（功能未激活时按钮仍可见，点按提示尚未配置）。 */
-    private void manualCheckUpdate() {
-        if (!UpdateChecker.isActive()) {
-            Toast.makeText(this, R.string.update_not_configured, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        Toast.makeText(this, R.string.update_checking, Toast.LENGTH_SHORT).show();
-        // 后台线程只用 application context（同 runAutoCheck：不持 Activity 强引用跑网络）
-        final Context app = getApplicationContext();
-        new Thread(() -> {
-            UpdateInfo info = null;
-            try {
-                info = UpdateChecker.check(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME);
-            } catch (Throwable t) {
-                android.util.Log.w("AdbSwitch", "update check failed", t);
-            }
-            if (info != null) {
-                UpdateChecker.markChecked(app);
-                if (info.hasUpdate) {
-                    // 记下远端版本，关于行同步显示「可更新」
-                    UpdateChecker.saveLatestKnown(app, info.versionCode, info.versionName);
-                }
-            }
-            final UpdateInfo result = info;
-            runOnUiThread(() -> {
-                if (isDestroyed()) {
-                    return;
-                }
-                if (result == null) {
-                    Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
-                } else if (!result.hasUpdate) {
-                    Toast.makeText(this, R.string.update_already_latest, Toast.LENGTH_SHORT).show();
-                } else {
-                    UpdateDialog.show(this, result, new UpdateDialog.Listener() {
-                        @Override
-                        public void onOpenUrl(String url) {
-                            openExternalUrl(url);
-                        }
-                    });
-                }
-            });
-        }, "update-check-manual").start();
-    }
-
-    private void openExternalUrl(String url) {
-        if (url == null || url.trim().isEmpty()) {
-            return;
-        }
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
-        } catch (Throwable t) {
-            android.util.Log.w("AdbSwitch", "open url failed: " + url, t);
-            Toast.makeText(this, R.string.update_check_failed, Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
-     * 双模式授权检测（探测逻辑见 {@link AuthCoordinator}：模式探测 + 30s 节流 + 会话闸门）。
-     * 本方法只负责把 {@link AuthCoordinator.AuthResult} 应用到 UI：刷新授权状态行 / 控件可用性，
-     * 并按模式弹引导（WSS 首次进入一次性引导）/ 请求 Shizuku 授权。
-     *
-     * 与旧实现的三点差异（已沉淀到 AuthCoordinator）：
-     *  1. **只探测当前模式对应的后端**：Shizuku 模式不再 fork su；
-     *  2. **失败也节流**：失败不反复 fork su 干等；
-     *  3. 探测结论区分「没有 su」与「有 su 未授权」，文案据此分流。
-     *
-     * @param force true=忽略会话闸门与节流，立即重测（切模式 / 点重试 / 授权结果回调）
-     */
-    private void performAuthCheck() {
-        performAuthCheck(false);
-    }
-
-    private void performAuthCheck(boolean force) {
-        if (!prefsLoaded) {
-            return;
-        }
-        AuthCoordinator.check(this, force, result -> {
-            if (isDestroyed() || isFinishing()) {
-                return; // Activity 已销毁，避免 UI/窗口泄漏
-            }
-            authProbeDone = true;
-            privilegedAvailable = result.available;
-            // 确认成功才记到本启动周期：失败不缓存，下次仍会重测（授权可能稍后补上）
-            if (result.available) {
-                AuthCoordinator.markSessionChecked();
-            }
-            applyRootState();
-            updateAuthStatusUI();
-            updateKillPrefState();
-            if (!result.available) {
-                // 未授权按模式给出引导。WSS 首次进入自动弹一次性授权引导（每会话一次，避免叠层）；
-                // Shizuku 模式且服务在跑却没授权：主动弹 Shizuku 授权对话框。
-                if (result.mode == AuthManager.Mode.SECURE_SETTINGS) {
-                    // WSS 分支的 shizukuRunning 恒按 false 传（与旧实现一致：该模式不依赖 Shizuku 文案）
-                    if (!wssBootstrapShown) {
-                        wssBootstrapShown = true;
-                        // 弹窗关闭后由默认回调恢复底部常驻「重试」提示
-                        showWssBootstrapDialog();
-                    } else {
-                        showAuthNotice(result.mode, false, RootUtil.RootStatus.DENIED);
-                    }
-                } else {
-                    if (result.mode == AuthManager.Mode.SHIZUKU) {
-                        maybeRequestShizukuPermission(false);
-                    }
-                    showAuthNotice(result.mode, result.shizukuRunning, result.rootStatus);
-                }
-            }
-        });
-    }
-
     /** M3 顶栏（MaterialToolbar）：标题 + 副标题，Surface 底色（无图标，左端留白）。 */
     private void setupToolbar() {
         androidx.appcompat.widget.Toolbar tb = findViewById(R.id.toolbar);
@@ -667,10 +468,10 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        performAuthCheck();
+        auth.check();
         refresh(DebugController.read(this));
         applyRootState();
-        rebuildLinkageList();
+        linkage.rebuildList();
     }
 
     /** 设置列表 fragment；preference 树就绪前 findPreference 不可用，刷新方法均有 null 守卫 */
@@ -686,7 +487,7 @@ public class MainActivity extends AppCompatActivity {
      * 原 showSettings 里「建好界面后」的初始化与首次刷新全部挪到这里
      * （fragment 事务在 onCreate 返回后才执行，原先的同步流程必须异步化）。
      */
-    private void onPreferencesCreated() {
+    void onPreferencesCreated() {
         if (!onCreateFinished) {
             // Activity 重建（深浅模式切换等）时，FragmentManager 在 super.onCreate() 内
             // 恢复 fragment 并同步回调到这里；此时 setContentView/setupToolbar/字段均未就绪，
@@ -700,60 +501,63 @@ public class MainActivity extends AppCompatActivity {
     /** preference 树就绪后的完整初始化与首刷（原 onPreferencesCreated 主体） */
     private void runPrefsInit() {
         prefsLoaded = true;
+        // 冷启动首帧的 onResume 会因 prefsLoaded=false 提前 return，那次观察注册被跳过；
+        // 若不在这里补一次，首次前台会话全程不监听外部对调试键/无障碍列表的改动，
+        // 界面会停在旧值（必须切一次后台再回来才补上）。observeSettings 内部幂等，
+        // 与 onResume 末尾的调用重复也安全。
+        observeSettings(true);
+        // 与 observeSettings 同理：冷启动首帧 onResume 因 prefsLoaded=false 提前 return，
+        // 那次网络监听注册被跳过。不在这里补一次，首次前台会话 Wi-Fi 断开/连回都不会重绘无线行。
+        // observeNetwork 内部幂等，与 onResume 末尾调用重复也安全。
+        observeNetwork(true);
         initPrefs();
-        checkUpdateOnStart();
-        performAuthCheck();
+        updateCheck.checkOnStart();
+        auth.check();
         refresh(DebugController.read(this));
+        // 启动时先把上次会话的「恢复待办」复核一遍再展示：旧结论可能早已自愈，
+        // 直接摆到界面上就是「明明开着却短暂提示需手动开启」
+        if (DebugController.hasPersistedA11yPending(this)) {
+            DebugController.recheckA11yRestore(this, () -> refresh(DebugController.read(this)));
+        }
         applyRootState();
-        rebuildLinkageList();
+        linkage.rebuildList();
         updateLiveUpdateState();
-        refreshAboutSummary();
-    }
-
-    /** 承载设置列表的 fragment：仅负责 inflate prefs.xml，业务与行刷新都在 Activity */
-    public static class SettingsFragment extends PreferenceFragmentCompat {
-        @Override
-        public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
-            setPreferencesFromResource(R.xml.prefs, null);
-            // 类型保护：requireActivity 的强转在异常复用路径下会以 ClassCastException
-            // 直接把进程带崩；本 fragment 正常只挂在 MainActivity 容器里，加一道 instanceof 兜底。
-            if (requireActivity() instanceof MainActivity) {
-                ((MainActivity) requireActivity()).onPreferencesCreated();
-            }
-        }
-
-        @Override
-        public androidx.recyclerview.widget.RecyclerView onCreateRecyclerView(
-                android.view.LayoutInflater inflater, android.view.ViewGroup parent,
-                Bundle state) {
-            androidx.recyclerview.widget.RecyclerView rv =
-                    super.onCreateRecyclerView(inflater, parent, state);
-            // Android 15+ 强制 edge-to-edge：列表会延伸到导航栏底下，最后一行被遮住
-            // （顶部状态栏 inset 已由 activity_main.xml 的 AppBarLayout 消费）。
-            // 标准做法：clipToPadding=false + 把系统栏 inset 作为列表底部内边距，
-            // 滚到末尾时最后一行仍完整可见。
-            rv.setClipToPadding(false);
-            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(rv, (v, insets) -> {
-                androidx.core.graphics.Insets bars = insets.getInsets(
-                        androidx.core.view.WindowInsetsCompat.Type.systemBars());
-                v.setPadding(0, 0, 0, bars.bottom);
-                return insets;
-            });
-            // 视图可能已 attached：主动请求一次 inset 应用，否则首帧不生效
-            androidx.core.view.ViewCompat.requestApplyInsets(rv);
-            return rv;
-        }
+        updateCheck.refreshAboutSummary();
     }
 
     /** 按 key 从 fragment 的 preference 树里取行；树未就绪时返回 null（调用方自行守卫）。
      *  字段为空时回退到 FragmentManager 查找：重建路径的系统恢复回调早于字段赋值。 */
-    private <T extends Preference> T pref(String key) {
+    <T extends Preference> T pref(String key) {
+        SettingsFragment f = findSettingsFragment();
+        return f == null ? null : f.findPreference(key);
+    }
+
+    /**
+     * 列表底部为底部浮层（持久提示条）留白：由 {@code AuthUiController} 在 Snackbar 显示后
+     * 传入它的顶边窗口坐标，否则最后两行「授权模式 / 关于」永远被条压住。
+     */
+    void reserveListBottomForOverlay(int overlayTopInWindow, int gapPx) {
+        SettingsFragment f = findSettingsFragment();
+        if (f != null) {
+            f.reserveBottomForOverlay(overlayTopInWindow, gapPx);
+        }
+    }
+
+    /** 浮层消失后撤销留白 */
+    void clearListBottomOverlay() {
+        SettingsFragment f = findSettingsFragment();
+        if (f != null) {
+            f.clearBottomOverlay();
+        }
+    }
+
+    private SettingsFragment findSettingsFragment() {
         SettingsFragment f = settingsFragment;
         if (f == null) {
             f = (SettingsFragment) getSupportFragmentManager()
                     .findFragmentById(R.id.settings_container);
         }
-        return f == null ? null : f.findPreference(key);
+        return f;
     }
 
     private void initPrefs() {
@@ -771,6 +575,30 @@ public class MainActivity extends AppCompatActivity {
         swNotifyPref = pref("swNotify");
         swWirelessPref = pref("swWireless");
         swDevOptsPref = pref("swDevOpts");
+        swA11yPref = pref("swA11y");
+        manageItemsPref = pref("manageItems");
+        // 笔图标用应用强调色（M3 动态 colorPrimary，随壁纸派生）：framework Preference 默认
+        // 会用 colorControlNormal 给 XML 里的 vector 染色（次级灰），与开关开启态色系不一致，
+        // 故在代码里显式 setTint。只作用于本行，不影响调试三行的状态圆点（它们共用 pref_row_state）。
+        if (manageItemsPref != null) {
+            try {
+                android.util.TypedValue accent = new android.util.TypedValue();
+                // resolveAttribute 返回 false 时 accent.data 无意义（可能为 0=透明），
+                // 必须判返回值，否则主题异常场景下笔图标会变成看不见的透明图标。
+                if (getTheme().resolveAttribute(com.google.android.material.R.attr.colorPrimary, accent, true)) {
+                    android.graphics.drawable.Drawable editIcon =
+                            androidx.appcompat.content.res.AppCompatResources.getDrawable(this, R.drawable.ic_edit);
+                    if (editIcon != null) {
+                        editIcon = androidx.core.graphics.drawable.DrawableCompat.wrap(editIcon).mutate();
+                        androidx.core.graphics.drawable.DrawableCompat.setTint(editIcon, accent.data);
+                        manageItemsPref.setIcon(editIcon);
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "tint edit icon failed", t);
+                // 着色失败保留 XML 默认图标，不影响功能
+            }
+        }
         swKillPref = pref("swKillBeforeOpen");
         // 分类内按 android:order 排序，而不是按添加顺序：
         // 折叠再展开时 usb / wireless 是 addPreference 回来的，按添加顺序会排到末尾
@@ -789,16 +617,17 @@ public class MainActivity extends AppCompatActivity {
         }
         liveUpdatePref = pref("liveUpdate");
         buildInfoPref = pref("buildInfo");
+        updateCheck.bindAboutPref(buildInfoPref);
         // 「关于」行：整行点击弹窗（旧 framework 实现行不可点、需 ListView 行接线；
         // androidx 行点击原生触发 OnPreferenceClickListener，直接挂监听即可）
         if (buildInfoPref != null) {
             buildInfoPref.setOnPreferenceClickListener(p -> {
-                showAboutDialog();
+                AboutDialog.show(this, privilegedAvailable, updateCheck::manualCheck);
                 return true;
             });
         }
         // 关于行默认显示当前版本号（有已知可更新版本时改成「版本 可更新最新版」）
-        refreshAboutSummary();
+        updateCheck.refreshAboutSummary();
         // 双模式授权：模式选择 + 授权状态已合并为同一项。点击整行 = 打开模式选择对话框
         authPref = pref("auth");
         if (authPref != null) {
@@ -807,7 +636,7 @@ public class MainActivity extends AppCompatActivity {
                 // 让用户**随时都能切换通道**——首次授权也允许直接切到 root / Shizuku，
                 // 而不是被锁死在 WSS 引导里。选 WSS 且未授权时，由 chooseAuthMode 内部
                 // 再弹一次性授权引导（见其 SECURE_SETTINGS 分支），默认弹窗授权不受影响。
-                chooseAuthMode();
+                auth.chooseMode();
                 return true;
             });
         }
@@ -821,7 +650,7 @@ public class MainActivity extends AppCompatActivity {
         swNotifyPref.setChecked(cfg.getBoolean(PREF_NOTIFY, true));
 
         // 初次进入即用当前模式渲染一次授权状态（精确结果等后台双检测回来再纠正）
-        updateAuthStatusUI();
+        auth.updateAuthStatusUI();
         // 底部「关于」行：点击弹窗展示版本/构建时间等（构建时间不再直接占用行摘要）
 
         // 主开关：一键开/关。关闭时记住两个子开关的组合，打开时原样还原。
@@ -849,6 +678,37 @@ public class MainActivity extends AppCompatActivity {
             bindSubSwitch(swDevOptsPref, (on, cb) -> DebugController.setDev(this, on, cb),
                     s -> s.dev, R.string.toast_write_not_effective, R.string.toast_devopts_hidden);
         }
+        // 无障碍行：关 = 清第三方条目（写前存记忆）；开 = 还原记忆列表。
+        // 「开」前预检有无记忆：无记忆时给明确提示（而非通用「写入未生效」），并吞掉拨动。
+        if (swA11yPref != null) {
+            swA11yPref.setOnPreferenceChangeListener((p, v) -> {
+                if (syncing) {
+                    return true;
+                }
+                if (swallowIfUnconfirmed()) {
+                    return false;
+                }
+                final boolean want = (Boolean) v;
+                if (want && !DebugController.hasA11ySave(this)) {
+                    Toast.makeText(this, R.string.a11y_no_save, Toast.LENGTH_LONG).show();
+                    return false;
+                }
+                DebugController.setA11y(this, want, (ok, s, reason) -> {
+                    if (!ok) {
+                        // 「系统隐藏了列表」不是失败，是需要用户确认（见 maybeAskA11yUnverified）
+                        if (!maybeAskA11yUnverified(reason)) {
+                            AuthCoordinator.resetSession();
+                            auth.handleWriteFailure(reason);
+                        }
+                    } else if (s == null || s.isOn(SwitchItem.A11Y) != want) {
+                        Toast.makeText(this, R.string.toast_write_not_effective,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                    refresh(s);
+                });
+                return true;
+            });
+        }
 
         // 调试三行右侧「›」箭头：点击跳系统对应设置项（开发者选项未开启时回退关于 + Toast，见 SettingsNav）。
         // 箭头点击与开关拨动互不干扰：箭头是独立 ImageButton，消费自身点击、不触发整行/开关切换。
@@ -860,6 +720,19 @@ public class MainActivity extends AppCompatActivity {
         }
         if (swDevOptsPref != null) {
             swDevOptsPref.setOnNavClickListener(() -> SettingsNav.navigate(this, SettingsNav.Target.DEV_OPTIONS));
+        }
+        if (swA11yPref != null) {
+            swA11yPref.setOnNavClickListener(() -> SettingsNav.navigate(this, SettingsNav.Target.A11Y));
+        }
+        // 「管理开关项」：弹窗配置每项是否显示 / 是否跟随主开关
+        if (manageItemsPref != null) {
+            manageItemsPref.setOnPreferenceClickListener(p -> {
+                ManageItemsDialog.show(this, () -> {
+                    rebuildSwitchList();
+                    refresh(DebugController.read(this));
+                });
+                return true;
+            });
         }
 
         // 「打开调试前先杀掉联动应用」：真正的执行在 DebugController 里（所有打开调试的入口统一处理）
@@ -896,7 +769,7 @@ public class MainActivity extends AppCompatActivity {
             ToggleShortcuts.markDirty(this);
             if (on) {
                 // 开启后提醒用户：以后怎么绕过自动跳转、进设置页（均基于现有能力，不新增入口）
-                showLinkageHintDialog();
+                linkage.showHintDialog();
             }
             return true;
         });
@@ -910,8 +783,8 @@ public class MainActivity extends AppCompatActivity {
         swNotifyPref.setOnPreferenceChangeListener((Preference p, Object v) -> {
             boolean on = (Boolean) v;
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NOTIFY, on).apply();
-            // 立即同步：若当前已是关闭态，开->弹通知，关->撤通知
-            if (DebugController.read(this).allOff()) {
+            // 立即同步：若当前主开关已是关闭态，开->弹通知，关->撤通知
+            if (DebugController.masterAllOff(this, DebugController.read(this))) {
                 if (on) {
                     AdbToggleService.start(this);
                 } else {
@@ -924,6 +797,9 @@ public class MainActivity extends AppCompatActivity {
             mainHandler.post(this::updateLiveUpdateState);
             return true;
         });
+
+        // 按开关项配置应用各行显隐（管理开关项里改过 shown/follow 后也要重跑）
+        rebuildSwitchList();
 
         // 状态变化改走进程内 listener 注册表（App 单进程，广播纯开销）
         DebugController.addStateListener(stateListener);
@@ -986,7 +862,7 @@ public class MainActivity extends AppCompatActivity {
             writer.write(want, (ok, s, reason) -> {
                 if (!ok) {
                     AuthCoordinator.resetSession();
-                    handleWriteFailure(reason);
+                    auth.handleWriteFailure(reason);
                 } else if (s == null || field.get(s) != want) {
                     // 命令退出码 0 却没写进去（个别 ROM 会屏蔽该键）：界面只会无声弹回，必须明确告知
                     Toast.makeText(MainActivity.this, notEffectiveRes, Toast.LENGTH_SHORT).show();
@@ -1008,7 +884,7 @@ public class MainActivity extends AppCompatActivity {
     private void toggleMaster() {
         DebugController.toggleMaster(this, (ok, s, reason) -> {
             if (ok) {
-                if (s.anyOn()) {
+                if (DebugController.masterAnyOn(this, s)) {
                     AdbToggleService.stop(MainActivity.this);
                 } else {
                     AdbToggleService.syncCloseNotification(MainActivity.this);
@@ -1017,52 +893,100 @@ public class MainActivity extends AppCompatActivity {
                 // 执行失败：授权大概率已失效（su 超时 / Shizuku 被撤销）。立即刷新授权状态，
                 // 让主开关与联动项灰掉并显示「未授权」+「重试」，而不是停在旧的「已授权」假象；
                 // 同时提示用户重试或切换授权模式。
+                // 例外：「系统隐藏了无障碍列表」不是授权问题，走二次确认（全局键此时已写下去了）。
+                if (maybeAskA11yUnverified(reason)) {
+                    refresh(s);
+                    return;
+                }
                 privilegedAvailable = false;
                 AuthCoordinator.resetSession();
                 applyRootState();
-                handleWriteFailure(reason);
+                auth.handleWriteFailure(reason);
             }
             refresh(s);
         });
     }
 
     /**
-     * 折叠/展开两个子开关：开启时默认展开，关闭时默认折叠；
-     * 用户点箭头可以手动覆盖（但关闭态下强制保持折叠，展开没有意义）。
+     * 折叠/展开「跟随主开关」的开关项：主开关开启时默认展开、关闭时默认折叠；
+     * 用户点箭头可手动覆盖（但关闭态下强制保持折叠，展开没有意义）。
+     * 不跟随主开关的显示项（如默认的开发者选项 / 无障碍）不受折叠影响、始终显示。
      */
-    private void applyMasterExpanded(boolean anyOn) {
-        PreferenceCategory cat = pref("catDebug");
-        if (cat == null || swUsbPref == null || swWirelessPref == null) {
-            return;
-        }
-        boolean want = anyOn
+    private void applyMasterExpanded(boolean masterOn) {
+        boolean want = masterOn
                 && (masterManualExpanded == null ? true : masterManualExpanded.booleanValue());
         if (want != subSwitchesShown) {
-            if (want) {
-                cat.addPreference(swUsbPref);
-                // API<30 没有无线调试键：该行已摘掉，不再加回来
-                if (wirelessSupported) {
-                    cat.addPreference(swWirelessPref);
-                }
-            } else {
-                cat.removePreference(swUsbPref);
-                cat.removePreference(swWirelessPref);
-            }
             subSwitchesShown = want;
+            rebuildSwitchList();
         }
         // 箭头图标随展开态同步（androidx：状态存进 Preference，行绑定时也会自动摆）
-        swMasterPref.setExpandedState(want);
+        if (swMasterPref != null) {
+            swMasterPref.setExpandedState(want);
+        }
     }
 
     /** 点箭头：手动切换展开态 */
     private void toggleExpanded() {
-        if (!DebugController.read(this).anyOn()) {
+        if (!DebugController.masterAnyOn(this, DebugController.read(this))) {
             return; // 关闭态强制保持折叠
         }
         masterManualExpanded = !subSwitchesShown;
         applyMasterExpanded(true);
     }
 
+    /**
+     * 按开关项配置 + 折叠态重建「调试开关」分类下各行的显隐与顺序：
+     *  - 隐藏项（shown=false）= 功能未启用：整行移除（不显示、不写入、不跟随）；
+     *  - 跟随主开关的显示项：折叠态（主开关关）时移除、展开态加回；
+     *  - 不跟随的显示项：始终显示（如默认的开发者选项 / 无障碍）。
+     * 顺序按「管理开关项」里拖出来的 SwitchConfig.getOrder() 映射到固定 order 槽位
+     * （10/20/30/40，位于 manageItems/auth 行之前），分类 setOrderingAsAdded(false)。
+     */
+    private void rebuildSwitchList() {
+        PreferenceCategory cat = pref("catDebug");
+        if (cat == null) {
+            return;
+        }
+        java.util.List<SwitchItem> order = SwitchConfig.getOrder(this);
+        for (int i = 0; i < order.size(); i++) {
+            SwitchItem item = order.get(i);
+            Preference p = itemPref(item);
+            if (p == null) {
+                continue;
+            }
+            p.setOrder(10 + 10 * i);
+            boolean visible = item.supported()
+                    && SwitchConfig.isShown(this, item)
+                    && (!SwitchConfig.followsMaster(this, item) || subSwitchesShown);
+            boolean attached = cat.findPreference(p.getKey()) != null;
+            if (visible && !attached) {
+                cat.addPreference(p);
+            } else if (!visible && attached) {
+                cat.removePreference(p);
+            }
+        }
+    }
+
+    /** 开关项 → 主界面 Preference 行 */
+    private Preference itemPref(SwitchItem item) {
+        switch (item) {
+            case USB:
+                return swUsbPref;
+            case WIRELESS:
+                return swWirelessPref;
+            case DEV:
+                return swDevOptsPref;
+            case A11Y:
+                return swA11yPref;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * 「管理开关项」弹窗：每项一个宽行（标题 + 显示/跟随复选框 + 右侧拖动柄），
+     * 支持拖动排序；确认后落盘（显示/跟随/顺序）并重建列表。
+     */
     /**
      * 主开关一键写入：唯一入口，两个子开关一起处理（su 写入在后台线程，回调回主线程）。
      * 关 -> 记忆当前组合并全关，按「临时关闭时弹通知」决定是否拉起常驻通知；
@@ -1075,7 +999,7 @@ public class MainActivity extends AppCompatActivity {
     private void applyMasterState(boolean on, final Runnable done) {
         DebugController.setMaster(this, on, (ok, s, reason) -> {
             if (ok) {
-                if (s.anyOn() != on) {
+                if (DebugController.masterAnyOn(this, s) != on) {
                     // 退出码 0 但真值没跟上（ROM 拦截该键）：明确提示写入未生效，别让用户以为成功
                     Toast.makeText(this, R.string.toast_write_not_effective, Toast.LENGTH_SHORT).show();
                 }
@@ -1089,10 +1013,14 @@ public class MainActivity extends AppCompatActivity {
                 // 写入失败：授权大概率已失效，立即刷新授权状态（主开关/联动灰掉 + 显示未授权），
                 // 而不是停在旧的「已授权」假象，让用户误以为操作成功了。
                 // 同时清掉本周期的授权缓存，下次操作前重新检测（权限可能稍后恢复）。
-                privilegedAvailable = false;
-                AuthCoordinator.resetSession();
-                applyRootState();
-                handleWriteFailure(reason);
+                // 例外：「系统隐藏了无障碍列表」不是授权问题，走二次确认；此时全局键已写下去了，
+                // 确认后只需补做 a11y 这一步，不再重复整轮写入。
+                if (!maybeAskA11yUnverified(reason)) {
+                    privilegedAvailable = false;
+                    AuthCoordinator.resetSession();
+                    applyRootState();
+                    auth.handleWriteFailure(reason);
+                }
             }
             refresh(s);
             if (done != null) {
@@ -1106,7 +1034,7 @@ public class MainActivity extends AppCompatActivity {
      *
      * @param autoJump 是否为「开启快捷打开后启动本 App」的自动跳转（决定是否弹跳转提示）
      */
-    private void runLinkage(String pkg, boolean autoJump) {
+    void runLinkage(String pkg, boolean autoJump) {
         // 从快捷方式冷启动时 onCreate 不会构建设置页（handleEntry 已判定为「自行处理」而跳过 showSettings），
         // 而 setMaster 是异步的、未授权时最坏要等满超时（10s）。若不先建好设置页，这段等待期间界面就是
         // 一个只有 toolbar、内容区空白的主页——表现就是「卡住 / 白屏」。
@@ -1130,10 +1058,10 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             AdbToggleService.syncCloseNotification(this);
-            if (!launchApp(pkg)) {
+            if (!linkage.launchApp(pkg)) {
                 // 目标应用已失效（卸载 / 停用）：提示并留在设置页，而不是静默闪回桌面。
                 // 同样未实际跳转，LinkageLauncher 未 markLaunched，下次进页仍可触发自动跳转。
-                handleLinkageTargetGone(pkg);
+                linkage.handleTargetGone(pkg);
                 if (!prefsLoaded) {
                     showSettings();
                 }
@@ -1152,183 +1080,44 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 快捷打开目标不可用（已卸载 / 已停用 / 无启动入口）的统一处理：
-     * 已卸载的顺手从列表清掉（与 rebuildLinkageList 的自动清理一致），已停用的保留（可随时恢复）；
-     * 两种情况都给出提示，避免「点了没反应」。
-     */
-    private void handleLinkageTargetGone(String pkg) {
-        if (isAppUninstalled(this, pkg)) {
-            List<String> apps = new ArrayList<>(LinkagePrefs.getApps(this));
-            if (apps.remove(pkg)) {
-                LinkagePrefs.setApps(this, apps);
-                ToggleShortcuts.markDirty(this);
-            }
-            Toast.makeText(this, R.string.linkage_app_uninstalled, Toast.LENGTH_LONG).show();
-            if (prefsLoaded) {
-                rebuildLinkageList();
-            }
-        } else {
-            Toast.makeText(this, R.string.linkage_app_unlaunchable, Toast.LENGTH_LONG).show();
-        }
-    }
-
-    /** 目标应用是否已卸载（停用的应用仍算「装着」，不清理、只在跳转失败时提示） */
-    private static boolean isAppUninstalled(Context ctx, String pkg) {
-        try {
-            ctx.getPackageManager().getApplicationInfo(pkg, 0);
-            return false;
-        } catch (Throwable t) {
-            return true;
-        }
-    }
-
-    // §2.5a：已卸载的快捷应用清理移到后台线程，避免每次 onResume 在主线程做 PM IPC。
-    private static final Object CLEAN_LOCK = new Object();
-    private static final java.util.concurrent.Executor CLEAN_EXEC =
-            java.util.concurrent.Executors.newSingleThreadExecutor();
-    private volatile long lastCleanAt = 0;
-
-    /**
-     * 后台线程检测并清理已卸载的快捷应用（§2.5a）。
-     * PM IPC（getApplicationInfo）在后台线程执行，不卡 UI；清理结果回主线程写配置 + 重建列表。
-     * 节流（每 2s 最多一次）+ 生命周期守卫（Activity 销毁后不回主线程操作）。
-     */
-    private void maybeCleanUninstalled() {
-        long now = android.os.SystemClock.uptimeMillis();
-        synchronized (CLEAN_LOCK) {
-            if (now - lastCleanAt < 2000) {
-                return;
-            }
-            lastCleanAt = now;
-        }
-        final List<String> apps = LinkagePrefs.getApps(this);
-        if (apps.isEmpty()) {
-            return;
-        }
-        CLEAN_EXEC.execute(() -> {
-            List<String> removed = new ArrayList<>();
-            for (String p : apps) {
-                if (isAppUninstalled(this, p)) {
-                    removed.add(p);
-                }
-            }
-            if (removed.isEmpty()) {
-                return;
-            }
-            final List<String> finalRemoved = new ArrayList<>(removed);
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) {
-                    return;
-                }
-                for (String r : finalRemoved) {
-                    linkageIconCache.remove(r);
-                }
-                List<String> alive = new ArrayList<>(apps);
-                alive.removeAll(finalRemoved);
-                LinkagePrefs.setApps(this, alive);
-                ToggleShortcuts.markDirty(this); // 默认目标可能随之清掉，动态快捷方式同步
-                if (prefsLoaded) {
-                    rebuildLinkageList();
-                }
-                Toast.makeText(this, R.string.linkage_app_uninstalled, Toast.LENGTH_LONG).show();
-            });
-        });
-    }
-
-    /**
-     * 「关于」弹窗：版本号 / 包名 / 构建时间 / 当前授权模式 / 签名指纹。
-     *
-     * 构建时间放在这里而不是行摘要上：行摘要只放一行字，塞不下这些；
-     * 而「设备上装的是不是最新版本」恰恰是排查问题时最常要的信息，
-     * 放进弹窗后仍可一键查看，不会因为折叠而看不到。
-     */
-    private void showAboutDialog() {
-        String buildTime = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
-                java.util.Locale.getDefault())
-                .format(new java.util.Date(BuildConfig.BUILD_TIME_MS));
-        AuthManager.Mode mode = AuthManager.getMode(this);
-
-        // 授权模式行与主界面「授权模式」保持一致文案（各模式 · 已授权/未授权）
-        int authStatusRes;
-        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
-            authStatusRes = privilegedAvailable ? R.string.auth_status_wss_ok : R.string.auth_status_wss_no;
-        } else if (mode == AuthManager.Mode.SHIZUKU) {
-            authStatusRes = privilegedAvailable ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no;
-        } else {
-            authStatusRes = privilegedAvailable ? R.string.auth_status_root_ok : R.string.auth_status_root_no;
-        }
-
-        // 结构化布局（dialog_about.xml）：直接给各 TextView 设文本，不使用带 %1$s/%1$d 占位符的字符串，
-        // 避免占位符未被 String.format 填充而原样显示。
-        android.view.View view = getLayoutInflater().inflate(R.layout.dialog_about, null);
-        ((TextView) view.findViewById(R.id.about_name_version))
-                .setText(getString(R.string.app_name) + " " + BuildConfig.VERSION_NAME);
-        ((TextView) view.findViewById(R.id.about_package)).setText(getPackageName());
-        ((TextView) view.findViewById(R.id.about_build_time))
-                .setText(getString(R.string.about_build_time_label) + buildTime);
-        ((TextView) view.findViewById(R.id.about_auth_mode)).setText(getString(authStatusRes));
-        // 右侧信息图标：跳转项目仓库
-        view.findViewById(R.id.about_info).setOnClickListener(v -> openUrl(ABOUT_REPO_URL));
-
-        final AlertDialog dlg = new MaterialAlertDialogBuilder(this)
-                .setView(view)
-                .setNegativeButton(R.string.about_credit, (d, which) -> openUrl(ABOUT_CREDIT_URL))
-                .setPositiveButton(android.R.string.ok, null)
-                .setNeutralButton(R.string.update_check, null) // 点击逻辑在 onShow 里接管
-                .create();
-        dlg.setOnShowListener(d -> {
-            Button neutral = dlg.getButton(AlertDialog.BUTTON_NEUTRAL);
-            // 「检查更新」常驻可见（待激活）：功能未配置时仍可点，提示尚未配置；
-            // 比「未上线就藏起来」更符合预期——关于页一眼能看到有此功能，配置好后即生效。
-            neutral.setOnClickListener(v -> manualCheckUpdate());
-        });
-        dlg.show();
-    }
-
-    /** 跳转外部链接（关于弹窗的署名按钮与信息图标用）；失败给 Toast 不闪退 */
-    private void openUrl(String url) {
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
-        } catch (Throwable t) {
-            Toast.makeText(this, R.string.about_open_failed, Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
      * 按完整状态刷新各行开关。
-     * 主开关 = 聚合态（任一开着就算开，因为 adbd 在跑）；子开关显示各自真值；
-     * 开发者选项行是独立开关，只反映 development_settings_enabled。
+     * 主开关 = 跟随主开关的项的聚合态（任一开着就算开）；子开关显示各自真值；
+     * 无障碍行显示第三方服务数（恢复失败时显示待办摘要）。
      */
     private void refresh(DebugController.State s) {
-        if (swMasterPref == null || swUsbPref == null || swWirelessPref == null) {
+        if (swMasterPref == null) {
             return;
         }
         // 真值尚未由授权通道确认时，界面按「上次确认状态」渲染，不用调用方传入的快照：
         // 那多半是 ContentResolver 兜底值（ROM 隐藏这两个键时恒为关），
         // 直接拿来显示会出现「启动先显示关闭、校准完又跳回开启」的闪变。
+        // 用 read()（命中 warmUp 预热的内存缓存）而非 lastKnownState：后者每次调用都读
+        // 偏好磁盘 + 现算无障碍计数（PM IPC），refresh 调用点极密，启动窗口期会被反复拖慢。
         if (!DebugController.isCalibrated()) {
-            s = DebugController.lastKnownState(this);
+            s = DebugController.read(this);
         }
-        boolean anyOn = s.anyOn();
+        // 主开关聚合：跟随主开关的项中任一开 = 开（a11y / dev 跟随时与 adbd 态会分叉）
+        java.util.EnumSet<SwitchItem> followed = SwitchConfig.followedItems(this);
+        boolean masterOn = s.anyOn(followed);
         // 真值未经本次授权通道确认时，显示「上次确认状态」的文案（保持稳定、不跳字）；
         // 只有首次使用（历史从没确认过、无上次状态）才显示「正在读取当前状态…」并置灰。
         final boolean calibrated = DebugController.isCalibrated();
         // 首次使用（无「上次状态」）才置灰；其余情况显示上次状态、不置灰，
         // 真值不一致时校准回来修正一次（见 MasterSwitchPreference 的显示规则）
         final boolean known = calibrated || DebugController.hasConfirmedBefore(this);
-        swMasterPref.applyState(anyOn, known);
+        swMasterPref.applyState(masterOn, known);
         // 展开态跟随主开关：开→展开，关→折叠
-        applyMasterExpanded(anyOn);
-        // 全开或全关显示明确结论；只有一个开着时提示"部分开启"，避免误以为已安全
+        applyMasterExpanded(masterOn);
+        // 全跟随项都开或都关显示明确结论；部分开启时提示"部分开启"，避免误以为已安全
         int masterSum;
         int masterColor;
         if (!known) {
             masterSum = R.string.master_checking;
             masterColor = R.color.stateUnknown;
-        } else if (s.allOff()) {
+        } else if (s.allOff(followed)) {
             masterSum = R.string.master_off;
             masterColor = R.color.stateOff;
-        } else if (s.usb && s.wireless) {
+        } else if (masterOn && allOn(followed, s)) {
             masterSum = R.string.master_on;
             masterColor = R.color.stateOn;
         } else {
@@ -1339,27 +1128,57 @@ public class MainActivity extends AppCompatActivity {
         // 这里不能覆盖它 —— 否则一次状态广播就把未授权提示冲掉了。
         if (privilegedAvailable) {
             swMasterPref.setSummary(masterSum);
-            swMasterPref.setIcon(stateIcon(masterColor));
+            setRowIcon(swMasterPref, masterIconSlot, masterColor);
         }
 
-        swUsbPref.setSummary(s.usb ? R.string.usb_on : R.string.usb_off);
-        swUsbPref.setIcon(stateIcon(s.usb ? R.color.stateOn : R.color.stateOff));
-
-        swWirelessPref.setSummary(s.wireless ? R.string.wireless_on : R.string.wireless_off);
-        swWirelessPref.setIcon(stateIcon(s.wireless ? R.color.stateOn : R.color.stateOff));
-
+        if (swUsbPref != null) {
+            swUsbPref.setSummary(s.usb ? R.string.usb_on : R.string.usb_off);
+            setRowIcon(swUsbPref, usbIconSlot, s.usb ? R.color.stateOn : R.color.stateOff);
+        }
+        if (swWirelessPref != null) {
+            // 无线调试三态（仅显示层，不改任何写入/判定语义）：
+            //  - 开关关（key=0）→ 已关闭（橙色）
+            //  - 开关开（key=1）+ 已连 Wi-Fi → 已开启 · adbd 运行中（绿色）
+            //  - 开关开（key=1）+ 未连 Wi-Fi → 已开启 · 未激活（同绿色，只换文案）
+            // 判据用「当前是否连着 Wi-Fi」而非底层 prop：实测 K90 / 荣耀关 Wi-Fi 后
+            // key 与 persist.adb.tls_server.enable 都保持 1，prop 根本判断不出「此刻不可用」。
+            // prop 读取代码保留（调试/历史用途），但不再作为显示判据。三模式统一生效。
+            if (!s.wireless) {
+                swWirelessPref.setSummary(R.string.wireless_off);
+                setRowIcon(swWirelessPref, wirelessIconSlot, R.color.stateOff);
+            } else if (com.elleng.adbswitch.util.NetworkUtil.isWifiConnected(this)) {
+                swWirelessPref.setSummary(R.string.wireless_on);
+                setRowIcon(swWirelessPref, wirelessIconSlot, R.color.stateOn);
+            } else {
+                swWirelessPref.setSummary(R.string.wireless_inactive);
+                setRowIcon(swWirelessPref, wirelessIconSlot, R.color.stateOn);
+            }
+        }
         if (swDevOptsPref != null) {
             swDevOptsPref.setSummary(s.dev ? R.string.devopts_on : R.string.devopts_off);
-            swDevOptsPref.setIcon(stateIcon(s.dev ? R.color.stateOn : R.color.stateOff));
+            setRowIcon(swDevOptsPref, devIconSlot, s.dev ? R.color.stateOn : R.color.stateOff);
+        }
+        if (swA11yPref != null) {
+            refreshA11yRow(s);
         }
 
         syncing = true;
-        swUsbPref.setChecked(s.usb);
-        swWirelessPref.setChecked(s.wireless);
+        if (swUsbPref != null) {
+            swUsbPref.setChecked(s.usb);
+        }
+        if (swWirelessPref != null) {
+            swWirelessPref.setChecked(s.wireless);
+        }
         if (swDevOptsPref != null) {
             swDevOptsPref.setChecked(s.dev);
         }
+        if (swA11yPref != null) {
+            swA11yPref.setChecked(s.a11yCount > 0);
+        }
         syncing = false;
+
+        // 无障碍恢复失败的一次性提示（每次最多弹一条，见 consumeA11yRestoreToast）
+        maybeToastA11yRestore();
 
         // 长按快捷方式的状态灯与界面同步
         ToggleShortcuts.markDirty(this);
@@ -1367,8 +1186,110 @@ public class MainActivity extends AppCompatActivity {
         // 校准状态变化后无需重挂点击：监听常驻，窗口期由回调内部自行屏蔽
     }
 
+    /** 给定项集合是否全部开启 */
+    private static boolean allOn(java.util.Collection<SwitchItem> items, DebugController.State s) {
+        for (SwitchItem i : items) {
+            if (!s.isOn(i)) {
+                return false;
+            }
+        }
+        return !items.isEmpty();
+    }
+
+    /** 无障碍行摘要/图标：恢复失败优先显示待办，其次显示第三方服务数 */
+    private void refreshA11yRow(DebugController.State s) {
+        int pending = DebugController.a11yRestorePending(this);
+        if (pending > 0) {
+            swA11yPref.setSummary(getString(R.string.a11y_restore_pending, pending));
+            setRowIcon(swA11yPref, a11yIconSlot, R.color.error);
+            // 懒复核自愈：写入时核对窗口短（慢绑定/ROM 缓存延迟会误报），稍后重核绑上即清
+            scheduleA11yRecheck();
+        } else if (s.a11yCount > 0) {
+            a11yRecheckCount = 0; // 无待办：重置懒复核配额，日后真出待办还能再重核
+            swA11yPref.setSummary(getString(R.string.a11y_on, s.a11yCount));
+            setRowIcon(swA11yPref, a11yIconSlot, R.color.stateOn);
+        } else {
+            a11yRecheckCount = 0;
+            swA11yPref.setSummary(R.string.a11y_off);
+            setRowIcon(swA11yPref, a11yIconSlot, R.color.stateOff);
+        }
+    }
+
+    /**
+     * 懒复核：pending>0 时延后 5s 重核（绑上自动清掉误报）。
+     *
+     * 必须设上限：复核结论若一直不变（如待办条目已不可能再绑定），「显示 → 排复核 → 结论不变
+     * → 再排」会变成每 5 秒一次的无限空转（持续唤醒 + 日志刷屏），用户看到的就是界面一直
+     * 卡在同一个状态。达到上限即停止，等下一次真实写入 / 重新进入页面再重新计数。
+     */
+    private static final int A11Y_RECHECK_MAX = 2;
+    private boolean a11yRecheckScheduled = false;
+    private int a11yRecheckCount = 0;
+    private final Runnable a11yRecheckRun = () -> {
+        a11yRecheckScheduled = false;
+        DebugController.recheckA11yRestore(this, () -> refresh(DebugController.read(this)));
+    };
+
+    private void scheduleA11yRecheck() {
+        if (a11yRecheckScheduled || a11yRecheckCount >= A11Y_RECHECK_MAX) {
+            return;
+        }
+        a11yRecheckScheduled = true;
+        a11yRecheckCount++;
+        mainHandler.postDelayed(a11yRecheckRun, 5000);
+    }
+
+    /** 恢复失败后的一次性 Toast（持久化摘要由 refreshA11yRow 常驻显示） */
+    private void maybeToastA11yRestore() {
+        int pending = DebugController.a11yRestorePending(this);
+        if (pending > 0 && DebugController.consumeA11yRestoreToast(this)) {
+            Toast.makeText(this, getString(R.string.a11y_restore_partial, pending),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * 「系统隐藏了无障碍列表」的二次确认。
+     *
+     * 关闭无障碍 = 把列表里的第三方条目剔除掉再写回；但荣耀这类 ROM 向第三方隐藏了该键，
+     * 应用读到空表时无法分辨哪些是系统预装服务，写空表可能把它们一起关掉（不可逆）。
+     * 这类情况不替用户做主：拦下来让用户确认——点「继续」才按空表口径执行，点「取消」什么都不写。
+     *
+     * @return true = 这是「等待确认」的失败原因，已弹框（调用方不要再走通用失败提示/授权重测）
+     */
+    private boolean maybeAskA11yUnverified(int reason) {
+        if (reason != RootUtil.REASON_READ_HIDDEN) {
+            return false;
+        }
+        final int dir = DebugController.a11yConfirmPendingDirection();
+        if (dir < 0 || isFinishing() || isDestroyed()) {
+            return false; // 没有待确认的写入（或页面已销毁）：按普通失败处理
+        }
+        final boolean want = dir == 1;
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.a11y_hidden_title)
+                .setMessage(R.string.a11y_hidden_msg)
+                .setNegativeButton(android.R.string.cancel, (d, w) ->
+                        refresh(DebugController.read(this)))
+                .setPositiveButton(R.string.a11y_hidden_continue, (d, w) ->
+                        DebugController.setA11yConfirmed(this, want, (ok, s, r) -> {
+                            if (!ok) {
+                                if (!maybeAskA11yUnverified(r)) {
+                                    AuthCoordinator.resetSession();
+                                    auth.handleWriteFailure(r);
+                                }
+                            } else if (s == null || s.isOn(SwitchItem.A11Y) != want) {
+                                Toast.makeText(this, R.string.toast_write_not_effective,
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                            refresh(s);
+                        }))
+                .show();
+        return true;
+    }
+
     /** 根据当前授权模式是否可用刷新控件与提示：未授权时禁用并提示，授权后及时恢复 */
-    private void applyRootState() {
+    void applyRootState() {
         // 偏好项任一为 null 说明设置页还没建好，直接跳过刷新
         if (swMasterPref == null || swUsbPref == null || swLinkagePref == null
                 || swNotifyPref == null || swWirelessPref == null) {
@@ -1388,6 +1309,11 @@ public class MainActivity extends AppCompatActivity {
             if (swDevOptsPref != null) {
                 swDevOptsPref.setNavigateMode(false);
             }
+            // 无障碍行同调试三行（写 enabled_accessibility_services 同样要写权限）
+            if (swA11yPref != null) {
+                swA11yPref.setEnabled(true);
+                swA11yPref.setNavigateMode(false);
+            }
             // 联动分类下（开关 + 动态填充的默认/应用/管理行）一并启用
             setLinkageEnabled(true);
             // 授权恢复：把主开关行从「未授权，无法写入」改回真实状态文案。
@@ -1395,7 +1321,7 @@ public class MainActivity extends AppCompatActivity {
             refresh(DebugController.read(this));
         } else {
             swMasterPref.setSummary(R.string.auth_no_priv);
-            swMasterPref.setIcon(stateIcon(R.color.error));
+            setRowIcon(swMasterPref, masterIconSlot, R.color.error);
             swMasterPref.setEnabled(false);
             // §4.1：「关闭调试后是否弹常驻通知」是纯本地偏好，不依赖写权限，未授权时也不禁用，
             // 让用户能先把配置配好（执行点击时才会按现有逻辑提示授权）。
@@ -1412,6 +1338,12 @@ public class MainActivity extends AppCompatActivity {
             if (swDevOptsPref != null) {
                 swDevOptsPref.setNavigateMode(true);
             }
+            // 无障碍行同调试三行：未授权时开关置灰（navigate 模式），行点击进系统无障碍设置。
+            // 写 enabled_accessibility_services 同样要写权限，不能只有它保持可拨。
+            if (swA11yPref != null) {
+                swA11yPref.setEnabled(true);
+                swA11yPref.setNavigateMode(true);
+            }
             // 联动分类下所有项一并禁用（无授权则无法写入调试开关，联动也失去意义）
             setLinkageEnabled(false);
         }
@@ -1419,11 +1351,11 @@ public class MainActivity extends AppCompatActivity {
         updateLiveUpdateState();
         // §3.3：kill 开关可用性由 updateKillPrefState 独占，确保本刷新路径下也被正确置灰/启用
         // （setLinkageEnabled 已不再触碰 swKillPref）。
-        updateKillPrefState();
+        auth.updateKillPrefState();
     }
 
     /** 联动分类下所有项（开关 + 动态填充的默认 / 应用 / 管理行）一并启用或禁用 */
-    private void setLinkageEnabled(boolean enabled) {
+    void setLinkageEnabled(boolean enabled) {
         PreferenceCategory cat = pref("catLinkage");
         if (cat == null) {
             return;
@@ -1439,175 +1371,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * 按当前快捷打开配置动态重建「快捷打开」分类下的列表：
-     *  1) 默认快捷应用行（图标在右侧）；2) 每个快捷应用一行（点击=快捷打开 / 长按=创建快捷方式）；
-     *  3) 管理快捷应用行。
-     *  每次配置变化（增删 app、改默认、授权状态变化）都重建，保证 UI 与配置一致。
-     */
-    private void rebuildLinkageList() {
-        PreferenceCategory cat = pref("catLinkage");
-        if (cat == null) {
-            return;
-        }
-        List<String> apps = LinkagePrefs.getApps(this);
-        // §2.5a：已卸载的快捷应用清理已移到后台线程（见 maybeCleanUninstalled），此处不再在主线程
-        // 做 PM IPC（getApplicationInfo）。卸载的应用由后台清理异步移除；清理到达前 UI 用
-        // loadAppDrawable / getApplicationLabel 的兜底层显示（图标=本应用、标签=包名），不会崩。
-        String def = LinkagePrefs.getDefault(this);
-        // 只有一个快捷应用时自动选它为默认（兼容旧数据：早先版本不会自动设默认）
-        if (apps.size() == 1 && def.isEmpty()) {
-            def = apps.get(0);
-            LinkagePrefs.setDefault(this, def);
-        }
-        // 内容指纹：配置与授权状态都没变就不重建。
-        // 重建要移除/新建所有 Preference，并在主线程同步 getApplicationIcon（跨进程 + 解码），
-        // 而 onResume 每次都会走到这里 —— 每次回前台都为一份没变的列表重做一遍纯属浪费。
-        String sig = privilegedAvailable + "|" + def + "|" + android.text.TextUtils.join(",", apps);
-        if (sig.equals(lastLinkageSignature)) {
-            return;
-        }
-        lastLinkageSignature = sig;
-
-        // 先移除上一轮动态项（保留静态的 swLinkage / swKillBeforeOpen）
-        List<Preference> stale = new ArrayList<>();
-        for (int i = 0; i < cat.getPreferenceCount(); i++) {
-            Preference p = cat.getPreference(i);
-            String k = p.getKey();
-            if (k != null && (k.equals(LINKAGE_KEY_DEFAULT)
-                    || k.equals(LINKAGE_KEY_MANAGE)
-                    || k.startsWith(LINKAGE_APP_KEY_PREFIX))) {
-                stale.add(p);
-            }
-        }
-        for (Preference p : stale) {
-            cat.removePreference(p);
-        }
-
-        // 1) 默认快捷应用行：开启快捷打开后要打开的目标；应用图标放在右侧
-        // （androidx 行点击/长按原生触发，直接挂监听，无需旧 ListView 行接线）
-        Preference defPref = new Preference(this);
-        defPref.setKey(LINKAGE_KEY_DEFAULT);
-        defPref.setTitle(R.string.linkage_default_title);
-        defPref.setLayoutResource(R.layout.pref_row_icon_right);
-        // 左侧不保留图标空位（图标在行尾；未设默认时右侧也不留空框）
-        defPref.setIconSpaceReserved(false);
-        defPref.setOnPreferenceClickListener(p -> {
-            openDefaultPicker();
-            return true;
-        });
-        CharSequence defLabel = def.isEmpty() ? getString(R.string.linkage_default_none) : getApplicationLabel(def);
-        defPref.setSummary(defLabel);
-        defPref.setIcon(def.isEmpty() ? null : loadAppDrawableCached(def));
-        cat.addPreference(defPref);
-
-        // 2) 每个快捷应用一行：整行点击=快捷打开；长按=创建桌面快捷方式
-        for (String pkg : apps) {
-            LongClickPreference p = new LongClickPreference(this);
-            p.setKey(LINKAGE_APP_KEY_PREFIX + pkg);
-            p.setLayoutResource(R.layout.pref_row);
-            CharSequence label = getApplicationLabel(pkg);
-            // 标题只显示应用名；它是否为「默认快捷应用」由上方「默认快捷应用」行统一体现，这里不再重复标注
-            p.setTitle(label == null ? pkg : label);
-            // 摘要改为操作提示，不再显示包名
-            p.setSummary(R.string.quick_hint);
-            p.setIcon(loadAppDrawableCached(pkg));
-            p.setOnPreferenceClickListener(pv -> {
-                if (!privilegedAvailable) {
-                    Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
-                    return true;
-                }
-                runLinkage(pkg, false);
-                return true;
-            });
-            p.setOnRowLongClickListener(() -> {
-                if (!privilegedAvailable) {
-                    Toast.makeText(this, R.string.auth_need_grant, Toast.LENGTH_SHORT).show();
-                    return true;
-                }
-                createDesktopShortcutFor(pkg);
-                return true;
-            });
-            cat.addPreference(p);
-        }
-
-        // 3) 管理快捷应用行（打开多选弹窗，一次性增删多个 app）
-        Preference manage = new Preference(this);
-        manage.setKey(LINKAGE_KEY_MANAGE);
-        manage.setTitle(R.string.linkage_manage_title);
-        manage.setLayoutResource(R.layout.pref_row);
-        // 无图标行：不保留图标空位，与其它 pref_row 行左缘对齐（androidx 默认会保留约 50dp）
-        manage.setIconSpaceReserved(false);
-        manage.setSummary(apps.isEmpty()
-                ? getString(R.string.linkage_apps_empty)
-                : getString(R.string.linkage_manage_sum));
-        manage.setOnPreferenceClickListener(p -> {
-            openAppPicker();
-            return true;
-        });
-        cat.addPreference(manage);
-
-        // 联动项跟随授权可用性
-        setLinkageEnabled(privilegedAvailable);
-    }
-
-    /** 打开联动应用选择器，并在选中后写回配置、刷新行与桌面快捷方式 */
-    private void openAppPicker() {
-        long now = android.os.SystemClock.uptimeMillis();
-        if (lastPickerOpenAt > 0 && now - lastPickerOpenAt < 500) {
-            return; // 防抖：避免 ListView 行点击与 preference click 同时触发，弹出两个选择器
-        }
-        lastPickerOpenAt = now;
-        // 多选：预勾已选应用，确认后整组写回（勾上=新增，取消=移除）
-        List<String> current = LinkagePrefs.getApps(this);
-        AppListDialog.showMulti(this, current, chosen -> {
-            LinkagePrefs.setApps(this, chosen);
-            rebuildLinkageList();
-            // 选完立刻刷新动态快捷方式（「启动联动应用」现取默认 app）
-            ToggleShortcuts.markDirty(this);
-        });
-    }
-
-    /**
-     * 「默认跳转应用」选择：列出当前联动应用，点选即设为默认跳转目标。
-     * 开启「自动联动跳转」后必须设置它（决定启动本 App 时跳去哪个）。
-     * 没添加任何联动应用时提示先去添加。
-     */
-    private void openDefaultPicker() {
-        List<String> apps = LinkagePrefs.getApps(this);
-        if (apps.isEmpty()) {
-            Toast.makeText(this, R.string.linkage_apps_empty_toast, Toast.LENGTH_LONG).show();
-            return;
-        }
-        String cur = LinkagePrefs.getDefault(this);
-        int checked = -1;
-        for (int i = 0; i < apps.size(); i++) {
-            if (apps.get(i).equals(cur)) {
-                checked = i;
-                break;
-            }
-        }
-        CharSequence[] labels = new CharSequence[apps.size()];
-        for (int i = 0; i < apps.size(); i++) {
-            CharSequence l = getApplicationLabel(apps.get(i));
-            labels[i] = (l == null ? apps.get(i) : l);
-        }
-        final int[] pick = {checked};
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.linkage_default_title)
-                .setSingleChoiceItems(labels, checked, (d, which) -> pick[0] = which)
-                .setPositiveButton(android.R.string.ok, (d, which) -> {
-                    if (pick[0] < 0) {
-                        return;
-                    }
-                    LinkagePrefs.setDefault(this, apps.get(pick[0]));
-                    rebuildLinkageList();
-                    ToggleShortcuts.markDirty(this);
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
     /** 打开「实时动态」引导（防抖，避免行点击与 preference click 同时触发） */
     private void openLiveUpdate() {
         long now = android.os.SystemClock.uptimeMillis();
@@ -1618,53 +1381,45 @@ public class MainActivity extends AppCompatActivity {
         checkAndPromptLiveUpdate();
     }
 
-    /** 开启「快捷打开」后弹窗：告知如何绕过自动跳转、进入设置页（均为现有入口，不新增功能） */
-    private void showLinkageHintDialog() {
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.linkage_hint_title)
-                .setMessage(R.string.linkage_hint_body)
-                .setPositiveButton(android.R.string.ok, null)
-                .show();
-    }
-
-    private CharSequence getApplicationLabel(String pkg) {
-        try {
-            return getPackageManager().getApplicationLabel(
-                    getPackageManager().getApplicationInfo(pkg, 0));
-        } catch (Throwable t) {
-            return pkg;
-        }
-    }
-
-    /** 状态圆点图标（实心圆，随状态变色）；显示尺寸由 pref_row_state 的 20dp 图标框决定，约等于一行文字高。
-     *  按 colorRes 缓存复用：refresh 每次都会取多个同色圆点，避免重复 new Drawable。 */
     /**
-     * 状态圆点：每次返回一个新的 GradientDrawable 实例。
-     * §4.7：旧实现按 colorRes 缓存并跨多行复用同一个 Drawable，多 View 共享会互相覆盖
-     * setBounds，可能导致某行圆点尺寸异常。圆点极小、创建成本可忽略，不复用更稳妥。
+     * 行状态圆点的缓存槽（**每行一个**，不跨行共享）。
+     *
+     * 为什么必须缓存：androidx 的 {@code Preference.setIcon} 是**引用比较**——
+     * 传入新实例必走 {@code notifyChanged()} → RecyclerView 整行重绑。
+     * refresh() 的调用点极密（写入回调 + 状态 listener + Settings 观察者 + 网络回调 + 授权刷新），
+     * 每次都 new 一个圆点，等于每次刷新都把主开关行重绑一遍：
+     * 用户看到的就是「点任何开关（哪怕是不跟随主开关的项）主开关都闪一下」。
+     * 复用同一实例则颜色未变时 setIcon 直接早退，不产生任何重绑。
+     * 仍按行独立持有实例，避免旧实现那种多 View 共享同一 Drawable 互相覆盖 setBounds 的问题。
      */
-    private GradientDrawable stateIcon(int colorRes) {
-        GradientDrawable d = new GradientDrawable();
-        d.setShape(GradientDrawable.OVAL);
-        d.setColor(getResources().getColor(colorRes, getTheme()));
-        d.setSize(40, 40);
-        return d;
+    private static final class IconSlot {
+        GradientDrawable drawable;
+        int colorRes;
     }
 
-    /** 启动目标应用；返回是否成功拉起（已卸载 / 已停用 / 无启动入口都会失败） */
-    private boolean launchApp(String pkg) {
-        try {
-            Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-            if (i == null) {
-                return false;
-            }
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
-            return true;
-        } catch (Throwable t) {
-            android.util.Log.w(TAG, "launchApp failed: " + pkg, t);
-            return false;
+    private final IconSlot masterIconSlot = new IconSlot();
+    private final IconSlot usbIconSlot = new IconSlot();
+    private final IconSlot wirelessIconSlot = new IconSlot();
+    private final IconSlot devIconSlot = new IconSlot();
+    private final IconSlot a11yIconSlot = new IconSlot();
+
+    /**
+     * 给某一行设置状态圆点：颜色与上次相同就复用同一 Drawable 实例（setIcon 内部引用相等即早退，
+     * 不会触发整行重绑）；颜色变了才新建实例。
+     */
+    private void setRowIcon(androidx.preference.Preference pref, IconSlot slot, int colorRes) {
+        if (pref == null) {
+            return;
         }
+        if (slot.drawable == null || slot.colorRes != colorRes) {
+            GradientDrawable d = new GradientDrawable();
+            d.setShape(GradientDrawable.OVAL);
+            d.setColor(getResources().getColor(colorRes, getTheme()));
+            d.setSize(40, 40);
+            slot.drawable = d;
+            slot.colorRes = colorRes;
+        }
+        pref.setIcon(slot.drawable);
     }
 
     @Override
@@ -1692,7 +1447,7 @@ public class MainActivity extends AppCompatActivity {
         // 探测在后台线程执行，不阻塞 UI；结果经 AuthResult 回主线程刷新状态与提示。
         if (fromBg || !privilegedAvailable) {
             AuthCoordinator.resetSession();
-            performAuthCheck(true);
+            auth.check(true);
         }
         // 状态（bug4：在系统里关了调试、回到应用却仍显示开启；首次回常错、再回才对）：
         // 从后台返回时作废缓存、强制用授权通道重读。此前只 refresh(read())——read 命中仍在
@@ -1704,14 +1459,16 @@ public class MainActivity extends AppCompatActivity {
         }
         // 先按当前缓存即时渲染（可能仍是旧值），真值读回后由 stateListener 再刷新一次
         refresh(DebugController.read(this));
-        rebuildLinkageList();
+        linkage.rebuildList();
         // §2.5a：已卸载快捷应用清理移到后台线程，避免在主线程做 PM IPC
-        maybeCleanUninstalled();
+        linkage.maybeCleanUninstalled();
         updateLiveUpdateState();
         // 关于行可能已在后台自动检查后更新（可更新提示），回到前台即时同步
-        refreshAboutSummary();
+        updateCheck.refreshAboutSummary();
         // 开始监听外部对这两个 Settings 键的改动（App 在前台的场景，onResume 的回读覆盖不到）
         observeSettings(true);
+        // 监听 Wi-Fi 连接变化：无线行的「未激活」判据是当前网络，断开/连回都要即时重绘
+        observeNetwork(true);
     }
 
     @Override
@@ -1721,13 +1478,22 @@ public class MainActivity extends AppCompatActivity {
         // 补偿在后台期间（observer 已反注册）错过的外部改动与授权变化。
         cameFromBackground = true;
         observeSettings(false);
+        observeNetwork(false);
+        // 停掉待执行的 a11y 懒复核（回前台后 refresh 会重新排）
+        mainHandler.removeCallbacks(a11yRecheckRun);
+        a11yRecheckScheduled = false;
+        // 回到前台是一次全新观察窗口：重置配额，避免上次会话用完次数后永远不再重核
+        a11yRecheckCount = 0;
     }
 
     /**
      * 注册/反注册 Settings 监听，避免泄漏与无谓开销。
      *
-     * 只监听 DebugController 管理的这三个键的 URI，不监听整个 Settings.Global.CONTENT_URI：
+     * 只监听 DebugController 管理的键（三个 Settings.Global 键 + Settings.Secure 的
+     * 无障碍列表键）的 URI，不监听整个 Settings.Global.CONTENT_URI：
      * 后者会让任何 global 设置变更（亮度、飞行模式等）都回调一次，白白触发一轮状态刷新。
+     * 无障碍列表在 Secure 命名空间，URI 不同，必须单独注册——外部在系统设置里增删
+     * 无障碍服务同样要即时刷新数量/开关态（实测 bug：不注册就只能等写路径重数）。
      */
     private void observeSettings(boolean register) {
         try {
@@ -1740,6 +1506,8 @@ public class MainActivity extends AppCompatActivity {
                     cr.registerContentObserver(
                             Settings.Global.getUriFor(key), false, settingsObserver);
                 }
+                cr.registerContentObserver(
+                        Settings.Secure.getUriFor(A11yHelper.KEY), false, settingsObserver);
                 settingsObserverRegistered = true;
             } else {
                 if (!settingsObserverRegistered) {
@@ -1750,6 +1518,31 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Throwable t) {
             android.util.Log.w(TAG, "observe settings failed", t);
+        }
+    }
+
+    /** 注册/反注册默认网络监听，随前台生命周期走，避免泄漏与后台无谓回调 */
+    private void observeNetwork(boolean register) {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) {
+                return;
+            }
+            if (register) {
+                if (wifiCallbackRegistered) {
+                    return;
+                }
+                cm.registerDefaultNetworkCallback(wifiCallback, mainHandler);
+                wifiCallbackRegistered = true;
+            } else {
+                if (!wifiCallbackRegistered) {
+                    return;
+                }
+                cm.unregisterNetworkCallback(wifiCallback);
+                wifiCallbackRegistered = false;
+            }
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "observe network failed", t);
         }
     }
 
@@ -1781,633 +1574,6 @@ public class MainActivity extends AppCompatActivity {
             cat.removePreference(liveUpdatePref);
         }
         liveUpdateShown = want;
-    }
-
-    // —— 双模式授权 ——
-
-    /** 弹出授权模式选择对话框（WSS 推荐 / root / Shizuku），选中后持久化并立即重测 */
-    private void chooseAuthMode() {
-        final AuthManager.Mode cur = AuthManager.getMode(this);
-        final int checked = cur == AuthManager.Mode.ROOT ? 1
-                : cur == AuthManager.Mode.SHIZUKU ? 2 : 0;
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.auth_choose_title)
-                .setSingleChoiceItems(
-                        new CharSequence[]{getString(R.string.auth_mode_wss),
-                                getString(R.string.auth_mode_root),
-                                getString(R.string.auth_mode_shizuku)},
-                        checked,
-                        (d, which) -> {
-                            AuthManager.Mode mode = which == 1 ? AuthManager.Mode.ROOT
-                                    : which == 2 ? AuthManager.Mode.SHIZUKU
-                                    : AuthManager.Mode.SECURE_SETTINGS;
-                            AuthManager.setMode(MainActivity.this, mode);
-                            // 执行通道变了（WSS 直写 ↔ su ↔ Shizuku），旧状态缓存作废并立即用新通道重新校准：
-                            // 不作废的话，切换后 UI 仍按旧缓存渲染，且校准可能被节流挡住导致卡在旧值。
-                            DebugController.invalidateAndRefresh(MainActivity.this);
-                            // 切换模式后授权状态必变，重置缓存、强制重新检测
-                            AuthCoordinator.resetSession();
-                            // 旧通道的「杀应用能力」结论对新通道无意义（root 与 Shizuku 是否授权各自独立）
-                            DebugController.clearKillCapability(MainActivity.this);
-                            // 重新武装「WSS 未授权自动引导」：切到 WSS 时应当再自动弹一次
-                            wssBootstrapShown = false;
-                            d.dismiss();
-                            updateAuthStatusUI();
-                            if (mode == AuthManager.Mode.SECURE_SETTINGS) {
-                                // 选了推荐通道：还没授权就给一次性引导；已授权则按新通道重测
-                                if (!AuthManager.hasWriteSecureSettings(MainActivity.this)) {
-                                    showWssBootstrapDialog();
-                                } else {
-                                    performAuthCheck(true);
-                                }
-                                return;
-                            }
-                            // 切到 root / Shizuku：Shizuku 模式先主动请求授权（force，用户是刚明确切过来的）
-                            maybeRequestShizukuPermission(true);
-                            // force：用户刚切了模式，旧探测结论作废，必须立刻按新通道重测
-                            performAuthCheck(true);
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    /**
-     * 写入失败的统一收口（主 / 子开关三条回调共用）。
-     *
-     * 免root模式尚未授权（REASON_NEED_GRANT）时不弹笼统 Toast，直接打开一次性授权引导 ——
-     * 用户缺的是一次 pm grant，既不是 root 也不是 Shizuku，别把人的注意力带偏
-     * （磁贴 / 桌面快捷方式等无界面入口走 DebugController.failureMessage 的对应文案）。
-     */
-    private void handleWriteFailure(int reason) {
-        if (reason == RootUtil.REASON_NEED_GRANT) {
-            showWssBootstrapDialog();
-            return;
-        }
-        Toast.makeText(this, DebugController.failureMessage(this, reason),
-                Toast.LENGTH_SHORT).show();
-        // 授权类失败（没有 su / su 被拒 / Shizuku 没起 / Shizuku 没授权）：说明之前探测到的
-        // 「已授权」已经失效（后台被撤销、root 被关掉、Shizuku 被杀）。此时只弹一句 Toast 不够——
-        // 「授权模式」那一行仍显示已授权、底部也没有常驻重试入口，用户不知道要去重新授权。
-        // 强制重测一次，让状态行变红并恢复底部「重试」提示，与真实授权态对齐。
-        if (reason == RootUtil.REASON_NO_SU || reason == RootUtil.REASON_DENIED
-                || reason == RootUtil.REASON_NO_BINDER
-                || reason == RootUtil.REASON_NO_PERMISSION) {
-            AuthCoordinator.resetSession();
-            performAuthCheck(true);
-        }
-    }
-
-    /**
-     * WRITE_SECURE_SETTINGS 一次性授权引导（三种等价方式，实现都在 AuthManager）：
-     *   · 手动 adb   —— 用户复制命令到电脑执行一次（本文只负责复制）
-     *   · Shizuku 代跑 —— 本应用借 Shizuku 的 shell(uid 2000) 跑一次 pm grant
-     *   · root 代跑   —— 本应用借 su 跑一次 pm grant
-     * 授权粘滞：跨重启 / 软重启保留，仅卸载重装会撤销，故无需重复引导。
-     */
-    private void showWssBootstrapDialog() {
-        // 默认在弹窗关闭后恢复底部常驻「重试」提示（仍处于未授权时）。
-        // 1.0.4 的 bug：旧 no-arg 版本 onDismiss=null，用户从「重试」重开弹窗后再次关闭，
-        // 既不弹新提示、也没有任何恢复入口，界面彻底静默。改为统一挂恢复回调后，
-        // 「关弹窗 → 出现常驻重试提示 → 点重试 → 重开弹窗」形成闭环，直到授权成功才消失。
-        showWssBootstrapDialog(this::restoreAuthNoticeIfStillUnauthorized);
-    }
-
-    /**
-     * 一次性授权引导弹窗关闭后，若仍处于「WSS 未授权」：恢复底部常驻提示（带「重试」）。
-     * 任何弹窗关闭路径（取消 / 代跑失败 / 从重试重开）都走这里，保证用户始终有恢复入口。
-     * 已授权 / 非 WSS 模式不做事——授权成功后由 {@link #updateAuthStatusUI()} 收起提示。
-     */
-    private void restoreAuthNoticeIfStillUnauthorized() {
-        if (isDestroyed() || isFinishing()) {
-            return;
-        }
-        if (AuthManager.getMode(this) == AuthManager.Mode.SECURE_SETTINGS
-                && !AuthManager.hasWriteSecureSettings(this)) {
-            showAuthNotice(AuthManager.Mode.SECURE_SETTINGS, false, RootUtil.RootStatus.DENIED);
-        }
-    }
-
-    /**
-     * 弹出一次性授权引导弹窗。
-     * @param onDismiss 弹窗消失后的回调（用于 §4.4：弹窗优先，消失后再显示底部 Snackbar 常驻入口）；
-     *                  为 null 时（如代跑失败重显）不额外做事。
-     */
-    private void showWssBootstrapDialog(Runnable onDismiss) {
-        final String cmd = AuthManager.grantCommand(this);
-        android.view.View v = getLayoutInflater()
-                .inflate(R.layout.dialog_auth_bootstrap, null);
-        ((TextView) v.findViewById(R.id.wss_body)).setText(R.string.auth_bootstrap_body);
-        ((TextView) v.findViewById(R.id.wss_cmd)).setText(cmd);
-
-        androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.auth_bootstrap_title)
-                .setView(v)
-                .create();
-
-        // 四个动作必须是真实 Button：此前用 setItems 配合 setMessage 时，列表项不呈现为可点条目
-        // （观感是纯文字、点击无回调），且 AlertDialog 最多只支持三个按钮，放不下这四个动作。
-        v.findViewById(R.id.btn_wss_root).setOnClickListener(x -> {
-            dialog.dismiss();
-            runGrantAsync(false);       // 借 root 跑一次 pm grant
-        });
-        final View btnShizuku = v.findViewById(R.id.btn_wss_shizuku);
-        btnShizuku.setOnClickListener(x -> {
-            dialog.dismiss();
-            // 走三段式：未获 Shizuku 授权时先弹授权框，授权回来再代跑 pm grant
-            grantWssViaShizuku();
-        });
-        // 按设备实际能力置灰：Shizuku 服务没在跑时，「用 Shizuku 代跑」点了也只会拿到一句
-        // 「请先启动 Shizuku」——不如直接置灰，把注意力留给可用的两条路（手动 adb / root）。
-        // pingBinder 是本地 JNI 探活、不发 IPC，主线程调用安全。
-        // root 按钮不预探测：RootUtil.probe() 是一次真实 su fork，未授权设备上会弹 Magisk
-        // 授权框——只是「看看选项」不该被弹窗打扰；它点了失败的后果由 grant 失败重显弹窗兜住。
-        if (!ShizukuUtil.running()) {
-            btnShizuku.setEnabled(false);
-        }
-        v.findViewById(R.id.btn_wss_copy).setOnClickListener(x -> copyToClipboard(cmd));
-        v.findViewById(R.id.btn_wss_cancel).setOnClickListener(x -> dialog.dismiss());
-        if (onDismiss != null) {
-            dialog.setOnDismissListener(d -> onDismiss.run());
-        }
-        dialog.show();
-    }
-
-    private void copyToClipboard(String text) {
-        try {
-            android.content.ClipboardManager cm =
-                    (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) {
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("pm grant", text));
-                Toast.makeText(this, R.string.auth_copy_done, Toast.LENGTH_SHORT).show();
-            }
-        } catch (Throwable t) {
-            android.util.Log.w("AdbSwitch", "copy grant command failed", t);
-        }
-    }
-
-    /**
-     * 借 Shizuku / root 代跑一次 pm grant（后台线程：pm grant 是一次阻塞的 shell 调用）。
-     * 成功后立刻按新状态重测 —— 授权刚拿到，旧探测结论已作废。
-     */
-    private void runGrantAsync(boolean viaShizuku) {
-        new Thread(() -> {
-            final boolean ok = viaShizuku
-                    ? AuthManager.grantViaShizuku(getApplicationContext())
-                    : AuthManager.grantViaRoot(getApplicationContext());
-            new Handler(Looper.getMainLooper()).post(() -> {
-                if (isDestroyed() || isFinishing()) {
-                    return;
-                }
-                Toast.makeText(MainActivity.this,
-                        ok ? R.string.auth_grant_ok : R.string.auth_grant_fail,
-                        Toast.LENGTH_SHORT).show();
-                if (!ok) {
-                    // 代跑失败（没有 su / Shizuku 没起来 / 被拒）：引导弹窗已关，只剩一个 Toast，
-                    // 用户没有补救入口——直接重显引导弹窗，换一条路或取消。
-                    showWssBootstrapDialog();
-                }
-                AuthCoordinator.resetSession();
-                DebugController.invalidateAndRefresh(MainActivity.this);
-                performAuthCheck(true);
-                updateAuthStatusUI();
-            });
-        }, "pm-grant").start();
-    }
-
-    /** 渲染合并的「授权模式」行（标题=授权模式，副标题直接显示「root模式 · 未授权」等）
-     *  规则：未授权 → 摘要整段改红字作警告（不挂圆形状态图标）；已授权 → 还原默认样式，
-     *  并关掉底部未授权的 Snackbar。 */
-    private void updateAuthStatusUI() {
-        if (authPref == null) {
-            return;
-        }
-        AuthManager.Mode mode = AuthManager.getMode(this);
-        boolean ok = privilegedAvailable;
-        int statusRes;
-        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
-            statusRes = ok ? R.string.auth_status_wss_ok : R.string.auth_status_wss_no;
-        } else if (mode == AuthManager.Mode.SHIZUKU) {
-            statusRes = ok ? R.string.auth_status_shizuku_ok : R.string.auth_status_shizuku_no;
-        } else {
-            statusRes = ok ? R.string.auth_status_root_ok : R.string.auth_status_root_no;
-        }
-
-        if (ok) {
-            // 已授权：还原默认样式，不单独变色、不挂图标
-            authPref.setSummary(statusRes);
-            // 授权成功后关掉底部未授权提示（含「重试」那条）
-            dismissAuthSnackbar();
-        } else {
-            // 未授权：整段摘要改红字警告（行首不加圆形指示图标）
-            SpannableString sp = new SpannableString(getString(statusRes));
-            sp.setSpan(new ForegroundColorSpan(
-                            getResources().getColor(R.color.error, getTheme())),
-                    0, sp.length(), SpannableString.SPAN_INCLUSIVE_INCLUSIVE);
-            authPref.setSummary(sp);
-        }
-        updateKillPrefState();
-    }
-
-    /**
-     * 「开启调试自动关闭快捷应用」开关的可用性判定与展示（§3.3 + 1.0.4 修正）：
-     * 能否真正关闭其他应用 = 「可写调试开关」(privilegedAvailable) 且「可杀进程（Shizuku 或 root）」。
-     * 体验（按用户澄清的口径）：
-     *  - 有 kill 权限：默认开启；仅当用户此前手动关闭过（{@code killUserDisabled}）才保持关闭。
-     *    免 root 模式下若同时具备 root/Shizuku 授权，同样可以关闭——旧文案错写成「免 root 模式不行」。
-     *  - 无 kill 权限（纯免 root 且 root/Shizuku 皆不可用）：直接关掉并置灰，文案说明原因；
-     *    显示值由本方法接管，不写用户偏好，以便权限回来后恢复默认开。
-     */
-    private void updateKillPrefState() {
-        if (swKillPref == null) {
-            return;
-        }
-        // 授权结论还没回来：保持布局默认值（开），不要先按「无权限」关掉再变回来
-        if (!authProbeDone) {
-            return;
-        }
-        boolean shizukuOk = ShizukuUtil.available();
-        boolean canKill = privilegedAvailable
-                && (shizukuOk || DebugController.isRootCapable());
-        if (canKill) {
-            swKillPref.setEnabled(true);
-            boolean wantOn = !killUserDisabled;
-            swKillPref.setChecked(wantOn);
-            // 显示值必须与实际执行值一致：DebugController 只认 kill_before_open。
-            // 若历史数据残留 false 而界面显示「开」，就会出现「开关开着却不杀应用」的错位
-            // （控件 persistent=false 不会自己落盘，只能在这里显式对齐）。
-            SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
-            if (sp.getBoolean(PREF_KILL_BEFORE_OPEN, true) != wantOn) {
-                sp.edit().putBoolean(PREF_KILL_BEFORE_OPEN, wantOn).apply();
-            }
-            // 免 root 模式不 fork su 探测（避免弹 Magisk 授权框），root 侧能力靠「上次真实执行结果」
-            // 判定：上次被拒过就在这里明说，而不是继续显示一切正常、实际静默失败。
-            // 开关保持可拨：用户补好授权后下次开调试会重试，成功即自动恢复为正常文案。
-            boolean rootDenied = !shizukuOk
-                    && DebugController.killCapability(this) == DebugController.KILL_CAP_DENIED;
-            swKillPref.setSummary(rootDenied
-                    ? R.string.kill_before_open_sum_last_failed
-                    : R.string.kill_before_open_sum);
-        } else {
-            swKillPref.setEnabled(false);
-            swKillPref.setChecked(false);
-            swKillPref.setSummary(R.string.kill_before_open_sum_nocap);
-        }
-    }
-
-    /** 关掉底部未授权提示（带「重试」的那条） */
-    private void dismissAuthSnackbar() {
-        if (authSnackbar != null) {
-            authSnackbar.dismiss();
-            authSnackbar = null;
-        }
-    }
-
-    /**
-     * Shizuku 模式且尚未授权时，向 Shizuku 管理器请求授权（弹出 Shizuku 授权对话框）。
-     *
-     * 触发时机：① Shizuku 服务就绪（binder 到达）；② 切到 Shizuku 模式；③ Shizuku 模式点「重试」。
-     * 前置条件：Shizuku 已在运行（pingBinder）—— 服务没起来时请求无意义，Shizuku 会直接拒绝、也不弹窗。
-     *
-     * @param force true=忽略防抖立即请求（用户主动动作：切模式 / 点重试）；
-     *              false=走 5s 防抖。防抖是必要的：授权结果回调会再次触发 performAuthCheck，
-     *              若未授权就无防抖地再次请求，会形成「请求 -> 结果 -> 重测 -> 请求」的循环。
-     */
-    /**
-     * WSS 引导里的「用 Shizuku 代跑」：借 Shizuku 的 shell(uid 2000) 跑一次 pm grant。
-     *
-     * 三段式，缺一不可：
-     *  1) Shizuku 服务没起 → 引导用户去 Shizuku 里启动（此时没人能代跑）；
-     *  2) 服务在、但本应用**还没被 Shizuku 授权** → 必须先弹 Shizuku 授权框
-     *     （复用既有的 requestShizukuPermissionRaw）；授权结果回到 shizukuPermListener 后，
-     *     由它再触发真正的 pm grant；
-     *  3) 已授权 → 直接跑 pm grant。
-     *
-     * ⚠️ 不能只调 AuthManager.grantViaShizuku()：它原先以 ShizukuUtil.available()
-     * （= 服务在跑 && 已授权）为前提，而用户点这个按钮的原因恰恰是「还没授权」，
-     * 条件恒为 false → 静默返回、点了没反应。这是本按钮点击无反应的根因之一。
-     */
-    private void grantWssViaShizuku() {
-        if (!ShizukuUtil.running()) {
-            Toast.makeText(this, R.string.auth_need_start, Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (!ShizukuUtil.permissionGranted()) {
-            pendingWssGrantAfterShizuku = true;
-            requestShizukuPermissionRaw(true);
-            return; // 结果由 shizukuPermListener 收回后再跑 pm grant
-        }
-        runGrantAsync(true);
-    }
-
-    private void maybeRequestShizukuPermission(boolean force) {
-        if (AuthManager.getMode(this) != AuthManager.Mode.SHIZUKU) {
-            return;
-        }
-        requestShizukuPermissionRaw(force);
-    }
-
-    /**
-     * 真正发起 Shizuku 授权请求（**不带模式门槛**）。
-     *
-     * 抽这一层的缘由：WSS 引导里的「用 Shizuku 代跑」同样需要弹出 Shizuku 授权框，
-     * 但那时当前授权模式是 WSS 而不是 Shizuku；若直接走 maybeRequestShizukuPermission，
-     * 会被它开头「模式必须是 Shizuku」的判定挡掉 —— 表现就是点了没反应。
-     */
-    private void requestShizukuPermissionRaw(boolean force) {
-        if (!ShizukuUtil.running()) {
-            android.util.Log.i(TAG, "Shizuku binder not alive, skip permission request");
-            return;
-        }
-        if (ShizukuUtil.permissionGranted()) {
-            return;
-        }
-        // 官方权限三分支里的第三支（Shizuku-API README 示例用 shouldShowRequestPermissionRationale
-        // 区分「还能请求」与「用户选过拒绝且不再询问」）。
-        //
-        // ⚠️ 这个标志的语义两侧并不一致：官方 README 示例把它注成
-        // "Users choose 'Deny and don't ask again'"，而 Android 原生同名 API 的语义是
-        // 「应该向用户解释、但仍可再次请求」。服务端到底按哪种填无法从客户端确认，
-        // 因此这里**不据此阻断请求** —— 阻断的风险是：若实际是原生语义，
-        // 用户只是拒绝过一次，就会被永久挡在授权弹窗之外，点「重试」毫无反应。
-        // 折中做法：请求照发（永久拒绝时它自然不会弹窗），另外给用户一条自救指引，
-        // 且只在用户主动动作（force）时提示，避免每次进页面都弹 Toast 扰民。
-        boolean deniedBefore = false;
-        try {
-            deniedBefore = Shizuku.shouldShowRequestPermissionRationale();
-        } catch (Throwable t) {
-            // 老版本 Shizuku 没有这个查询：按「可再次请求」处理，退回原逻辑
-            android.util.Log.w(TAG, "shouldShowRequestPermissionRationale unavailable", t);
-        }
-        if (deniedBefore) {
-            android.util.Log.i(TAG, "Shizuku permission rationale set, showing manual guide");
-            if (force) {
-                Toast.makeText(this, R.string.toast_shizuku_denied_forever, Toast.LENGTH_LONG).show();
-            }
-        }
-        long now = android.os.SystemClock.uptimeMillis();
-        if (!force && now - lastShizukuRequestAt < 5000) {
-            return;
-        }
-        lastShizukuRequestAt = now;
-        android.util.Log.i(TAG, "requesting Shizuku permission (force=" + force + ")");
-        try {
-            Shizuku.requestPermission(AuthManager.SHIZUKU_PERM_REQUEST);
-        } catch (Throwable t) {
-            android.util.Log.w(TAG, "requestPermission failed", t);
-        }
-    }
-
-    /** 未授权时「重试」：root 模式直接重测；Shizuku 模式先确认服务在跑，未授权则弹授权请求 */
-    private void onAuthRetry() {
-        AuthManager.Mode mode = AuthManager.getMode(this);
-        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
-            // WSS 模式缺的是那一次性的 pm grant：重试 = 重新打开引导弹窗。
-            // 不能只走 performAuthCheck——它的自动弹窗有「每会话一次」的闸门
-            // （wssBootstrapShown），用户手动点「重试」会被静默挡成一句红字 Snackbar。
-            if (!AuthManager.hasWriteSecureSettings(this)) {
-                showWssBootstrapDialog();
-                return;
-            }
-            performAuthCheck(true);
-            return;
-        }
-        if (mode == AuthManager.Mode.SHIZUKU) {
-            if (!ShizukuUtil.running()) {
-                Toast.makeText(this, R.string.auth_need_start, Toast.LENGTH_LONG).show();
-                return;
-            }
-            if (!ShizukuUtil.permissionGranted()) {
-                // force=true：用户明确点了「重试」，必须立即弹授权
-                maybeRequestShizukuPermission(true);
-                return; // 结果由 OnRequestPermissionResultListener 收后再重测
-            }
-        }
-        // force=true：重试是明确的用户动作，不能被「本周期已确认」或 30s 节流挡住
-        // （旧实现走无参版本，一旦 authCheckedThisSession 还是 true 就会静默 return，点了没反应）
-        performAuthCheck(true);
-    }
-
-    /**
-     * 底部未授权提示（原生 Snackbar，带「重试」）。
-     *
-     * 文案严格绑定当前授权模式 —— 底部提示与「授权模式」那一行是同一件事的两种呈现，
-     * 不能出现「选了 root 模式却提示 Shizuku 已授权」这种错位引导（旧实现的 bug：
-     * 它按双检测结果挑「哪个后端可用」来提示，跟用户选的模式无关）。
-     * Shizuku 模式下再细分「服务没启动」与「已启动但没授权」，否则只说"未授权"用户无从下手；
-     * root 模式下细分「根本没有 su」与「有 su 但未授权」——前者换模式才有意义，
-     * 后者才该去 Magisk 点允许。
-     * WSS 模式下缺的既不是 root 也不是 Shizuku，而是那**一次性的 pm grant** ——
-     * 必须给独立文案（旧实现会落进 root 分支，把用户往 Magisk 那边带偏）。
-     */
-    private void showAuthNotice(AuthManager.Mode mode, boolean shizukuRunning,
-                                RootUtil.RootStatus rootStatus) {
-        final int textRes;
-        if (mode == AuthManager.Mode.SECURE_SETTINGS) {
-            textRes = R.string.toast_wss_no_perm;
-        } else if (mode == AuthManager.Mode.SHIZUKU) {
-            textRes = shizukuRunning ? R.string.auth_toast_shizuku_no : R.string.auth_need_start;
-        } else if (rootStatus == RootUtil.RootStatus.NO_SU) {
-            textRes = R.string.toast_no_su;
-        } else {
-            textRes = R.string.auth_toast_root_no;
-        }
-        runOnUiThread(() -> showAuthSnackbar(getString(textRes), true));
-    }
-
-    /** 真正的 Snackbar：M3 默认反色样式（浅色模式深底 / 深色模式浅底），未授权文字标红作警告 */
-    private void showAuthSnackbar(String text, boolean unauthorized) {
-        try {
-            View root = getWindow().getDecorView().findViewById(android.R.id.content);
-            if (root == null) {
-                // 兜底：拿不到内容视图时退化为普通 Toast
-                Toast.makeText(this, text, Toast.LENGTH_LONG).show();
-                return;
-            }
-            // 同一时刻只保留一个提示
-            if (authSnackbar != null) {
-                authSnackbar.dismiss();
-                authSnackbar = null;
-            }
-            Snackbar sb = Snackbar.make(root, text,
-                    unauthorized ? Snackbar.LENGTH_INDEFINITE : Snackbar.LENGTH_LONG);
-            View v = sb.getView();
-            TextView tv = v.findViewById(com.google.android.material.R.id.snackbar_text);
-            if (tv != null && unauthorized) {
-                // 未授权红字警告。条底恒为反色 surface（浅色模式=深条 / 深色模式=浅条），
-                // 必须用按模式反转的 error 档 errorInverse（深条→浅红 / 浅条→深红）；
-                // 若用当前模式的 error 档，明暗正好与条底同侧、对比度不足。
-                // 已授权提示不改文字色，走 M3 默认 colorOnSurfaceInverse（两种模式都正确）。
-                tv.setTextColor(getResources().getColor(R.color.errorInverse, getTheme()));
-            }
-            if (unauthorized) {
-                // 重试按钮与红字同色系：同样必须用反色档（硬编码白色在深色模式浅底条上看不清）
-                sb.setActionTextColor(getResources().getColor(R.color.errorInverse, getTheme()));
-                sb.setAction(R.string.auth_retry, x -> onAuthRetry());
-            }
-            authSnackbar = sb;
-            sb.addCallback(new Snackbar.Callback() {
-                @Override
-                public void onDismissed(Snackbar transientBottomBar, int event) {
-                    if (authSnackbar == transientBottomBar) {
-                        authSnackbar = null;
-                    }
-                }
-            });
-            sb.show();
-        } catch (Throwable t) {
-            // Snackbar 在个别主题/ROM 下可能 inflate 失败：绝不因此闪退，降级为 Toast
-            android.util.Log.w(TAG, "Snackbar show failed, fallback to Toast", t);
-            Toast.makeText(this, text, unauthorized ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /** dp -> px 助手 */
-    /** 取目标应用图标（Drawable，供 Preference 左侧显示）；失败回退本应用图标 */
-    private Drawable loadAppDrawable(String pkg) {
-        try {
-            return getPackageManager().getApplicationIcon(pkg);
-        } catch (Throwable t) {
-            return ContextCompat.getDrawable(this, R.mipmap.ic_launcher);
-        }
-    }
-
-    /**
-     * 取联动应用图标（带内存缓存）：优先命中 {@link #linkageIconCache}，命中时经 ConstantState
-     * 克隆一个新 Drawable 实例（共享底层位图、不再跨进程解码），未命中才走 {@link #loadAppDrawable}
-     * 解码并缓存。目的：rebuildLinkageList 每次回前台都会重建列表，未变化的包不必重复
-     * getApplicationIcon（IPC + 位图解码），消除 onResume 的同步卡顿；同时返回独立实例，
-     * 避免同一 Drawable 被「默认快捷应用行」与某条 app 行同时绑定带来状态串扰。
-     */
-    private Drawable loadAppDrawableCached(String pkg) {
-        Drawable cached = linkageIconCache.get(pkg);
-        if (cached != null) {
-            Drawable.ConstantState cs = cached.getConstantState();
-            return cs != null ? cs.newDrawable() : cached;
-        }
-        Drawable d = loadAppDrawable(pkg);
-        linkageIconCache.put(pkg, d);
-        return d;
-    }
-
-    /**
-     * 创建「原生桌面快捷方式」：在桌面（主屏幕）生成一个真实图标，点击直接拉起联动应用。
-     *
-     * 与 ShortcutManager 的「Shortcut」（长按应用图标弹出的菜单项）不同，这里用的是
-     * Android 自 1.6/2.3 起就有的「添加到主屏幕」机制：
-     *   - Android 7.1 及以下：发 {@code com.android.launcher.action.INSTALL_SHORTCUT} 广播；
-     *   - Android 8.0+：多数 launcher 不再响应上面的广播，改用 ShortcutManager.requestPinShortcut
-     *     钉选（同样生成真实桌面图标，且需用户确认）。
-     * 二者都会在桌面落下实体图标，区别于其它 agent 误用的「Shortcut」长按菜单项。
-     */
-    /**
-     * 为某个联动应用创建「原生桌面快捷方式」：在桌面（主屏幕）生成一个真实图标，点击直接关调试并联动启动该应用。
-     * 与 ShortcutManager 的「Shortcut」（长按菜单项）不同，这里用的是
-     * Android 自 1.6/2.3 起就有的「添加到主屏幕」机制（见 requestPinShortcut）。
-     *
-     * @param pkg 要创建快捷方式的联动应用包名（每个 app 的桌面图标各不相同，故意图里携带包名）
-     */
-    private void createDesktopShortcutFor(String pkg) {
-        if (pkg == null || pkg.isEmpty()) {
-            return; // 行点击传入的包名恒非空（缺包名场景已废弃），此守卫只防编程错误
-        }
-        CharSequence label = getApplicationLabel(pkg);
-        // 关键：快捷方式必须先打开「本 App」，由 App 关掉调试再联动启动目标应用，
-        // 而不是直接拉起目标 app（那样会绕过关调试的联动逻辑，等于什么都不做）。
-        // 用显式 Intent 指向 MainActivity + 自定义 action，并把包名带进去，
-        // 图标仍用「目标应用 + 本 App 角标」以便一眼认出这是哪个联动应用的快捷方式。
-        Intent launch = new Intent(this, MainActivity.class);
-        launch.setAction(ACTION_DESKTOP_LINKAGE);
-        launch.putExtra(EXTRA_LINKAGE_PKG, pkg);
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        Bitmap icon = badgedShortcutIcon(pkg);
-
-        // Android 8+（minSdk=27 必满足）优先用 LauncherApps 钉选（现代 launcher 才支持），失败再回退老广播
-        if (requestPinShortcut(label, launch, icon)) {
-            // 真实结果由回调给（PinShortcutReceiver）：钉上才提示「已创建」，
-            // 用户取消 / 被 ROM 吞掉则超时兜底提示「未创建」。这里不再发「已请求」这类无结果提示。
-            return;
-        }
-        Intent intent = new Intent("com.android.launcher.action.INSTALL_SHORTCUT");
-        intent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, launch);
-        intent.putExtra(Intent.EXTRA_SHORTCUT_NAME, label != null ? label.toString() : pkg);
-        if (icon != null) {
-            intent.putExtra(Intent.EXTRA_SHORTCUT_ICON, icon);
-        }
-        intent.putExtra("duplicate", false);
-        try {
-            sendBroadcast(intent);
-            // 两条路径都拿不到「是否真的落到桌面」的真实结果，只能提示已发起
-            Toast.makeText(this, R.string.create_shortcut_done, Toast.LENGTH_SHORT).show();
-        } catch (Throwable t) {
-            // 旧广播路径基本不会抛异常；真抛了只记日志（创建失败与否无从得知）
-            android.util.Log.w(TAG, "INSTALL_SHORTCUT broadcast failed", t);
-        }
-    }
-
-    /** Android 8+：用 ShortcutManager.requestPinShortcut 把联动应用钉选为桌面图标
-     *  （区别于 shortcuts.xml 里的长按菜单「Shortcut」，这里生成的是真实桌面图标），
-     *  返回是否成功发出请求。 */
-    private boolean requestPinShortcut(CharSequence label, Intent launch, Bitmap icon) {
-        ShortcutManager sm = (ShortcutManager) getSystemService(SHORTCUT_SERVICE);
-        if (sm == null || !sm.isRequestPinShortcutSupported()) {
-            return false;
-        }
-        ShortcutInfo.Builder b = new ShortcutInfo.Builder(this,
-                "desktop_linkage_" + System.currentTimeMillis());
-        b.setIntent(launch);
-        b.setShortLabel(label != null ? label : getString(R.string.app_name));
-        if (icon != null) {
-            b.setIcon(Icon.createWithBitmap(icon));
-        }
-        try {
-            // 结果回调：按官方契约，只有真正钉上时才会收到（PendingIntent 按官方样例用
-            // FLAG_IMMUTABLE）；取消/被拒不回调，故 arm() 挂超时兜底提示。
-            Intent cb = new Intent(this, PinShortcutReceiver.class);
-            PendingIntent result = PendingIntent.getBroadcast(this, 0, cb,
-                    PendingIntent.FLAG_IMMUTABLE);
-            boolean accepted = sm.requestPinShortcut(b.build(), result.getIntentSender());
-            if (accepted) {
-                PinShortcutReceiver.arm(this);
-            }
-            return accepted;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    /**
-     * 生成「联动应用图标 + 本 App 角标」的合成位图，避免桌面快捷方式图标与原 App 图标混淆。
-     * 底层为联动应用图标，右下角叠加本 App 的小图标（白底圆），示意「由本 App 创建」。
-     */
-    private Bitmap badgedShortcutIcon(String pkg) {
-        int size = Math.max(1, (int) (48 * getResources().getDisplayMetrics().density));
-        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(out);
-
-        // 底层：联动应用图标
-        Drawable base;
-        try {
-            base = getPackageManager().getApplicationIcon(pkg);
-        } catch (Throwable t) {
-            base = ContextCompat.getDrawable(this, R.mipmap.ic_launcher);
-        }
-        base.setBounds(0, 0, size, size);
-        base.draw(c);
-
-        // 角标：本 App 图标（右下角，约 1/3 大小），白底圆提高辨识度
-        int badge = (int) (size * 0.36f);
-        int margin = (int) (size * 0.05f);
-        int left = size - badge - margin;
-        int top = size - badge - margin;
-        Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dot.setColor(0xFFFFFFFF);
-        c.drawCircle(left + badge / 2f, top + badge / 2f, badge / 2f, dot);
-
-        Drawable mine = ContextCompat.getDrawable(this, R.drawable.ic_shortcut_badge);
-        mine.setBounds(left, top, left + badge, top + badge);
-        mine.draw(c);
-
-        return out;
     }
 
     @Override

@@ -55,6 +55,8 @@ public class LongClickPreference extends Preference {
             row.setLongClickable(true);
         } else {
             row.setOnLongClickListener(null);
+            // 行复用时可能残留上一行的 longClickable=true：不复位则长按无响应却仍有触觉反馈
+            row.setLongClickable(false);
         }
     }
 }

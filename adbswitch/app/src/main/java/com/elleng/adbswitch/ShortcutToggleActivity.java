@@ -28,6 +28,14 @@ public class ShortcutToggleActivity extends Activity {
         // NoDisplay 硬约束：必须在 onResume 之前 finish()，否则系统抛异常
         finish();
 
+        // 调用方鉴权：三个 toggle action 是公开字符串、本 Activity 又必须 exported 供 launcher
+        // 跨 UID 拉起，故仅靠 action 白名单挡不住三方 App 构造同 action 的显式 intent 触发特权写。
+        // 校验 shortcut intent 里随安装生成、不可猜测的 token；缺失/不匹配一律不执行写入。
+        // 校验放在所有 action 分发之前，覆盖主开关与两个子开关三个入口。
+        if (!ToggleShortcuts.hasValidActionToken(app, getIntent())) {
+            return;
+        }
+
         if (ToggleShortcuts.ACTION_TOGGLE_USB.equals(action)
                 || ToggleShortcuts.ACTION_TOGGLE_WIRELESS.equals(action)) {
             final boolean wireless = ToggleShortcuts.ACTION_TOGGLE_WIRELESS.equals(action);
@@ -53,6 +61,12 @@ public class ShortcutToggleActivity extends Activity {
             return;
         }
 
+        // 导出组件安全收口：只认本应用发布的三个 action。未知 / null action 一律不做任何写入——
+        // 否则任意三方 App 都能借这个无界面中转页触发特权写（改 adb_enabled / force-stop）
+        if (!ToggleShortcuts.ACTION_TOGGLE.equals(action)) {
+            return;
+        }
+
         // 一键开关：先读真值再翻转（toggleMaster 内部处理）
         DebugController.toggleMaster(app, (ok, s, reason) -> {
             if (!ok) {
@@ -60,13 +74,14 @@ public class ShortcutToggleActivity extends Activity {
                         Toast.LENGTH_SHORT).show();
                 return;
             }
-            if (s.anyOn()) {
+            boolean masterOn = DebugController.masterAnyOn(app, s);
+            if (masterOn) {
                 AdbToggleService.stop(app);
             } else {
                 AdbToggleService.syncCloseNotification(app);
             }
             ToggleShortcuts.markDirty(app);
-            Toast.makeText(app, s.anyOn() ? R.string.master_on : R.string.master_off,
+            Toast.makeText(app, masterOn ? R.string.master_on : R.string.master_off,
                     Toast.LENGTH_SHORT).show();
         });
     }

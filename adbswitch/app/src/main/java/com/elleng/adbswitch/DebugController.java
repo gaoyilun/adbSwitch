@@ -82,10 +82,23 @@ public final class DebugController {
     private static final String TAG_USB_A = "__ASW_USB_A__";
     private static final String TAG_WIFI_A = "__ASW_WIFI_A__";
     private static final String TAG_DEV_A = "__ASW_DEV_A__";
+    /** 无障碍服务列表（settings get secure）：第三方应用读该键可能被 ROM 脱敏，shell 读才可信 */
+    private static final String TAG_A11Y_B = "__ASW_A11Y_B__";
+    /**
+     * 无线调试的「底层意图」属性：adb_wifi_enabled（key）会被系统在无 Wi-Fi / 未授权网络时
+     * 自行写回 0，而 persist.adb.tls_server.enable（prop）仍为 1；仅作显示辅助细分「未激活」态，
+     * 绝不参与开关判定、回读确认、saved 记忆或主开关聚合（底层逻辑保持上一版不变）。
+     * 只有 shell 通道（root / Shizuku）能读；纯 WSS 读不到 → 记 -1 → 维持两态显示。
+     */
+    private static final String TAG_WIFI_PROP = "__ASW_WIFIPROP__";
+    private static final String PROP_WIFI_INTENT = "persist.adb.tls_server.enable";
 
     private static final String PREFS = "cfg";
     private static final String SAVED_USB = "saved_usb";
     private static final String SAVED_WIRELESS = "saved_wireless";
+    private static final String SAVED_DEV = "saved_dev";
+    /** 记忆的第三方无障碍列表（master 关时存原始 enabled_accessibility_services 串） */
+    private static final String SAVED_A11Y = "saved_a11y_list";
     private static final String SAVED_VALID = "saved_valid";
     /** 「开启调试自动关闭快捷应用」开关（与 MainActivity 共用同一份 cfg） */
     private static final String PREF_KILL_BEFORE_OPEN = "kill_before_open";
@@ -93,6 +106,13 @@ public final class DebugController {
     private static final String LAST_USB = "last_usb";
     private static final String LAST_WIRELESS = "last_wireless";
     private static final String LAST_DEV = "last_dev";
+    private static final String LAST_A11Y = "last_a11y_count";
+    /** 无障碍恢复未成功的第三方服务数（持久化摘要「仍有 N 个需手动开启」的数据源） */
+    private static final String A11Y_RESTORE_PENDING = "a11y_restore_pending";
+    /** 恢复未成功的具体条目（懒复核自愈用；旧版本残留只有计数没有条目） */
+    private static final String A11Y_RESTORE_PENDING_ENTRIES = "a11y_restore_pending_entries";
+    /** 无障碍恢复后的一次性提示（UI 侧消费后清掉） */
+    private static final String A11Y_RESTORE_TOAST = "a11y_restore_toast";
     /**
      * 「开启调试自动关闭快捷应用」的**真实执行结果**（三态持久化）：
      * 无此键 = 从未执行过（未知）；true = 上次执行成功；false = 上次因授权问题失败。
@@ -110,27 +130,100 @@ public final class DebugController {
     private DebugController() {
     }
 
-    /** 三个开关的组合状态（dev 只是随行携带，不参与调试态判定） */
+    /**
+     * 开关项的组合状态（通用项集合：usb / wireless / dev / a11y 各自独立，主开关按配置聚合）。
+     *
+     * anyOn()/allOff() 保留 adbd 语义（USB 或无线任一开 = adbd 在跑）—— 通知栏、
+     * RASP 检测文案仍按此判定；主开关的聚合走 {@link #anyOn(java.util.Collection)} /
+     * {@link #allOff(java.util.Collection)}（按 SwitchConfig.followedItems 聚合）。
+     */
     public static final class State {
         public final boolean usb;
         public final boolean wireless;
         /** 开发者选项入口是否开启：独立开关，不影响 adbd 是否运行 */
         public final boolean dev;
+        /** 已启用的第三方无障碍服务条目数（0 = 无）；-1 = 未知（parseState 纯函数的占位，提交前会被补真值） */
+        public final int a11yCount;
+        /**
+         * 无线调试底层意图属性 persist.adb.tls_server.enable：-1 = 未读到（纯 WSS 或读失败，
+         * 显示退化为两态）/ 0 = 底层关 / 1 = 底层开。**只用于 UI 细分「未激活」态**，
+         * 不参与 anyOn/allOff/isOn 等任何开关判定（那些只看 key，保持上一版语义）。
+         */
+        public final int wifiProp;
 
         State(boolean usb, boolean wireless, boolean dev) {
+            this(usb, wireless, dev, -1, -1);
+        }
+
+        State(boolean usb, boolean wireless, boolean dev, int a11yCount) {
+            this(usb, wireless, dev, a11yCount, -1);
+        }
+
+        State(boolean usb, boolean wireless, boolean dev, int a11yCount, int wifiProp) {
             this.usb = usb;
             this.wireless = wireless;
             this.dev = dev;
+            this.a11yCount = a11yCount;
+            this.wifiProp = wifiProp;
         }
 
-        /** 任一开着 → adbd 在跑 → 会被检测为调试态（不含 dev） */
+        /** 只读附加字段：把 shell 读到的底层意图态附加到既有 State（不可变，返回新实例） */
+        State withWifiProp(int p) {
+            if (this.wifiProp == p) {
+                return this;
+            }
+            return new State(usb, wireless, dev, a11yCount, p);
+        }
+
+        /** 无线调试是否处于「key 关但底层意图仍开」（系统因无 Wi-Fi / 未授权网络写回 key=0） */
+        public boolean wirelessInactive() {
+            return !wireless && wifiProp == 1;
+        }
+
+        /** adbd 是否在跑（USB 或 无线任一开着）→ 会被检测为调试态（不含 dev / a11y） */
         public boolean anyOn() {
             return usb || wireless;
         }
 
-        /** 两个都关 → adbd stopped → 通过检测（不含 dev） */
+        /** adbd 已停止（USB 与 无线都关）→ 通过检测（不含 dev / a11y） */
         public boolean allOff() {
             return !usb && !wireless;
+        }
+
+        /** 该项当前是否开启（无障碍以「有第三方服务启用」为开） */
+        public boolean isOn(SwitchItem item) {
+            switch (item) {
+                case USB:
+                    return usb;
+                case WIRELESS:
+                    return wireless;
+                case DEV:
+                    return dev;
+                case A11Y:
+                    return a11yCount > 0;
+                default:
+                    return false;
+            }
+        }
+
+        /** 在给定项集合内任一开启（主开关聚合语义：跟随主开关的项中任一开 = 主开关开） */
+        public boolean anyOn(java.util.Collection<SwitchItem> items) {
+            for (SwitchItem i : items) {
+                if (isOn(i)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** 在给定项集合内全部关闭（主开关聚合语义） */
+        public boolean allOff(java.util.Collection<SwitchItem> items) {
+            for (SwitchItem i : items) {
+                if (isOn(i)) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         /** §2.4：状态比较用于「无变化不重复广播」，避免 UI 重绘 / 快捷方式重发 / 通知重绘 */
@@ -139,7 +232,8 @@ public final class DebugController {
             if (this == o) return true;
             if (!(o instanceof State)) return false;
             State s = (State) o;
-            return usb == s.usb && wireless == s.wireless && dev == s.dev;
+            return usb == s.usb && wireless == s.wireless && dev == s.dev
+                    && a11yCount == s.a11yCount && wifiProp == s.wifiProp;
         }
 
         @Override
@@ -148,6 +242,8 @@ public final class DebugController {
             h = 31 * h + (usb ? 1 : 0);
             h = 31 * h + (wireless ? 1 : 0);
             h = 31 * h + (dev ? 1 : 0);
+            h = 31 * h + a11yCount;
+            h = 31 * h + wifiProp;
             return h;
         }
     }
@@ -252,6 +348,40 @@ public final class DebugController {
         // + 自身写入：标记本会话已确认以放行点击，不再做会被欺骗的校准。
         if (wssTrustWriteOnly(app)) {
             confirmedThisSession = true;
+            // 三个 GLOBAL 键的 ContentResolver 回读被 ROM 隐藏/欺骗，不能跑校准（见上）；
+            // 但无障碍列表键（Settings.Secure.enabled_accessibility_services）的
+            // ContentResolver 读取是可信的（A11yHelper 类注释）——外部在系统设置里增删
+            // 无障碍服务后，必须单独把第三方服务数刷回来，否则缓存与 LAST_A11Y 会一直
+            // 停在上次写入值（实测 bug：改系统设置返回 App 数量不刷新，只有 App 内
+            // 关了再开才变 —— 因为此前只有写路径 commitAfter 会重数，本分支直接 return）。
+            // GLOBAL 三键仍维持「上次确认状态 + 自身写入」，绝不用假回读污染。
+            CALIBRATE.execute(() -> {
+                int n = A11yHelper.countThirdPartyNow(app);
+                Snapshot c2 = cache;
+                State base = c2 != null ? c2.state : lastKnownState(app);
+                if (base.a11yCount == n) {
+                    return; // 数量没变：缓存/LAST_A11Y 本就正确
+                }
+                android.util.Log.d(TAG, "a11y count partial refresh: " + base.a11yCount + " -> " + n);
+                // countThirdPartyNow 含 PM IPC，耗时期间 IO 线程可能已由 commitAfter 提交新全局态。
+                // 写回前重读一次 cache，只把 a11yCount 合并到「最新」快照，全局三键取最新值——
+                // 绝不用 IPC 前读到的 base.usb/wireless/dev 覆盖已提交状态（否则 UI 倒退且
+                // persistLast 落盘成跨启动假状态）。
+                Snapshot current = cache;
+                State latest = current != null ? current.state : base;
+                State s = new State(latest.usb, latest.wireless, latest.dev, n);
+                boolean confirmedBefore = hasConfirmedBefore(app);
+                // 只有存在「上次确认状态」（GLOBAL 三键落盘值可信）才整体落盘；
+                // 首次使用时全局值来自 ContentResolver 快读（可能被 ROM 伪造），
+                // 绝不能写进 LAST_* 冒充确认过 —— 只更新内存并广播即可。
+                cache = new Snapshot(s, confirmedBefore
+                        ? android.os.SystemClock.uptimeMillis()
+                        : (current != null ? current.at : 0));
+                if (confirmedBefore) {
+                    persistLast(app, s);
+                }
+                broadcast(app);
+            });
             return;
         }
         CALIBRATE.execute(() -> {
@@ -299,12 +429,15 @@ public final class DebugController {
     public static State lastKnownState(Context ctx) {
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!sp.contains(LAST_USB)) {
-            return new State(readUsb(ctx), readWireless(ctx), readDev(ctx));
+            return new State(readUsb(ctx), readWireless(ctx), readDev(ctx),
+                    A11yHelper.countThirdPartyNow(ctx));
         }
-        // 老版本升级上来没有 LAST_DEV（只记过两个键）：缺哪个就退回快读，不硬塞 false
+        // 老版本升级上来没有 LAST_DEV / LAST_A11Y：缺哪个就退回快读，不硬塞 false
         return new State(sp.getBoolean(LAST_USB, false),
                 sp.getBoolean(LAST_WIRELESS, false),
-                sp.contains(LAST_DEV) ? sp.getBoolean(LAST_DEV, false) : readDev(ctx));
+                sp.contains(LAST_DEV) ? sp.getBoolean(LAST_DEV, false) : readDev(ctx),
+                sp.contains(LAST_A11Y) ? sp.getInt(LAST_A11Y, 0)
+                        : A11yHelper.countThirdPartyNow(ctx));
     }
 
     /** 记下经授权通道确认过的状态（后台线程调用；apply 异步落盘即可） */
@@ -314,6 +447,7 @@ public final class DebugController {
                 .putBoolean(LAST_USB, s.usb)
                 .putBoolean(LAST_WIRELESS, s.wireless)
                 .putBoolean(LAST_DEV, s.dev)
+                .putInt(LAST_A11Y, s.a11yCount)
                 .apply();
     }
 
@@ -348,14 +482,134 @@ public final class DebugController {
      * @return usb / wireless 读不到有效值时返回 null（调用方保留旧缓存，不覆盖为真假难辨的状态）
      */
     private static State readViaPrivileged(Context app) {
-        return readViaShellOrWss(app);
+        // a11y 已由 readViaShellOrWss 内部的 shell 读顺带取回（ROM 脱敏时唯一可信来源）
+        return enrichA11y(app, readViaShellOrWss(app), null);
+    }
+
+    /**
+     * parseState 是纯函数（不便做 PM 查询），产出的 State 带 a11yCount=-1 占位；
+     * 此处补上第三方无障碍服务真值。
+     *
+     * @param a11yRaw 同一通道顺带读到的列表真值；null = 没读到（回退 ContentResolver 直读）
+     */
+    private static State enrichA11y(Context ctx, State s, String a11yRaw) {
+        if (s == null || s.a11yCount >= 0) {
+            return s;
+        }
+        int count = a11yRaw != null
+                ? A11yHelper.countThirdParty(ctx, a11yRaw)
+                : A11yHelper.countThirdPartyNow(ctx);
+        return new State(s.usb, s.wireless, s.dev, count, s.wifiProp);
+    }
+
+    /** 从合并 shell 输出里按标记行取出某个值；标记行缺失返回 null（= 通道没读到，不是空值） */
+    private static String tagValue(String out, String tag) {
+        if (out == null) {
+            return null;
+        }
+        for (String line : out.split("[\\r\\n]+")) {
+            String s = line.trim();
+            if (s.startsWith(tag + "=")) {
+                return s.substring(tag.length() + 1).trim();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 取合并读输出里的无障碍列表真值，并把「ContentResolver vs shell」的差异交给 A11yHelper 记账
+     * （荣耀等 ROM 会把该键对第三方脱敏成空串，只有 shell 读得到真值）。
+     *
+     * @return null = 标记行缺失（通道异常），调用方回退 ContentResolver 读
+     */
+    private static String a11yRawFromOut(Context ctx, String out) {
+        String v = tagValue(out, TAG_A11Y_B);
+        if (v == null) {
+            return null;
+        }
+        // settings get 对「从未设置过的键」返回字面量 null，语义上是「列表为空」
+        String raw = "null".equals(v) ? "" : v;
+        A11yHelper.noteTrustedRead(A11yHelper.readRawList(ctx), raw);
+        return raw;
+    }
+
+    /**
+     * 写路径用的无障碍列表（写前态 / 关闭时过滤用）。
+     *
+     * 与界面读的区别：这里**宁可多 fork 一次 shell**。ROM 脱敏时 ContentResolver 读到空串，
+     * 若把它当真值，「关闭」算出的目标列表就是空表 —— 写下去会把系统预装的无障碍服务
+     * （TalkBack 之类）一起抹掉。写路径本来就在 IO 线程，多一次读的代价可忽略。
+     *
+     * 无 shell 通道（纯 WSS）时不做额外读，仍返回 ContentResolver 值；
+     * 「读到空但服务其实已绑定」的矛盾由 {@link #hasBoundA11y} 交叉验证，此时拒绝写入
+     * （见 {@link #writeA11yBlocking}），绝不把空表当写前态。
+     */
+    private static String readA11yRawForWrite(Context ctx) {
+        String cr = A11yHelper.readRawList(ctx);
+        if (!android.text.TextUtils.isEmpty(cr)) {
+            return cr;
+        }
+        // WSS 尚未拿到一次性 pm grant 时绝不静默 fork su（与 readViaShellOrWss 同一立场）
+        if (AuthManager.getMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
+                && !AuthManager.hasWriteSecureSettings(ctx)) {
+            return cr;
+        }
+        RootUtil.Result r;
+        if (AuthManager.getEffectiveMode(ctx) == AuthManager.Mode.SECURE_SETTINGS) {
+            if (!ShizukuUtil.available()) {
+                return cr;
+            }
+            r = ShizukuUtil.run(SHELL_READ_A11Y_CMD);
+        } else {
+            r = runPrivileged(ctx, SHELL_READ_A11Y_CMD);
+        }
+        if (!r.ok()) {
+            return cr;
+        }
+        String v = tagValue(r.out, TAG_A11Y_B);
+        if (v == null) {
+            return cr;
+        }
+        String raw = "null".equals(v) ? "" : v;
+        A11yHelper.noteTrustedRead(cr, raw);
+        return raw;
+    }
+
+    /** 主开关聚合态：跟随主开关的项中任一开启（UI / 磁贴的「主开关开/关」显示） */
+    public static boolean masterAnyOn(Context ctx, State s) {
+        return s != null && s.anyOn(SwitchConfig.followedItems(ctx));
+    }
+
+    /** 主开关聚合态：跟随主开关的项全部关闭 */
+    public static boolean masterAllOff(Context ctx, State s) {
+        return s == null || s.allOff(SwitchConfig.followedItems(ctx));
     }
 
     /** WSS 模式下的合并读命令（与 readViaPrivileged 原内联命令一致，抽成常量复用） */
     private static final String SHELL_READ_CMD =
             "echo " + TAG_USB_B + "=$(settings get global " + KEY_USB + ");"
                     + " echo " + TAG_WIFI_B + "=$(settings get global " + KEY_WIRELESS + ");"
-                    + " echo " + TAG_DEV_B + "=$(settings get global " + KEY_DEV + ")";
+                    + " echo " + TAG_DEV_B + "=$(settings get global " + KEY_DEV + ");"
+                    + " echo " + TAG_WIFI_PROP + "=$(getprop " + PROP_WIFI_INTENT + ");"
+                    + " echo " + TAG_A11Y_B + "=$(settings get secure " + A11yHelper.KEY + ")";
+
+    /**
+     * 从 shell 输出里解析无线底层意图属性，返回 1 / 0 / -1（未读到）：
+     * getprop 对不存在的属性返回空行，非 0/1 一律按「未读到」处理 → UI 维持两态，绝不据此改判定。
+     */
+    static int parseWifiProp(String out, String p) {
+        String v = tagValue(out, p);
+        return "1".equals(v) ? 1 : "0".equals(v) ? 0 : -1;
+    }
+
+    /** 把 shell 顺带读到的底层意图态附加到 State（仅 shell 通道调用；读不到保持 -1） */
+    private static State attachWifiProp(State s, String out) {
+        return s == null ? null : s.withWifiProp(parseWifiProp(out, TAG_WIFI_PROP));
+    }
+
+    /** 单读无障碍列表（写路径在 ContentResolver 读空时现场补一次 shell 读） */
+    private static final String SHELL_READ_A11Y_CMD =
+            "echo " + TAG_A11Y_B + "=$(settings get secure " + A11yHelper.KEY + ")";
 
     /** 实际写通道是否为 WSS（默认推荐）：WSS 已授权时走应用进程内直写，无需 root / Shizuku */
     private static boolean wssWriteActive(Context ctx) {
@@ -367,7 +621,7 @@ public final class DebugController {
      * ContentResolver 读这三个键会被 ROM 隐藏/欺骗（HyperOS 上尤甚），回读不可信 ——
      * 写后只能信任自身写入 + 持久化的「上次确认状态」（lastKnownState），不再把被隐藏的
      * ContentResolver 读当真值。这正是 HyperOS 上「免 root 模式读不到状态、也拨不动开关」
-     * 的根因与对策；Geto/IMD 同样走标准 WSS API，纯 WSS 时也只能是 best-effort。
+     * 的根因与对策；标准 WSS API 下纯 WSS 路径也只能是 best-effort。
      */
     private static boolean wssTrustWriteOnly(Context ctx) {
         return AuthManager.getEffectiveMode(ctx) == AuthManager.Mode.SECURE_SETTINGS
@@ -376,7 +630,7 @@ public final class DebugController {
 
     /**
      * WSS 直写单个键（无需 root / Shizuku）。
-     * 对齐 Geto/IMD：用 {@code Settings.Global.putString}（字符串 API）而非 putInt，
+     * 这里用 {@code Settings.Global.putString}（字符串 API）而非 putInt，
      * 并**用其布尔返回值识别「这一行到底写没写进去」**——部分 ROM（如 HyperOS）对第三方
      * 应用写 adb_enabled / adb_wifi_enabled 直接静默丢弃且不抛错，putInt 的 void 返回会
      * 让调用方误以为写成功了。返回 false → 标记 REASON_WRITE_DROPPED（如实告知而非静默弹回）。
@@ -418,7 +672,8 @@ public final class DebugController {
     private static State readStateWss(Context ctx) {
         return new State(getInt(ctx, KEY_USB) == 1,
                 wirelessSupported() && getInt(ctx, KEY_WIRELESS) == 1,
-                getInt(ctx, KEY_DEV) == 1);
+                getInt(ctx, KEY_DEV) == 1,
+                A11yHelper.countThirdPartyNow(ctx));
     }
 
     /**
@@ -439,11 +694,15 @@ public final class DebugController {
         AuthManager.Mode mode = AuthManager.getEffectiveMode(ctx);
         if (mode != AuthManager.Mode.SECURE_SETTINGS) {
             RootUtil.Result r = runPrivileged(ctx, SHELL_READ_CMD);
-            return parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
+            return enrichA11y(ctx,
+                    attachWifiProp(parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B), r.out),
+                    a11yRawFromOut(ctx, r.out));
         }
         if (ShizukuUtil.available()) {
             RootUtil.Result r = ShizukuUtil.run(SHELL_READ_CMD);
-            return parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
+            return enrichA11y(ctx,
+                    attachWifiProp(parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B), r.out),
+                    a11yRawFromOut(ctx, r.out));
         }
         // 纯 WSS 无 shell 兜底：ContentResolver 读被 ROM 隐藏/欺骗（HyperOS 上尤甚），回读不可信——
         // 直接返回本地持久化的「上次确认状态」（lastKnownState），不再把被隐藏的真值当真。
@@ -470,7 +729,8 @@ public final class DebugController {
             w.after = w.ok ? new State(
                     KEY_USB.equals(key) ? on : before.usb,
                     KEY_WIRELESS.equals(key) ? on : before.wireless,
-                    KEY_DEV.equals(key) ? on : before.dev) : null;
+                    KEY_DEV.equals(key) ? on : before.dev,
+                    before.a11yCount) : null;
         } else {
             // 有 Shizuku 兜底的设备仍回读真值（一次 newProcess，但可靠，能纠正 ROM 屏蔽写入）
             w.after = readViaShellOrWss(ctx);
@@ -482,43 +742,63 @@ public final class DebugController {
      * WSS 模式主开关合并写。与 shell 版的三点差异：
      *  1. 只写与 before 不同的键：putInt 即使值不变也是一次完整 Binder 往返（还触发 observer /
      *     落盘），磁贴 / 快捷方式高频点击时全是无谓开销。before 读失败（null）时不敢 diff，
-     *     退化为两个键都写；
+     *     退化为都写；
      *  2. 写后态直接用「期望值」提交，不再同步走一次 shell 回读 —— WSS+Shizuku 设备上那是
      *     一次 100~500ms 的 newProcess，全压在用户的点击等待上。ROM 静默屏蔽写入（putInt
      *     不抛错但值没变）的情况由 setMasterBlocking 末尾的 {@link #verifyWssWrite} 复核兜底；
      *  3. API<30 没有无线键，直接跳过（不写无人读取的无效键）。
      *
+     * 只写 {@code followed} 里的全局键（usb / wireless / dev）；a11y 由 setMasterBlocking 单独走
+     * {@link #writeA11yBlocking}（列表值不是 0/1，无法与全局键合并）。
+     *
      * @param knownBefore 调用方刚读到的真值（toggleMaster 已读过一次，不必再读）；null=现读
      */
-    private static MasterMerge masterMergeWriteWss(Context ctx, boolean on, State knownBefore) {
-        State saved = loadSaved(ctx);
+    private static MasterMerge masterMergeWriteWss(Context ctx, boolean on, State knownBefore,
+                                                   java.util.EnumSet<SwitchItem> followed) {
+        boolean trustOnly = wssTrustWriteOnly(ctx);
         // 纯 WSS 无 shell 兜底：before 用本地持久化的「上次确认状态」（回读被隐藏不可信）；
         // 否则优先用调用方刚读到的真值，避免重复读。
-        boolean trustOnly = wssTrustWriteOnly(ctx);
         State before = trustOnly ? lastKnownState(ctx)
                 : (knownBefore != null ? knownBefore : readViaShellOrWss(ctx));
-        killLinkageIfNeeded(ctx, on);
-        boolean tUsb = on ? saved.usb : false;
-        boolean tWifi = on && wirelessSupported() ? saved.wireless : false;
+        // 「开启调试自动关闭快捷应用」只在真的要开调试键（usb / wireless 跟随）时才有意义：
+        // 它的目的是防快捷应用在 adbd 状态翻转瞬间读到调试态；只动 dev / a11y 时没这个翻转
+        if (on && (followed.contains(SwitchItem.USB) || followed.contains(SwitchItem.WIRELESS))) {
+            killLinkageIfNeeded(ctx, on);
+        }
+        boolean tUsb = on && savedItemOn(ctx, SwitchItem.USB, true);
+        boolean tWifi = on && savedItemOn(ctx, SwitchItem.WIRELESS, false);
+        boolean tDev = on && savedItemOn(ctx, SwitchItem.DEV, false);
         boolean wroteAny = false;
+        // 任一键失败即整体失败（与 shell 路径同一条不变式）：保留第一个非 NONE 的失败原因，
+        // 绝不让后一次成功覆盖前一次失败——否则 USB 被 ROM 丢弃而无线写成功时会提交假成功，
+        // 纯 WSS 设备没有 verifyWssWrite 兜底，假状态会直接进缓存
         int reason = RootUtil.REASON_NONE;
-        // 关闭（!on）时**强制写两个键为 0**，不参与「与 before 相同就跳过」的 diff 优化：
+        // 关闭（!on）时**强制写目标值为 0**，不参与「与 before 相同就跳过」的 diff 优化：
         // 纯 WSS 无 shell 兜底时 before 来自持久化的「上次确认状态」，可能已过期（例如调试在别处
         // 被打开、或上次写入被 ROM 静默丢弃后又记为成功）。若按过期 before 判定「已是目标态」而
         // 跳过写入，就会出现「关调试成功」（回调 ok=true、界面/快捷方式照常跳转）但系统里调试其实
         // 还开着——正是用户反馈的「桌面快捷方式只跳转、不关调试」。关闭不是高频操作，多写一次
         // Binder 的代价可忽略，换来的是「关就必须真关」的确定性。
-        if (!on || before == null || before.usb != tUsb) {
-            reason = putWss(ctx, KEY_USB, tUsb ? 1 : 0);
-            wroteAny = true;
+        if (followed.contains(SwitchItem.USB)) {
+            if (!on || before == null || before.usb != tUsb) {
+                int r = putWss(ctx, KEY_USB, tUsb ? 1 : 0);
+                if (reason == RootUtil.REASON_NONE) reason = r;
+                wroteAny = true;
+            }
         }
-        if (!on || before == null || before.wireless != tWifi) {
-            reason = putWss(ctx, KEY_WIRELESS, tWifi ? 1 : 0);
-            wroteAny = true;
+        if (followed.contains(SwitchItem.WIRELESS) && wirelessSupported()) {
+            if (!on || before == null || before.wireless != tWifi) {
+                int r = putWss(ctx, KEY_WIRELESS, tWifi ? 1 : 0);
+                if (reason == RootUtil.REASON_NONE) reason = r;
+                wroteAny = true;
+            }
         }
-        if (!wroteAny) {
-            // 两个键都已是目标态（无需写入 = 成功）：别让上一次操作的失败原因污染本次结论
-            reason = RootUtil.REASON_NONE;
+        if (followed.contains(SwitchItem.DEV)) {
+            if (!on || before == null || before.dev != tDev) {
+                int r = putWss(ctx, KEY_DEV, tDev ? 1 : 0);
+                if (reason == RootUtil.REASON_NONE) reason = r;
+                wroteAny = true;
+            }
         }
         lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
         MasterMerge m = new MasterMerge();
@@ -531,7 +811,12 @@ public final class DebugController {
             return m;
         }
         if (before != null) {
-            m.after = new State(tUsb, tWifi, before.dev);
+            // 写后态 = before 把跟随项替换成目标值（非跟随项保持 before 值不动）
+            m.after = new State(
+                    followed.contains(SwitchItem.USB) ? tUsb : before.usb,
+                    followed.contains(SwitchItem.WIRELESS) ? tWifi : before.wireless,
+                    followed.contains(SwitchItem.DEV) ? tDev : before.dev,
+                    before.a11yCount);
             // 真写了才需要异步复核；什么都没写时 after==before（刚读回来的真值，无需验证）
             m.trusted = wroteAny;
         } else {
@@ -591,7 +876,7 @@ public final class DebugController {
     }
 
     private static int getInt(Context ctx, String key) {
-        // 对齐 Geto/IMD：用 getString 读再解析，而非 getInt。
+        // 用 getString 读再解析，而非 getInt。
         // getInt 对「键不存在」会抛 SettingNotFoundException，而 getString 返回 null（更稳）；
         // 二者对"已存在的值"解析结果一致。读不到（null / 异常）按「未开启」处理。
         try {
@@ -643,6 +928,8 @@ public final class DebugController {
                 return ctx.getString(R.string.toast_wss_need_grant);
             case RootUtil.REASON_WRITE_DROPPED:
                 return ctx.getString(R.string.toast_wss_write_dropped);
+            case RootUtil.REASON_READ_HIDDEN:
+                return ctx.getString(R.string.toast_a11y_read_hidden);
             default:
                 return ctx.getString(R.string.toast_root_fail);
         }
@@ -700,27 +987,49 @@ public final class DebugController {
      * 旧实现把 INFLIGHT.add 放在 IO.execute 的任务体里，而执行器是单线程，第二个同键任务
      * 提交后只是排队，等第一个跑完（finally 已 INFLIGHT.remove）才开始执行，此时 add 必然
      * 成功、PENDING 分支永远不可达，结果「连点 N 次 = N 次串行 shell 往返」，去重完全失效。
-     * 现改为：提交侧 synchronized 内先查 INFLIGHT，命中就把最新 Runnable 记进 PENDING 并直接
-     * return（不提交新任务）；未命中才加锁占有 INFLIGHT 并提交一次 IO 任务。真正执行只在持有
-     * INFLIGHT 的那一条 IO 任务里发生，收尾时拾取 PENDING 的最新参数接着跑。
+     * 现改为：提交侧 synchronized 内先查 INFLIGHT，命中就把最新任务记进 PENDING 并直接
+     * return（不提交新任务，被覆盖者的回调并入补发列表）；未命中才加锁占有 INFLIGHT 并提交一次
+     * IO 任务。真正执行只在持有 INFLIGHT 的那一条 IO 任务里发生，收尾时拾取 PENDING 的最新参数接着跑。
      */
     private static final java.util.Set<String> INFLIGHT =
             java.util.Collections.newSetFromMap(new ConcurrentHashMap<>());
-    private static final java.util.Map<String, Runnable> PENDING = new ConcurrentHashMap<>();
+    /** 待办任务 = 最新一次操作 + 被它覆盖掉的历次回调（收尾时以最终结果统一补发，绝不静默丢） */
+    private static final class Pending {
+        final WriteTask task;
+        final ResultCallback cb;
+        final java.util.List<ResultCallback> merged = new java.util.ArrayList<>();
+        Pending(WriteTask task, ResultCallback cb) {
+            this.task = task;
+            this.cb = cb;
+        }
+    }
+    private static final java.util.Map<String, Pending> PENDING = new ConcurrentHashMap<>();
     private static final Object ENQUEUE_LOCK = new Object();
 
+    /** 写任务体：回调由 enqueue 统一包装传入（任务自身不直接持有调用方回调） */
+    private interface WriteTask {
+        void run(ResultCallback cb);
+    }
+
+    /** 主开关一键写入的队列键（与子项 "usb"/"wireless"/"dev"/"a11y" 区分开） */
+    private static final String KEY_MASTER_WRITE = "master";
+
     /**
-     * §4.7 写入在途冻结：单线程 IO 执行器下，busy = INFLIGHT 非空。
-     * UI 订阅 {@link #addBusyListener} 后在写任务排队期间冻结主开关，给出明确反馈
-     * （不再停在旧值、连发 Toast 无所适从）。busy 只在「由空变非空 / 由非空变空」时通知，
-     * 避免每次提交都刷 UI。
+     * §4.7 写入在途冻结：**只跟随主开关自己的写入**，主开关行的 Switch 在
+     * {@code setMaster/toggleMaster} 排队期间临时置灰，给出「正在执行」的明确反馈。
+     *
+     * 为什么不能看「INFLIGHT 非空」：任何子项写入都会让 INFLIGHT 非空，
+     * 于是拨一次 USB / 无线 / 开发者选项 / 无障碍，主开关也会被置灰再恢复 ——
+     * 表现就是「点子开关时主开关的按钮闪一下」，连未跟随主开关的项也会。
+     * 主开关聚合态本来就要等这些写入的回读结果，冻结它并无意义，只是视觉噪声。
      */
-    private static volatile boolean sBusy = false;
+    private static volatile boolean sMasterBusy = false;
     private static final java.util.List<Runnable> BUSY_LISTENERS =
             new java.util.concurrent.CopyOnWriteArrayList<>();
 
-    public static boolean isBusy() {
-        return sBusy;
+    /** 主开关自身的写入是否在途（不含子项写入） */
+    public static boolean isMasterBusy() {
+        return sMasterBusy;
     }
 
     public static void addBusyListener(Runnable r) {
@@ -731,9 +1040,11 @@ public final class DebugController {
         BUSY_LISTENERS.remove(r);
     }
 
-    private static void setBusy(boolean b) {
-        if (sBusy != b) {
-            sBusy = b;
+    /** 按当前在途键重算主开关冻结态；只在状态真正翻转时通知（避免每次提交都刷 UI） */
+    private static void updateMasterBusy() {
+        boolean b = INFLIGHT.contains(KEY_MASTER_WRITE);
+        if (sMasterBusy != b) {
+            sMasterBusy = b;
             for (Runnable r : BUSY_LISTENERS) {
                 try {
                     r.run();
@@ -744,47 +1055,66 @@ public final class DebugController {
         }
     }
 
-    private static void enqueue(String key, Runnable task) {
-        boolean submit;
+    private static void enqueue(String key, WriteTask task, ResultCallback cb) {
         synchronized (ENQUEUE_LOCK) {
             if (INFLIGHT.contains(key)) {
-                // 同键已有任务在途：只记最新一次（覆盖中间态），由在途任务收尾时拾起，不再提交
-                PENDING.put(key, task);
+                // 同键已有任务在途：只执行最新一次（覆盖中间态），由在途任务收尾时拾起。
+                // 被覆盖者的回调不丢：并入 merged，最终写完后以同一结果各补发一次。
+                Pending old = PENDING.get(key);
+                Pending p = new Pending(task, cb);
+                if (old != null) {
+                    p.merged.addAll(old.merged);
+                    if (old.cb != null) {
+                        p.merged.add(old.cb);
+                    }
+                }
+                PENDING.put(key, p);
                 return;
             }
             INFLIGHT.add(key);
-            submit = true;
         }
-        if (!submit) {
-            return;
-        }
-        // §4.7：有任务在途，立刻冻结 UI 开关（仅在由空变非空时通知）
-        setBusy(!INFLIGHT.isEmpty());
+        // §4.7：主开关写入在途，立刻冻结主开关 Switch（子项写入不冻结，见 sMasterBusy 注释）
+        updateMasterBusy();
         IO.execute(() -> {
-            Runnable current = task;
+            WriteTask current = task;
+            ResultCallback currentCb = cb;
+            java.util.List<ResultCallback> merged = java.util.Collections.emptyList();
             while (true) {
+                final ResultCallback fcb = currentCb;
+                final java.util.List<ResultCallback> fmerged = merged;
                 try {
-                    current.run();
+                    current.run((ok, s, reason) -> {
+                        if (fcb != null) {
+                            fcb.onResult(ok, s, reason);
+                        }
+                        for (ResultCallback m : fmerged) {
+                            try {
+                                m.onResult(ok, s, reason);
+                            } catch (Throwable ignored) {
+                                // 单个补发回调抛错不影响其它消费者
+                            }
+                        }
+                    });
                 } catch (Throwable t) {
                     // 任务自身的 bug 绝不能把执行器线程搞死、把待办任务永久吞掉：
                     // 记日志后照常走收尾（清在途标记、拾起最新待办）
                     android.util.Log.e(TAG, "enqueued task crashed", t);
                 } finally {
                     synchronized (ENQUEUE_LOCK) {
-                        Runnable next = PENDING.remove(key);
+                        Pending next = PENDING.remove(key);
                         if (next == null) {
                             // 没有待办：释放在途标记，当前任务线结束
                             INFLIGHT.remove(key);
                             current = null;
-                            // 全空则解除 busy 冻结（仅在由非空变空时通知）
-                            if (INFLIGHT.isEmpty()) {
-                                setBusy(false);
-                            }
                         } else {
                             // 有最新待办：用最新参数接着跑（不重新入队，避免再多一次调度）
-                            current = next;
+                            current = next.task;
+                            currentCb = next.cb;
+                            merged = next.merged;
                         }
                     }
+                    // 主开关写完即解除冻结；放在锁外通知，避免持锁时跑 UI 回调
+                    updateMasterBusy();
                 }
                 if (current == null) {
                     return;
@@ -847,7 +1177,7 @@ public final class DebugController {
             failWithoutWrite(app, cb, grantReason);
             return;
         }
-        enqueue("master", () -> setMasterBlocking(app, on, cb));
+        enqueue(KEY_MASTER_WRITE, c -> setMasterBlocking(app, on, c), cb);
     }
 
     /**
@@ -864,15 +1194,17 @@ public final class DebugController {
             failWithoutWrite(app, cb, grantReason);
             return;
         }
-        enqueue("master", () -> {
+        enqueue(KEY_MASTER_WRITE, c -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
-                failWithoutWrite(app, cb, lastFailReason());
+                failWithoutWrite(app, c, lastFailReason());
                 return;
             }
-            // 把刚读到的真值传下去：WSS 路径直接复用，不必再走一次 100~500ms 的 shell 读
-            setMasterBlocking(app, !cur.anyOn(), cb, cur);
-        });
+            // 把刚读到的真值传下去：WSS 路径直接复用，不必再走一次 100~500ms 的 shell 读。
+            // 翻转方向按主开关聚合态（跟随项任一开 = 开），而不是 adbd 态（usb||wireless）——
+            // a11y / dev 跟随主开关时二者会分叉。
+            setMasterBlocking(app, !masterAnyOn(app, cur), c, cur);
+        }, cb);
     }
 
     /** 主开关写入核心：单次 shell 完成「读前态 → 杀联动应用 → 写入 → 回读后态」 */
@@ -885,7 +1217,16 @@ public final class DebugController {
      */
     private static void setMasterBlocking(Context app, boolean on, ResultCallback cb,
                                           State knownBefore) {
-        MasterMerge m = masterMergeWrite(app, on, knownBefore);
+        java.util.EnumSet<SwitchItem> followed = SwitchConfig.followedItems(app);
+        boolean wantA11y = followed.contains(SwitchItem.A11Y);
+        // a11y 写前列表：优先 ContentResolver，读空时补一次 shell 读（ROM 脱敏时才是真值；
+        // 拿脱敏后的空表当写前态，关闭会把系统无障碍服务一起抹掉）
+        String a11yRawBefore = wantA11y ? readA11yRawForWrite(app) : null;
+
+        // 全局键合并写（只写跟随主开关的 usb / wireless / dev；a11y 是列表值，单独走一步）
+        java.util.EnumSet<SwitchItem> globalFollowed = followed.clone();
+        globalFollowed.remove(SwitchItem.A11Y);
+        MasterMerge m = masterMergeWrite(app, on, knownBefore, globalFollowed);
         // 写入或回读失败（未授权 / 通道挂起 / ROM 拦截）：**绝不提交**。
         // 曾有的严重缺陷：after 兜底成 new State(false,false,false) 并无条件进 cache + persistLast，
         // 把「假全关」当成真值渲染、还污染跨启动的「上次确认状态」——表现为关了再也开不回来、
@@ -901,14 +1242,35 @@ public final class DebugController {
             }
             return;
         }
-        // 关闭时记忆「写前组合」，并只在实际开着时才记（避免把「两个都关」这种无效组合写进 saved）
-        if (!on && m.before != null && m.before.anyOn()) {
-            save(app, m.before);
+        // 补 before 的 a11y 计数（parseState 占位 -1），供「关闭时记忆组合」的聚合判定
+        State before = m.before;
+        if (before != null && before.a11yCount < 0) {
+            before = new State(before.usb, before.wireless, before.dev,
+                    wantA11y ? A11yHelper.countThirdParty(app, a11yRawBefore) : 0);
         }
-        State s = commitAfter(app, m.after);
+        // 关闭时记忆「写前组合」，并只在跟随项真有开着时才记（避免把「全关」这种无效组合写进 saved）
+        if (!on && before != null && before.anyOn(followed)) {
+            save(app, before, a11yRawBefore, followed);
+        }
+        // a11y 写入（列表值，无法与全局键合并成一条 settings put）；
+        // 恢复待办计数由 writeA11yBlocking 内部异步核对后持久化，这里不再经手
+        int reason = m.reason;
+        boolean wroteAll = m.wrote;
+        if (wantA11y) {
+            A11yWriteResult aw = writeA11yBlocking(app, on, a11yRawBefore, false);
+            if (!aw.ok) {
+                wroteAll = false;
+                reason = aw.reason;
+            }
+        }
+        // 组装最终 after：全局键取 m.after，a11y 计数在写后重读（ContentResolver）
+        State after = new State(m.after.usb, m.after.wireless, m.after.dev,
+                A11yHelper.countThirdPartyNow(app));
+        State s = commitAfter(app, after);
         if (cb != null) {
-            final int reason = m.reason;
-            MAIN.post(() -> cb.onResult(m.wrote, s, reason));
+            final int r = reason;
+            final boolean ok = wroteAll;
+            MAIN.post(() -> cb.onResult(ok, s, r));
         }
         // WSS 路径的「写后态」是信任写结果算出的期望值（没走 shell 回读）：shell 兜底可用时
         // 补一次异步复核。放在回调之后执行——UI 已即时更新，复核耗时不再占用户等待。
@@ -919,51 +1281,59 @@ public final class DebugController {
 
     /**
      * 主开关写入的通道分发点（WSS 直写 ↔ su / Shizuku shell），与 {@link #writeKey} 对称：
-     * 所有主开关写入都经这里，调用点不再写三目。
+     * 所有主开关的全局键写入都经这里，调用点不再写三目。
      *
      * @param knownBefore 调用方刚读到的真值（toggleMaster 传，省掉 WSS 路径重复一次 shell 读）；
      *                    shell 路径忽略它（单条命令自带读前态标记行）
+     * @param followed    跟随主开关的项集合（只写这些全局键；a11y 由 setMasterBlocking 单独处理）
      */
-    private static MasterMerge masterMergeWrite(Context ctx, boolean on, State knownBefore) {
+    private static MasterMerge masterMergeWrite(Context ctx, boolean on, State knownBefore,
+                                                java.util.EnumSet<SwitchItem> followed) {
         if (wssWriteActive(ctx)) {
-            return masterMergeWriteWss(ctx, on, knownBefore);
+            return masterMergeWriteWss(ctx, on, knownBefore, followed);
         }
-        return masterMergeWriteShell(ctx, on);
+        return masterMergeWriteShell(ctx, on, followed);
     }
 
-    /** 单 shell 完成主开关的「读前态 →（打开时杀联动应用）→ 写入 → 回读后态」 */
-    private static MasterMerge masterMergeWriteShell(Context ctx, boolean on) {
-        State saved = loadSaved(ctx);
+    /** 单 shell 完成主开关的「读前态 →（打开时杀联动应用）→ 写入 → 回读后态」；只写 followed 里的全局键 */
+    private static MasterMerge masterMergeWriteShell(Context ctx, boolean on,
+                                                     java.util.EnumSet<SwitchItem> followed) {
         StringBuilder cmd = new StringBuilder();
-        // 1) 写前真值（关闭时用于记忆组合）
+        // 1) 写前真值（全读，供 State / 记忆组合用；a11y 另走 ContentResolver）
         cmd.append("echo ").append(TAG_USB_B).append("=$(settings get global ").append(KEY_USB).append(");");
         cmd.append(" echo ").append(TAG_WIFI_B).append("=$(settings get global ").append(KEY_WIRELESS).append(");");
         cmd.append(" echo ").append(TAG_DEV_B).append("=$(settings get global ").append(KEY_DEV).append(");");
-        // 2) 写入（打开时先杀联动应用、再还原记忆组合；关闭时直接全关）
-        if (on) {
+        // 2) 写入（打开时先杀联动应用、再还原记忆组合；关闭时直接全关；只写跟随主开关的项）
+        // 杀联动应用仅在真要开调试键时执行（与 masterMergeWriteWss 同条件）
+        if (on && (followed.contains(SwitchItem.USB) || followed.contains(SwitchItem.WIRELESS))) {
             String kill = killScriptFor(ctx, true);
             if (kill != null && !kill.isEmpty()) {
                 cmd.append(' ').append(kill).append(';');
             }
+        }
+        if (followed.contains(SwitchItem.USB)) {
             cmd.append(" settings put global ").append(KEY_USB).append(' ')
-                    .append(saved.usb ? '1' : '0').append(';');
-        } else {
-            cmd.append(" settings put global ").append(KEY_USB).append(" 0;");
+                    .append((on && savedItemOn(ctx, SwitchItem.USB, true)) ? '1' : '0').append(';');
         }
         // API<30 没有无线调试键：不写（写了也是个无人读取的无效键），读侧按 "null" 放行
-        if (wirelessSupported()) {
+        if (followed.contains(SwitchItem.WIRELESS) && wirelessSupported()) {
             cmd.append(" settings put global ").append(KEY_WIRELESS).append(' ')
-                    .append(on ? (saved.wireless ? '1' : '0') : '0').append(';');
+                    .append((on && savedItemOn(ctx, SwitchItem.WIRELESS, false)) ? '1' : '0').append(';');
         }
-        // 3) 写后真值回读
+        if (followed.contains(SwitchItem.DEV)) {
+            cmd.append(" settings put global ").append(KEY_DEV).append(' ')
+                    .append((on && savedItemOn(ctx, SwitchItem.DEV, false)) ? '1' : '0').append(';');
+        }
+        // 3) 写后真值回读（prop 仅作显示辅助：写后 key 归零但底层意图仍开时 UI 仍需显示未激活）
         cmd.append(" echo ").append(TAG_USB_A).append("=$(settings get global ").append(KEY_USB).append(");");
         cmd.append(" echo ").append(TAG_WIFI_A).append("=$(settings get global ").append(KEY_WIRELESS).append(");");
         cmd.append(" echo ").append(TAG_DEV_A).append("=$(settings get global ").append(KEY_DEV).append(");");
+        cmd.append(" echo ").append(TAG_WIFI_PROP).append("=$(getprop ").append(PROP_WIFI_INTENT).append(");");
         RootUtil.Result r = runPrivileged(ctx, cmd.toString());
         lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
         MasterMerge m = new MasterMerge();
         m.before = parseState(r.out, TAG_USB_B, TAG_WIFI_B, TAG_DEV_B);
-        m.after = parseState(r.out, TAG_USB_A, TAG_WIFI_A, TAG_DEV_A);
+        m.after = attachWifiProp(parseState(r.out, TAG_USB_A, TAG_WIFI_A, TAG_DEV_A), r.out);
         m.wrote = r.ok();
         m.reason = r.reason;
         return m;
@@ -982,18 +1352,22 @@ public final class DebugController {
         cmd.append("echo ").append(TAG_USB_A).append("=$(settings get global ").append(KEY_USB).append(");");
         cmd.append(" echo ").append(TAG_WIFI_A).append("=$(settings get global ").append(KEY_WIRELESS).append(");");
         cmd.append(" echo ").append(TAG_DEV_A).append("=$(settings get global ").append(KEY_DEV).append(");");
+        cmd.append(" echo ").append(TAG_WIFI_PROP).append("=$(getprop ").append(PROP_WIFI_INTENT).append(");");
         RootUtil.Result r = runPrivileged(ctx, cmd.toString());
         lastOwnWriteAt = android.os.SystemClock.uptimeMillis();
         WriteResult w = new WriteResult();
         w.ok = r.ok();
         w.reason = r.reason;
-        w.after = parseState(r.out, TAG_USB_A, TAG_WIFI_A, TAG_DEV_A);
+        w.after = attachWifiProp(parseState(r.out, TAG_USB_A, TAG_WIFI_A, TAG_DEV_A), r.out);
         return w;
     }
 
     /** 写完后用回读真值刷新内存缓存并广播（仅可在后台线程调用）；返回广播出去的状态 */
     private static State commitAfter(Context app, State after) {
         if (after != null) {
+            // parseState 是纯函数产出的 State 带 a11yCount=-1 占位；提交缓存前必须补真值，
+            // 否则 -1 会进缓存/persistLast，污染后续一切聚合判定与启动兜底显示
+            after = enrichA11y(app, after, null);
             cache = new Snapshot(after, android.os.SystemClock.uptimeMillis());
             persistLast(app, after);
         }
@@ -1243,10 +1617,10 @@ public final class DebugController {
             failWithoutWrite(app, cb, grantReason);
             return;
         }
-        enqueue("usb", () -> {
+        enqueue("usb", c -> {
             WriteResult w = writeKey(app, KEY_USB, on, true);
-            finishSubWrite(app, w, cb);
-        });
+            finishSubWrite(app, w, c);
+        }, cb);
     }
 
     /** 单独翻转 USB 调试：先经授权通道读真值再翻，读不到真值则拒绝 */
@@ -1257,17 +1631,17 @@ public final class DebugController {
             failWithoutWrite(app, cb, grantReason);
             return;
         }
-        enqueue("usb", () -> {
+        enqueue("usb", c -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
-                failWithoutWrite(app, cb, lastFailReason());
+                failWithoutWrite(app, c, lastFailReason());
                 return;
             }
             boolean on = !cur.usb;
             // kill 传 on：只有「正在打开」才需要杀联动应用
             WriteResult w = writeKey(app, KEY_USB, on, on);
-            finishSubWrite(app, w, cb);
-        });
+            finishSubWrite(app, w, c);
+        }, cb);
     }
 
     /** 单独改无线调试（不动 saved） */
@@ -1278,10 +1652,10 @@ public final class DebugController {
             failWithoutWrite(app, cb, grantReason);
             return;
         }
-        enqueue("wireless", () -> {
+        enqueue("wireless", c -> {
             WriteResult w = writeKey(app, KEY_WIRELESS, on, true);
-            finishSubWrite(app, w, cb);
-        });
+            finishSubWrite(app, w, c);
+        }, cb);
     }
 
     /** 单独翻转无线调试：先读真值再翻；读不到真值则拒绝 */
@@ -1292,16 +1666,16 @@ public final class DebugController {
             failWithoutWrite(app, cb, grantReason);
             return;
         }
-        enqueue("wireless", () -> {
+        enqueue("wireless", c -> {
             State cur = readViaPrivileged(app);
             if (cur == null) {
-                failWithoutWrite(app, cb, lastFailReason());
+                failWithoutWrite(app, c, lastFailReason());
                 return;
             }
             boolean on = !cur.wireless;
             WriteResult w = writeKey(app, KEY_WIRELESS, on, on);
-            finishSubWrite(app, w, cb);
-        });
+            finishSubWrite(app, w, c);
+        }, cb);
     }
 
     /**
@@ -1316,36 +1690,661 @@ public final class DebugController {
             return;
         }
         // 开发者选项不参与调试态、不联动快捷应用，无需杀进程（kill=false）
-        enqueue("dev", () -> {
+        enqueue("dev", c -> {
             WriteResult w = writeKey(app, KEY_DEV, on, false);
-            finishSubWrite(app, w, cb);
-        });
+            finishSubWrite(app, w, c);
+        }, cb);
+    }
+
+    /** 是否有可还原的第三方无障碍记忆（UI 在「开」前预检，无记忆时给明确提示而非「写入未生效」） */
+    public static boolean hasA11ySave(Context ctx) {
+        String s = savedA11yList(ctx);
+        return s != null && !s.isEmpty();
+    }
+
+    /**
+     * 单独开关第三方无障碍服务。
+     * 关 = 当前列表去掉第三方条目（写前把原始列表存进记忆，供「开」还原）；
+     * 开 = 把记忆的原始列表写回（无记忆时不写入，调用方应先用 {@link #hasA11ySave} 预检）。
+     */
+    public static void setA11y(Context ctx, final boolean on, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
+            return;
+        }
+        enqueue("a11y", c -> setA11yBlocking(app, on, c, false), cb);
+    }
+
+    /** 单独翻转第三方无障碍：以「有无第三方服务启用」为当前态翻转 */
+    public static void toggleA11y(Context ctx, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
+            return;
+        }
+        enqueue("a11y", c -> {
+            boolean on = !(A11yHelper.countThirdParty(app, readA11yRawForWrite(app)) > 0);
+            setA11yBlocking(app, on, c, false);
+        }, cb);
+    }
+
+    // —— 「列表读不到」时的二次确认 ——
+
+    /**
+     * 上次因「需用户二次确认」而未执行的 a11y 写入方向：-1 无 / 0 关 / 1 开。
+     *
+     * 与 {@link RootUtil#REASON_READ_HIDDEN} 配套：写入被拦下时记下方向，UI 据此弹确认框，
+     * 用户点「继续」后再用 {@link #setA11yConfirmed} 原方向重试——**不是替用户做决定**，
+     * 而是把"要不要承担清空系统服务的风险"交回用户。
+     */
+    private static volatile int a11yConfirmPendingOn = -1;
+
+    /** 上次被拦下的 a11y 写入方向（-1 = 当前没有被拦下的写入） */
+    public static int a11yConfirmPendingDirection() {
+        return a11yConfirmPendingOn;
+    }
+
+    /**
+     * 用户在二次确认框里选了「继续」：只重做 a11y 这一步（主开关路径的全局键在第一次尝试里
+     * 已经写下去了），方向由 {@link #a11yConfirmPendingDirection()} 决定。
+     *
+     * 「已确认」不能做成字段：{@code enqueue} 是串行队列，UI 线程先置标志、IO 任务再消费时，
+     * 若队列里已经压着别的 a11y 写入（磁贴/快捷方式/用户又拨了开关），那次未确认的写入会
+     * 抢先吃掉标志 —— 结果就是「未经同意就按空表口径写」。故把确认结果作为**任务参数**
+     * 一路传到 {@link #writeA11yBlocking}，让它和这次写入绑定，队列里谁先跑都不影响。
+     */
+    public static void setA11yConfirmed(Context ctx, boolean on, ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
+            return;
+        }
+        enqueue("a11y", c -> setA11yBlocking(app, on, c, true), cb);
+    }
+
+    private static void setA11yBlocking(Context app, boolean on, ResultCallback cb,
+                                        boolean allowUnverified) {
+        String before = readA11yRawForWrite(app);
+        if (!on) {
+            // 关闭：记忆当前列表（开时靠它还原）。与全局项的「子开关不动 saved」不同——
+            // a11y 的「开」语义就是「还原被关掉的服务」，不存就永远还原不了。
+            if (A11yHelper.countThirdParty(app, before) > 0) {
+                app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                        .putString(SAVED_A11Y, before == null ? "" : before)
+                        .putBoolean(SAVED_VALID, true).apply();
+            }
+        }
+        A11yWriteResult w = writeA11yBlocking(app, on, before, allowUnverified);
+        // 恢复待办计数由 writeA11yBlocking 内部异步核对后持久化（含一次性 Toast 标记）
+        if (!w.ok) {
+            // 写失败：绝不提交假状态（与主开关/全局子开关同一不变式）
+            State last = read(app);
+            android.util.Log.w(TAG, "a11y write refused to commit (reason=" + w.reason + ")");
+            broadcast(app);
+            if (cb != null) {
+                final int reason = w.reason;
+                MAIN.post(() -> cb.onResult(false, last, reason));
+            }
+            return;
+        }
+        // 全局键未动，直接取缓存 + 重读 a11y 计数组装 after（省一次 shell fork）
+        State cached = read(app);
+        State after = new State(cached.usb, cached.wireless, cached.dev,
+                A11yHelper.countThirdPartyNow(app));
+        State s = commitAfter(app, after);
+        if (cb != null) {
+            final int reason = w.reason;
+            MAIN.post(() -> cb.onResult(true, s, reason));
+        }
     }
 
     // —— 记忆 ——
 
-    private static void save(Context ctx, State s) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putBoolean(SAVED_USB, s.usb)
-                .putBoolean(SAVED_WIRELESS, s.wireless)
-                .putBoolean(SAVED_VALID, true)
-                .apply();
+    /**
+     * 关闭时记忆「写前组合」：只存当前跟随主开关的项（不跟随的项不该被主开关的记忆覆盖）。
+     * a11y 存原始 enabled_accessibility_services 列表串（恢复时原样写回）。
+     */
+    private static void save(Context ctx, State s, String a11yRawList,
+                             java.util.EnumSet<SwitchItem> followed) {
+        SharedPreferences.Editor e = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+        if (followed.contains(SwitchItem.USB)) {
+            e.putBoolean(SAVED_USB, s.usb);
+        }
+        if (followed.contains(SwitchItem.WIRELESS)) {
+            e.putBoolean(SAVED_WIRELESS, s.wireless);
+        }
+        if (followed.contains(SwitchItem.DEV)) {
+            e.putBoolean(SAVED_DEV, s.dev);
+        }
+        if (followed.contains(SwitchItem.A11Y)) {
+            // 列表读成空、而系统里确有已绑定的服务 = 该 ROM 脱敏，空表是假值：
+            // 别拿它覆盖上一次真正可恢复的记忆（否则「开」永远还原不回任何服务）
+            if (!android.text.TextUtils.isEmpty(a11yRawList) || !hasBoundA11y(ctx)) {
+                e.putString(SAVED_A11Y, a11yRawList == null ? "" : a11yRawList);
+            }
+        }
+        e.putBoolean(SAVED_VALID, true);
+        e.apply();
     }
 
     /**
-     * 取记忆的组合；没有有效记忆时回退 USB 开、无线关。
+     * 取记忆里某个全局项的取值；没有有效记忆时回退默认（USB 开、无线关、dev 关）。
      *
-     * 这里的组合只用于「一键打开还原调试态」，dev 不属于它 —— 独立开关的取值必须来自当前真值，
-     * 否则一键打开会把用户自己关掉的开发者选项又悄悄打开（违背「两者互不联动」）。
-     * 故 dev 一律填 false，调用方（主开关路径）也不会读这个字段。
+     * 记忆只用于「一键打开还原」，不跟随的项不会被读到 —— 独立开关的取值来自当前真值，
+     * 否则一键打开会把用户自己关掉的项又悄悄打开（违背「不跟随 = 互不联动」）。
      */
-    private static State loadSaved(Context ctx) {
+    private static boolean savedItemOn(Context ctx, SwitchItem item, boolean dflt) {
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (sp.getBoolean(SAVED_VALID, false)) {
-            return new State(sp.getBoolean(SAVED_USB, true),
-                    sp.getBoolean(SAVED_WIRELESS, false), false);
+        if (!sp.getBoolean(SAVED_VALID, false)) {
+            return dflt;
         }
-        return new State(true, false, false);
+        switch (item) {
+            case USB:
+                return sp.getBoolean(SAVED_USB, true);
+            case WIRELESS:
+                return sp.getBoolean(SAVED_WIRELESS, false);
+            case DEV:
+                return sp.getBoolean(SAVED_DEV, false);
+            default:
+                return dflt;
+        }
+    }
+
+    /** 记忆的第三方无障碍列表（null = 无可恢复记录） */
+    private static String savedA11yList(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!sp.getBoolean(SAVED_VALID, false)) {
+            return null;
+        }
+        return sp.getString(SAVED_A11Y, null);
+    }
+
+    // —— 无障碍列表写入 ——
+
+    /** a11y 写结果：是否成功 + 失败原因（恢复待办计数由 writeA11yBlocking 异步核对后自行持久化） */
+    private static final class A11yWriteResult {
+        boolean ok = true;
+        int reason = RootUtil.REASON_NONE;
+    }
+
+    /**
+     * a11y 写入代号：每次写入自增。绑定核对挪到 CALIBRATE 异步跑后，
+     * 旧一次恢复的核对结果可能晚于新一次写入（如开→秒关）到达，
+     * 代号不匹配即丢弃，防止陈旧 pending 覆盖新状态。
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger A11Y_VERIFY_GEN =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * 无障碍列表写入（主开关与子开关共用）：
+     *  - 关闭：当前列表去掉第三方条目（保留系统预装服务）后写回；
+     *  - 恢复：写回记忆的原始列表，并尽力拉起第三方进程（避免卡 Binding services）。
+     * 读列表优先 ContentResolver；读空但本机有 shell 通道时补一次 shell 读（部分 ROM 脱敏，
+     * 见 {@link #readA11yRawForWrite}）；写按授权通道收口（WSS 直写 / shell put）。
+     *
+     * <p>恢复待办（pending）统一由本方法持久化：
+     * **先判定这次是否真的会写**（会被二次确认拦下 / ON 无记忆直接返回都不算），
+     * 确认要写之后才清旧待办、作废旧核对代号，写成功后把绑定核对（最长 2.5s 轮询）
+     * 排到 CALIBRATE 异步执行，核完写回真实计数并 broadcast 通知 UI。
+     * 顺序不能颠倒：被拦下时什么都没写，旧结论若被清掉就再也不会落盘 ——
+     * 服务其实还没绑上，提示却凭空消失了。
+     * 核对绝不占 IO 单线程——否则期间所有写操作排队。
+     */
+    private static A11yWriteResult writeA11yBlocking(Context app, boolean on, String rawBefore,
+                                                     boolean allowUnverified) {
+        A11yWriteResult out = new A11yWriteResult();
+        if (rawBefore == null) {
+            rawBefore = readA11yRawForWrite(app);
+        }
+        String target;
+        List<String> startPkgs = null;
+        if (!on) {
+            // 关闭会写回「过滤后的列表」。若列表读成空、而系统里明明有已绑定服务，
+            // 说明这个 ROM 把该键对第三方脱敏了 —— 此时按空表写会把系统预装无障碍服务
+            // （TalkBack 等）一起抹掉。这是不可逆操作，不替用户决定：先拦下来让 UI 弹二次确认，
+            // 用户点「继续」后经 setA11yConfirmed 原方向重试。
+            if (android.text.TextUtils.isEmpty(rawBefore) && hasBoundA11y(app) && !allowUnverified) {
+                android.util.Log.w(TAG, "a11y read is empty but services ARE bound: "
+                        + "key is redacted by ROM, ask user before writing an empty list");
+                a11yConfirmPendingOn = on ? 1 : 0;
+                out.ok = false;
+                out.reason = RootUtil.REASON_READ_HIDDEN;
+                return out;
+            }
+            // 关闭：清掉第三方条目。rawBefore 空 = 本来就没有服务，过滤后仍是空（无副作用）
+            target = A11yHelper.filterOutThirdParty(app, rawBefore);
+        } else {
+            String saved = savedA11yList(app);
+            if (saved == null || saved.isEmpty()) {
+                // 无可恢复记录：不写入（保持现状），不算失败，也不动旧待办
+                return out;
+            }
+            target = saved;
+            startPkgs = A11yHelper.thirdPartyPackages(app, saved);
+        }
+
+        // —— 到这里才确定真的要写 ——
+        final int gen = A11Y_VERIFY_GEN.incrementAndGet();
+        // 清旧待办：这次写入会给出新结论，旧的「需手动」作废，核对完再写回真实值
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putInt(A11Y_RESTORE_PENDING, 0)
+                .putString(A11Y_RESTORE_PENDING_ENTRIES, "")
+                .apply();
+        // 放行展示闸门，避免写入后界面还挂着上一次的「需手动」；上一次被拦下的方向也作废
+        a11yPendingChecked = true;
+        a11yConfirmPendingOn = -1;
+
+        // 写入目标留痕：排查「开关说开了但列表里少了一个服务」这类问题全靠这一行
+        android.util.Log.i(TAG, "a11y write " + (on ? "ON" : "OFF")
+                + " target=[" + target + "] before=[" + rawBefore + "]");
+        // 写入回读（仅 shell/root 通道有；WSS 直写无回读值 → 走绑定列表兜底）
+        final String[] readBack = new String[1];
+        int reason = wssWriteActive(app)
+                ? putWssSecure(app, A11yHelper.KEY, target)
+                : writeA11yShell(app, target, readBack);
+        out.reason = reason;
+        out.ok = (reason == RootUtil.REASON_NONE);
+        if (out.ok) {
+            // 脱敏 ROM 上回读恒为空，把刚写下的目标列表记成可信值，
+            // 否则界面会一直显示写前的条数（关掉了还显示「已启用 2 个」）
+            A11yHelper.noteOwnWrite(target);
+        }
+        if (!out.ok || !on || startPkgs == null) {
+            return out;
+        }
+        // 恢复：先尽力拉起第三方进程（HyperOS 自启动管控会挡住系统绑定时的自动建进程，
+        // 服务永久卡 Binding services；shell 侧 am start 可绕过。见 a11y-toggle-research），
+        // 然后**以绑定结果为准**核对哪些服务真的没生效——不能按「有无 shell 通道」猜测：
+        // 实测小米 14 无 root 纯 WSS 没有 shell 也绑定成功，旧口径把全部计成「需手动」是误判。
+        int launchFailed = startA11yPackages(app, startPkgs);
+        final String targetF = target;
+        final int launchFailedF = launchFailed;
+        final String readBackF = readBack[0];
+        scheduleA11yVerify(app, gen, targetF, launchFailedF, readBackF, out.ok);
+        return out;
+    }
+
+    /**
+     * 写后核对「恢复是否真的生效」——两层，与显示解耦（消除「实际已开却卡在需手动十几秒」）：
+     *
+     * <p>显示层：写入成功即清待办并广播，UI 秒级显示「已开启 N 个」，绝不因系统绑定慢而卡在
+     * 「仍有 N 个需手动开启」。开关语义 = key 里有该服务，绑定是系统异步的后续动作。
+     *
+     * <p>判据优先级：
+     * <ol>
+     *   <li>有 shell 回读值（root/Shizuku）：回读列表明确不含目标条目 = 写入被 ROM 丢弃，
+     *       真失败，带提示写回。荣耀只对本进程 ContentResolver 脱敏，shell 读仍可信。</li>
+     *   <li>延迟一次保守的绑定核验：仅当系统绑定列表「非空但明确不含」目标时才静默纠正摘要
+     *       （不弹 Toast）——覆盖极少数「key 写进去了但服务最终没绑上」。空绑定列表不作证据
+     *       （可见性过滤 / ROM 缓存延迟），沿用 {@link #verifyA11yBound} 的保守口径。</li>
+     * </ol>
+     * 旧实现两轮绑定核对各等 2.5s + 轮间 5s，荣耀上把「已开」误报成「需手动」十几秒；
+     * 现在显示不依赖绑定，核验只做静默兜底。
+     */
+    private static void scheduleA11yVerify(Context app, int gen, String target,
+                                           int launchFailed, String readBack, boolean writeOk) {
+        CALIBRATE.execute(() -> {
+            if (A11Y_VERIFY_GEN.get() != gen) {
+                return; // 已有更新一次写入：本次核对结果作废
+            }
+            // 显示层：写入成功立即清待办并广播（不等绑定），UI 秒级显示「已开启」
+            if (writeOk) {
+                persistA11yPendingEx(app, 0, null, true);
+            }
+            // 回读判据：shell 读回的列表明确不含目标第三方条目 = 真写入失败
+            if (readBack != null) {
+                List<String> targets = A11yHelper.thirdPartyEntries(app, target);
+                List<String> rb = A11yHelper.splitList("null".equals(readBack) ? "" : readBack);
+                List<String> missing = new java.util.ArrayList<>();
+                for (String e : targets) {
+                    if (!rb.contains(e)) {
+                        missing.add(e);
+                    }
+                }
+                if (!missing.isEmpty()) {
+                    android.util.Log.w(TAG, "a11y write readback missing entries=" + missing);
+                    if (A11Y_VERIFY_GEN.get() == gen) {
+                        persistA11yPendingEx(app, missing.size(), missing, true);
+                    }
+                    return;
+                }
+            }
+            // 校验层：延迟做一次保守绑定核验，仅明确没绑上时静默纠正（不弹 Toast）
+            MAIN.postDelayed(() -> CALIBRATE.execute(() -> {
+                if (A11Y_VERIFY_GEN.get() != gen) {
+                    return;
+                }
+                List<String> pending = new java.util.ArrayList<>();
+                int n = verifyA11yBound(app, target, launchFailed, pending);
+                if (A11Y_VERIFY_GEN.get() != gen) {
+                    return;
+                }
+                if (n > 0) {
+                    android.util.Log.i(TAG, "a11y bind silent-correct pending=" + n
+                            + ", bound=" + A11yHelper.boundServiceComponents(app));
+                    persistA11yPendingEx(app, n, pending, false);
+                }
+            }), A11Y_VERIFY_SECOND_ROUND_DELAY_MS);
+        });
+    }
+
+    /**
+     * 落盘恢复待办并广播。
+     *
+     * @param toast 是否置一次性 Toast 标记；静默纠正传 false（只改摘要、不弹提示）
+     */
+    private static void persistA11yPendingEx(Context app, int pending, List<String> entries,
+                                             boolean toast) {
+        SharedPreferences.Editor pe = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+        pe.putInt(A11Y_RESTORE_PENDING, pending);
+        pe.putString(A11Y_RESTORE_PENDING_ENTRIES, pending > 0 && entries != null
+                ? android.text.TextUtils.join(":", entries) : "");
+        if (pending > 0 && toast) {
+            pe.putBoolean(A11Y_RESTORE_TOAST, true);
+        } else if (pending == 0) {
+            pe.putBoolean(A11Y_RESTORE_TOAST, false);
+        }
+        pe.apply();
+        a11yPendingChecked = true; // 本次会话已给出核对结论（含 0），UI 可以据此展示
+        broadcast(app); // UI 按最新 pending 刷新摘要 / 消费一次性 Toast
+    }
+
+    /**
+     * 系统里是否真的绑定着无障碍服务。
+     * 用来交叉验证「列表读到空」到底是真没有，还是 ROM 把该键对第三方脱敏：
+     * 读到空 + 服务却已绑定 = 读不可信，绝不能把空表当作写前态。
+     */
+    private static boolean hasBoundA11y(Context app) {
+        java.util.Set<String> bound = A11yHelper.boundServiceComponents(app);
+        return bound != null && !bound.isEmpty();
+    }
+
+    /** 恢复后绑定核对的总等待窗口 / 轮询间隔（绑定是异步的，通常 <500ms 全绑上，等满即按未绑定计） */
+    private static final long A11Y_BIND_VERIFY_TIMEOUT_MS = 2500;
+    private static final long A11Y_BIND_VERIFY_POLL_MS = 250;
+
+    /**
+     * 写入后延迟多久做「静默绑定核验」（见 {@link #scheduleA11yVerify}）。
+     * 显示层不等它（写入成功即显示已开启），这一步只兜底极少数「key 有但服务没绑上」。
+     * 延迟给足绑定时间，避免把慢绑定的服务误判成没绑上。
+     */
+    private static final long A11Y_VERIFY_SECOND_ROUND_DELAY_MS = 5000;
+
+    /**
+     * 恢复后核对「真的没生效」的第三方服务数（与写入通道无关）：
+     * 用 {@link A11yHelper#unboundEntries}（AccessibilityManager 已绑定列表）短轮询等
+     * 绑定完成，全绑上提前退出；轮询窗口内仍没绑上的才计「需手动开启」。
+     *
+     * <p>关键口径：**「绑定列表为空」不是失败的正证据**。Android 11+ 包可见性会把
+     * getEnabledAccessibilityServiceList 过滤成空列表，MIUI/HyperOS 也存在绑定状态
+     * 缓存延迟（数秒到数十秒）——这两种情况下旧口径把「查不到」当成「全没绑上」，
+     * 造成系统性误报（实测小米 14 恢复明明成功却永远提示仍需手动）。故只有
+     * 「绑定列表非空（查询可信）但某个条目不在其中」或「shell 侧拉起进程确有失败」
+     * 才算正证据；查不到 + 无 shell 旁证时宁可漏报不误报。
+     *
+     * @param target          写回的完整原始列表（含系统服务，核对时只看第三方条目）
+     * @param launchFailed    shell 侧拉起进程的失败数（无 shell 通道为 -1，不可作证据）
+     * @param outPending      出参：未生效的具体条目（供懒复核自愈）
+     */
+    private static int verifyA11yBound(Context app, String target, int launchFailed,
+                                       List<String> outPending) {
+        List<String> entries = A11yHelper.thirdPartyEntries(app, target);
+        if (entries.isEmpty()) {
+            return 0;
+        }
+        long deadline = android.os.SystemClock.uptimeMillis() + A11Y_BIND_VERIFY_TIMEOUT_MS;
+        List<String> unbound = A11yHelper.unboundEntries(app, entries);
+        while (unbound != null && !unbound.isEmpty()
+                && android.os.SystemClock.uptimeMillis() < deadline) {
+            try {
+                Thread.sleep(A11Y_BIND_VERIFY_POLL_MS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            unbound = A11yHelper.unboundEntries(app, entries);
+        }
+        if (unbound == null) {
+            android.util.Log.w(TAG, "a11y bind verify unavailable, launchFailed=" + launchFailed);
+            return launchFailed > 0 ? launchFailed : 0;
+        }
+        if (unbound.size() == entries.size()) {
+            // 全部未绑定：可能是真全卡住，也可能是绑定列表本身查出来就空（可见性过滤 /
+            // ROM 缓存延迟）。空列表不作失败证据，无 shell 旁证时不报。
+            java.util.Set<String> bound = A11yHelper.boundServiceComponents(app);
+            if (bound == null || bound.isEmpty()) {
+                android.util.Log.w(TAG, "a11y bind verify saw empty bound list, not reporting");
+                return launchFailed > 0 ? launchFailed : 0;
+            }
+        }
+        outPending.clear();
+        outPending.addAll(unbound);
+        android.util.Log.d(TAG, "a11y bind verify: unbound=" + unbound.size()
+                + "/" + entries.size());
+        return unbound.size();
+    }
+
+    /** WSS 直写 Settings.Secure 键（无障碍列表）；putString 布尔回值识别 ROM 静默丢弃 */
+    private static int putWssSecure(Context ctx, String key, String val) {
+        int reason;
+        try {
+            boolean written = Settings.Secure.putString(
+                    ctx.getContentResolver(), key, val == null ? "" : val);
+            if (!written) {
+                android.util.Log.w(TAG, "wss put secure " + key + " not written (dropped by ROM)");
+                reason = RootUtil.REASON_WRITE_DROPPED;
+            } else {
+                reason = RootUtil.REASON_NONE;
+            }
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "wss put secure " + key + " failed", t);
+            reason = RootUtil.REASON_EXEC;
+        }
+        lastFailReason = reason;
+        return reason;
+    }
+
+    /**
+     * shell 通道写无障碍列表（settings put secure）；列表内容仅 pkg/component 字符，单引号包裹。
+     * 同一次 shell 顺带回读写入后的 key（标记行），作为写后「是否真的生效」的可靠判据——
+     * 荣耀等 ROM 只对本进程 ContentResolver 脱敏，shell 视角的 settings get 仍是真值。
+     *
+     * @param outReadBack 出参[0]：回读到的列表串（"null" 表示空）；通道异常时为 null
+     */
+    private static int writeA11yShell(Context ctx, String list, String[] outReadBack) {
+        String safe = list == null ? "" : list.replace("'", "");
+        String cmd = "settings put secure " + A11yHelper.KEY + " '" + safe
+                + "'; echo __ASW_A11Y_W__=\"$(settings get secure " + A11yHelper.KEY + ")\"";
+        RootUtil.Result r = runPrivileged(ctx, cmd);
+        if (outReadBack != null) {
+            outReadBack[0] = tagValue(r.out, "__ASW_A11Y_W__");
+        }
+        return r.ok() ? RootUtil.REASON_NONE : r.reason;
+    }
+
+    /**
+     * 恢复无障碍时尽力拉起第三方进程：进程不在跑则 am start 启动其默认 activity
+     * （HyperOS 自启动管控会挡住系统绑定时的自动建进程，进程一跑起来待绑定的服务即可完成绑定）；
+     * 随后立即回桌面，减少对用户的打扰。进程已在跑则跳过（绑定本就会成功）。
+     *
+     * 无 shell 通道（纯 WSS 且 root/Shizuku 皆不可用）时拉不起来，全部计「待手动开启」。
+     *
+     * @return 未能拉起进程的包数（0 = 全部可恢复）
+     */
+    private static int startA11yPackages(Context app, List<String> pkgs) {
+        if (pkgs == null || pkgs.isEmpty()) {
+            return 0;
+        }
+        StringBuilder cmd = new StringBuilder();
+        int attempted = 0;
+        for (String pkg : pkgs) {
+            if (!LinkagePrefs.isValidPackageName(pkg)) {
+                continue;
+            }
+            android.content.Intent launch =
+                    app.getPackageManager().getLaunchIntentForPackage(pkg);
+            if (launch == null || launch.getComponent() == null) {
+                // 无启动 activity（纯后台服务型应用）：am start 无从下手，只能计待手动
+                continue;
+            }
+            // 组件名单引号包裹：类名可能含 $（内部类），防 shell 变量展开
+            String comp = launch.getComponent().flattenToString().replace("'", "");
+            if (cmd.length() > 0) {
+                cmd.append("; ");
+            }
+            // pidof 有则跳过 am start（进程在跑绑定就会成功），没有才拉起 + 回桌面；
+            // 逐包 echo 退出码标记行，回传后按行统计失败数（一次 shell，不逐包 fork）
+            cmd.append("echo __ASW_P").append(attempted)
+                    .append("=$(pidof ").append(pkg)
+                    .append(" >/dev/null 2>&1 || (am start -n '").append(comp)
+                    .append("' >/dev/null 2>&1 && input keyevent 3 >/dev/null 2>&1); echo $?)");
+            attempted++;
+        }
+        if (attempted == 0) {
+            return pkgs.size(); // 全都无法解析启动 activity
+        }
+        RootUtil.Result r;
+        if (ShizukuUtil.available()) {
+            r = ShizukuUtil.run(cmd.toString());
+        } else if (sRootCapable) {
+            r = RootUtil.su(cmd.toString());
+        } else {
+            // 纯 WSS 无 shell 兜底：拉不起进程，但这不是「失败」的证据——很多设备
+            // 不拉进程也能正常绑定（实测小米 14）。返回 -1 表示「无旁证」，由
+            // verifyA11yBound 按绑定核对定夺，绝不凭空全计失败。
+            return -1;
+        }
+        if (!r.ok()) {
+            return attempted + (pkgs.size() - attempted);
+        }
+        // 按标记行统计失败（非 0 = pidof 没有进程且 am start 也没成功）
+        int failed = 0;
+        for (int i = 0; i < attempted; i++) {
+            if (!markerOk(r.out, "__ASW_P" + i + "=")) {
+                failed++;
+            }
+        }
+        return failed + (pkgs.size() - attempted);
+    }
+
+    /** 标记行形如 "__ASW_P0__=0"：取值 0 = 成功 */
+    private static boolean markerOk(String out, String prefix) {
+        if (out == null) {
+            return false;
+        }
+        for (String line : out.split("[\\r\\n]+")) {
+            String s = line.trim();
+            if (s.startsWith(prefix)) {
+                String v = s.substring(prefix.length()).trim();
+                return "0".equals(v);
+            }
+        }
+        return false;
+    }
+
+    // —— 无障碍恢复失败反馈（UI 消费）——
+
+    /**
+     * 本会话是否已复核过持久化的「恢复待办」结论。
+     * 上次会话写下的 pending 很可能早已自愈（服务后来绑上了），启动就把旧结论摆到界面上，
+     * 用户看到的就是「明明开着却短暂显示需手动开启」——所以一律先复核、再展示。
+     */
+    private static volatile boolean a11yPendingChecked = false;
+
+    /**
+     * 上次无障碍恢复未成功的服务数（0 = 无待办）。
+     * 本会话尚未复核过时恒返回 0（见 {@link #a11yPendingChecked}），
+     * 调用方需在启动时用 {@link #hasPersistedA11yPending} + {@link #recheckA11yRestore} 先复核。
+     */
+    public static int a11yRestorePending(Context ctx) {
+        if (!a11yPendingChecked) {
+            return 0;
+        }
+        return rawA11yRestorePending(ctx);
+    }
+
+    /** 持久化的恢复待办原始值（不经本会话复核闸门，供启动时判断是否需要复核） */
+    public static boolean hasPersistedA11yPending(Context ctx) {
+        return rawA11yRestorePending(ctx) > 0;
+    }
+
+    private static int rawA11yRestorePending(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(A11Y_RESTORE_PENDING, 0);
+    }
+
+    /**
+     * 恢复失败摘要的自愈复核（后台线程，CALIBRATE 串行）：写入时的绑定核对窗口只有 2.5s，
+     * 慢绑定 / ROM 绑定状态缓存延迟（MIUI 有数秒到数十秒滞后的报道）会让「仍需手动」误报；
+     * 这里稍后按同一口径重核，绑上即清掉。也顺带清掉旧版本误报残留在 cfg 里的 stale pending
+     * （旧数据只有计数没存条目时，按记忆列表的第三方条目复核）。
+     *
+     * @param onDone 复核结束后在主线程回调（UI 刷新用）；可为 null
+     */
+    public static void recheckA11yRestore(Context ctx, final Runnable onDone) {
+        final Context app = ctx.getApplicationContext();
+        SharedPreferences sp = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (sp.getInt(A11Y_RESTORE_PENDING, 0) <= 0) {
+            // 没有待办：标记本会话已「复核」，让 UI 正常显示条数（而不是一直卡在 0 的闸门后）
+            a11yPendingChecked = true;
+            if (onDone != null) {
+                MAIN.post(onDone);
+            }
+            return;
+        }
+        List<String> entries = A11yHelper.splitList(
+                sp.getString(A11Y_RESTORE_PENDING_ENTRIES, ""));
+        if (entries.isEmpty()) {
+            // 旧版本残留（只存了计数没存条目）：按记忆列表的第三方条目复核
+            entries = A11yHelper.thirdPartyEntries(app, savedA11yList(app));
+        }
+        if (entries.isEmpty()) {
+            a11yPendingChecked = true;
+            if (onDone != null) {
+                MAIN.post(onDone);
+            }
+            return;
+        }
+        final List<String> toCheck = entries;
+        CALIBRATE.execute(() -> {
+            List<String> unbound = A11yHelper.unboundEntries(app, toCheck);
+            int pending = 0;
+            String raw = "";
+            // 与 verifyA11yBound 同口径：绑定列表为空不是失败正证据，不报
+            if (unbound != null && !unbound.isEmpty()) {
+                java.util.Set<String> bound = A11yHelper.boundServiceComponents(app);
+                if (bound != null && !bound.isEmpty()) {
+                    pending = unbound.size();
+                    raw = android.text.TextUtils.join(":", unbound);
+                }
+            }
+            SharedPreferences sp2 = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            if (sp2.getInt(A11Y_RESTORE_PENDING, 0) != pending) {
+                sp2.edit().putInt(A11Y_RESTORE_PENDING, pending)
+                        .putString(A11Y_RESTORE_PENDING_ENTRIES, raw).apply();
+                android.util.Log.d(TAG, "a11y restore recheck: pending -> " + pending);
+            }
+            // 无论结论有没有变都要放行闸门并回调：
+            // 启动时 a11yRestorePending() 恒为 0，界面正等着这次复核的结果来渲染摘要
+            a11yPendingChecked = true;
+            if (onDone != null) {
+                MAIN.post(onDone);
+            }
+        });
+    }
+
+    /** 消费一次性恢复提示（有未成功的恢复记录时 UI 弹一次） */
+    public static boolean consumeA11yRestoreToast(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        boolean v = sp.getBoolean(A11Y_RESTORE_TOAST, false);
+        if (v) {
+            sp.edit().putBoolean(A11Y_RESTORE_TOAST, false).apply();
+        }
+        return v;
     }
 
     // —— 合并写操作的结果载体 ——

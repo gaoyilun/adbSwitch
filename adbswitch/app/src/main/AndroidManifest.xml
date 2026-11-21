@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 在线更新检测（已启用：ENABLED=true，GitHub 主通道硬编码激活；INTERNET 用于拉取 update.json） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 无线调试行判定「未激活」：读当前是否连着 Wi-Fi（NetworkCapabilities.hasTransport）。
+         普通权限，无需运行时申请；三种授权模式统一可用。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 安装下载下来的更新 APK 需要「安装未知应用」授权（API 26+） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 原生「添加到主屏幕」快捷方式（Android 2.3 起）：发 INSTALL_SHORTCUT 广播所需权限 -->
@@ -25,6 +28,12 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Android 11+ 包可见性：getEnabledAccessibilityServiceList 会被过滤成空列表，
+             绑定核对必须声明对无障碍服务的可见性（实测：缺这条时恢复核对把「查不到」
+             误判成「全没绑上」，界面永远提示仍需手动）。 -->
+        <intent>
+            <action android:name="android.accessibilityservice.AccessibilityService" />
         </intent>
     </queries>
 
@@ -48,6 +57,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 控制中心磁贴长按：系统默认进入「应用信息」，官方覆盖方式是声明
+                 QS_TILE_PREFERENCES（FlClash 同款做法），落到本页即应用主页。
+                 activity 已是 singleTask，满足 API 28+ 对 NEW_TASK 的要求。 -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
             </intent-filter>
             <!-- 长按菜单快捷方式全部改为动态发布（ToggleShortcuts.publish）：
                  静态项顺序与图标都无法随状态控制，见该类注释 -->

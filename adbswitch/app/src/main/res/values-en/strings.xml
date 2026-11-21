@@ -14,7 +14,7 @@
     <string name="sc_toggle_wireless_short">Wireless Debugging</string>
     <string name="sc_toggle_wireless_long">Toggle wireless debugging only, without opening the UI</string>
 
-    <string name="header_subtitle">One-tap toggle for USB &amp; wireless debugging</string>
+    <string name="header_subtitle">One tap to pass detection — debug &amp; accessibility traces handled</string>
 
     <string name="card_debug_title">Debug Switch</string>
 
@@ -33,6 +33,9 @@
     <string name="wireless_title">Wireless Debugging</string>
     <string name="wireless_on">On · adbd running</string>
     <string name="wireless_off">Off</string>
+    <!-- Switch is on but no Wi-Fi connected: wireless debugging is unavailable right now.
+         Keeps the "on" color; only the adbd-running wording is replaced. -->
+    <string name="wireless_inactive">On · inactive</string>
 
     <string name="devopts_title">Developer Options</string>
     <string name="devopts_on">On</string>
@@ -91,6 +94,7 @@
     <string name="toast_devopts_hidden">Developer options hidden; tap build number 7 times to restore</string>
     <string name="toast_devopts_off_hint">Developer options off; tap build number 7 times in \'About phone\'</string>
     <string name="toast_wireless_fallback">Can\'t open wireless debugging directly; tap \'Wireless debugging\' in Developer options</string>
+    <string name="toast_nav_unavailable">This settings page is unavailable on your system</string>
     <string name="nav_chevron_desc">Open corresponding settings</string>
 
     <string name="about_title">About</string>
@@ -182,7 +186,23 @@
     <string name="toast_wss_no_perm">Rootless mode not authorized; tap \'Authorization Mode\' above to authorize</string>
     <string name="toast_wss_need_grant">Rootless mode not authorized; open the app to authorize</string>
     <string name="toast_wss_write_dropped">Write ineffective: the system rejected this setting (possibly restricted)</string>
+    <string name="a11y_hidden_title">Can\'t read the accessibility service list</string>
+    <string name="a11y_hidden_msg">The system hides the accessibility service list from this app (some ROMs do), so it cannot tell which services are system-provided.\n\nContinuing treats the list as empty and may also turn off system accessibility services. This cannot be undone automatically.\n\nContinue?</string>
+    <string name="a11y_hidden_continue">Turn off anyway</string>
+    <string name="toast_a11y_read_hidden">The system hides the accessibility service list; cancelled. You can confirm and retry inside the app</string>
 
     <string name="nav_confirm_title">Developer options required</string>
     <string name="nav_confirm_msg">Opening this page requires enabling Developer options (writes a system setting). Continue?</string>
+
+    <string name="a11y_title">Accessibility Services</string>
+    <string name="a11y_on">%1$d third-party services enabled</string>
+    <string name="a11y_off">No third-party services</string>
+    <string name="a11y_restore_pending">%1$d still need manual enabling</string>
+    <string name="a11y_no_save">No saved accessibility services to restore; enable them manually in system settings</string>
+    <string name="a11y_restore_partial">Accessibility restore incomplete; %1$d still need manual enabling</string>
+    <string name="manage_items_title">Manage Switch Items</string>
+    <string name="manage_items_sum">Choose which switches are shown and follow the master switch</string>
+    <string name="manage_shown">Show</string>
+    <string name="manage_follow">Follow master switch</string>
+    <string name="manage_drag_desc">Drag to reorder</string>
 </resources>

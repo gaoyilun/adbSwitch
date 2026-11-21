@@ -60,6 +60,15 @@ public final class RootUtil {
      * 必须显式把这个假成功标记成失败，UI 才能如实提示「写入未生效」。
      */
     public static final int REASON_WRITE_DROPPED = 8;
+    /**
+     * 无障碍列表被 ROM 对第三方脱敏：{@code Settings.Secure.enabled_accessibility_services}
+     * 在应用内读到空串，而系统里其实绑定着服务（实测荣耀 MagicOS）。
+     * 此时按空表口径改写会把系统预装无障碍服务一起抹掉，属不可逆操作 ——
+     * 本原因码表示「已拦下、等用户二次确认」，用户点「继续」后可原方向重试
+     * （{@code DebugController.setA11yConfirmed}）。后台入口（磁贴/快捷方式）无法弹框，
+     * 只能如实提示本次已取消。
+     */
+    public static final int REASON_READ_HIDDEN = 9;
 
     public static class Result {
         public int code;
@@ -96,8 +105,11 @@ public final class RootUtil {
      */
     public static boolean suBinaryExists() {
         for (String path : new String[]{
-                "/system/bin/su", "/system/xbin/su", "/sbin/su",
-                "/magisk/.core/bin/su", "/data/adb/magisk/su"}) {
+                "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su",
+                "/magisk/.core/bin/su", "/data/adb/magisk/su", "/system/bin/.magisk/su",
+                // KernelSU / APatch：su 由 ksud/apd 挂载提供，传统路径探不到
+                "/data/adb/ksu/bin/su", "/data/adb/ap/bin/su",
+                "/system/bin/ksud", "/data/adb/ksud", "/data/adb/apd"}) {
             try {
                 if (new java.io.File(path).exists()) {
                     return true;
@@ -133,6 +145,9 @@ public final class RootUtil {
     public static Result su(String cmd) {
         Result res = new Result();
         Process p = null;
+        // 单一 deadline：waitFor 与收尾 join 共用同一预算，总耗时不超过声明的 TIMEOUT_MS
+        // （旧实现 waitFor(10s)+join(2s)+join(2s) 最坏 14s，超出声明 40%）
+        long deadline = System.nanoTime() + TIMEOUT_MS * 1_000_000L;
         try {
             p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
             // 必须先并发抽干 stdout / stderr，再 waitFor：
@@ -145,6 +160,9 @@ public final class RootUtil {
             final StringBuffer errB = new StringBuffer();
             Thread tOut = new Thread(() -> outB.append(drain(proc.getInputStream())));
             Thread tErr = new Thread(() -> errB.append(drain(proc.getErrorStream())));
+            // daemon：子进程僵死、管道不 EOF 时 drain 会永久阻塞，不能让它挡住进程退出
+            tOut.setDaemon(true);
+            tErr.setDaemon(true);
             tOut.start();
             tErr.start();
             boolean timedOut = false;
@@ -157,13 +175,10 @@ public final class RootUtil {
                 timedOut = true;
                 res.code = CODE_TIMEOUT;
                 res.reason = REASON_TIMEOUT;
-                try {
-                    proc.destroy();
-                } catch (Throwable ignored) {
-                }
+                killQuietly(proc);
             }
-            tOut.join(2000);
-            tErr.join(2000);
+            tOut.join(joinBudget(deadline));
+            tErr.join(joinBudget(deadline));
             res.out = outB.toString();
             res.err = errB.toString();
             // 退出码非 0：区分「su 没给权限」与「命令本身失败」。
@@ -177,6 +192,12 @@ public final class RootUtil {
                 res.err = (res.err == null || res.err.isEmpty() ? "" : res.err + "\n")
                         + "su 执行超时(" + TIMEOUT_MS + "ms)";
             }
+        } catch (InterruptedException ie) {
+            // 恢复中断位再退出：执行器 shutdownNow / 任务取消依赖它，吞掉会让线程继续跑完超时链
+            Thread.currentThread().interrupt();
+            res.code = CODE_TIMEOUT;
+            res.reason = REASON_TIMEOUT;
+            res.err = "su 等待被中断";
         } catch (Throwable t) {
             res.code = -1;
             res.err = String.valueOf(t);
@@ -185,37 +206,64 @@ public final class RootUtil {
             res.reason = isSuMissing(t) ? REASON_NO_SU : REASON_EXEC;
         } finally {
             if (p != null) {
-                try {
-                    p.destroy();
-                } catch (Throwable ignored) {
-                }
+                killQuietly(p);
+                // 超时后 drain 可能仍阻塞在管道读上：关流打断并释放 fd
+                closeQuietly(p.getInputStream());
+                closeQuietly(p.getErrorStream());
+                closeQuietly(p.getOutputStream());
             }
         }
         return res;
     }
 
-    /** exec 抛错是否代表「没有 su」：只看异常文本，不额外 fork 进程去 which su */
+    /** 收尾 join 的预算：deadline 剩余额度与 500ms 取小，读不完就放弃（本次按已有输出判定） */
+    private static long joinBudget(long deadline) {
+        long ms = (deadline - System.nanoTime()) / 1_000_000L;
+        return Math.max(0, Math.min(500, ms));
+    }
+
+    /** SIGTERM 后补 SIGKILL：su 卡在授权弹窗时仅 destroy 杀不掉 */
+    private static void killQuietly(Process p) {
+        try {
+            p.destroy();
+        } catch (Throwable ignored) {
+        }
+        try {
+            p.destroyForcibly();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void closeQuietly(java.io.Closeable c) {
+        try {
+            if (c != null) {
+                c.close();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** exec 抛错是否代表「没有 su」：只看异常文本，不额外 fork 进程去 which su。
+     *  收紧匹配：裸 "not found" 会把任何带该字样的 IOException 误判成未 root；
+     *  "permission denied" 是「有 su 被拒」而非「没有 su」，不再归这里 */
     private static boolean isSuMissing(Throwable t) {
         if (t == null) {
             return false;
         }
         String m = String.valueOf(t.getMessage()).toLowerCase(java.util.Locale.ROOT);
-        return m.contains("no such file or directory") || m.contains("not found")
-                || m.contains("permission denied") && m.contains("su");
+        return m.contains("no such file or directory") || m.contains("cannot find");
     }
 
     /**
-     * 非零退出是否像「授权被拒」：输出里带拒绝字样，或完全没有任何输出
-     * （su 被 Magisk / 用户拒绝时典型表现：命令根本没跑，stderr 也是空的）。
+     * 非零退出是否像「授权被拒」：只认输出里确实带拒绝字样。
+     * 空输出不再冒充 DENIED——命令静默失败（个别 ROM 的 settings put）也是这个形态，
+     * 归 REASON_EXEC 让用户重试 / 换模式，而不是被带偏去查 root 授权。
      */
     private static boolean looksDenied(Result r) {
         String text = (String.valueOf(r.err) + "\n" + String.valueOf(r.out))
                 .toLowerCase(java.util.Locale.ROOT);
-        if (text.contains("denied") || text.contains("not permitted")
-                || text.contains("permission denied") || text.contains("not allowed")) {
-            return true;
-        }
-        return r.err.trim().isEmpty() && r.out.trim().isEmpty();
+        return text.contains("denied") || text.contains("not permitted")
+                || text.contains("not allowed");
     }
 
     private static String drain(java.io.InputStream is) {

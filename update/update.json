@@ -1,9 +1,9 @@
 {
-  "versionCode": 5,
-  "versionName": "1.0.4",
-  "notes": "1.0.4：调试三行新增「›」箭头，点它或长按整行直达对应系统设置（未授权也能用）；新增英文界面。回到应用即重读真实状态，授权被撤销也能立刻发现并提示；「开启调试自动关闭快捷应用」跟随授权能力，执行失败不再静默；快捷方式统一为先关调试再打开；未授权不再挡住通知与快捷应用配置。",
+  "versionCode": 6,
+  "versionName": "1.1.0",
+  "notes": "1.1.0：将开关解耦，支持自由自定义；新增无障碍服务一键开关、控制中心磁贴长按直达主页；优化 Wi-Fi 未连接时无线adb的状态指示；修复主开关开始瞬间闪烁。",
   "mandatory": false,
-  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.0.4/com.elleng.adbswitch-1.0.4-universal-release.apk",
+  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.1.0/com.elleng.adbswitch-1.1.0-universal-release.apk",
   "fallbackUrl": "https://github.com/gaoyilun/adbSwitch/releases",
-  "sha256": "07d2a3b8859cd67ec9899372f4d555a81a19a851b84f210b9b879a6896bd462e"
+  "sha256": "edcce07355cfcc1029f84f988a7027d51bbfa071f621df125f866ed9e76fd0c0"
 }

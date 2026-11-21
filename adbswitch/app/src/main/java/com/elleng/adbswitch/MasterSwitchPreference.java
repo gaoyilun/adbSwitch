@@ -98,14 +98,21 @@ public class MasterSwitchPreference extends Preference {
      * 行尚未绑定时不做任何事（绑定时 {@link #onBindViewHolder} 会按同一规则摆好）。
      */
     public void applyState(boolean on, boolean enabled) {
+        lastShownOn = on;
+        lastKnownAllowed = enabled;
         if (boundSwitch == null) {
             return;
         }
-        lastShownOn = on;
-        lastKnownAllowed = enabled;
+        final boolean wantEnabled = enabled && prefEnabled && !busyFreeze;
+        // 完全没变化就什么都不做：refresh() 的调用点很密（写入回调 / 状态 listener / Settings 观察者
+        // / 网络回调 / 授权刷新），无谓的 setChecked/setEnabled 会让 Switch 重绘，
+        // 表现为「点别的开关时主开关闪一下」。
+        if (boundSwitch.isChecked() == on && boundSwitch.isEnabled() == wantEnabled) {
+            return;
+        }
         syncing = true;
         boundSwitch.setChecked(on);
-        boundSwitch.setEnabled(enabled && prefEnabled && !busyFreeze);
+        boundSwitch.setEnabled(wantEnabled);
         syncing = false;
     }
 
@@ -155,9 +162,12 @@ public class MasterSwitchPreference extends Preference {
         // 首次使用（历史上从没确认过真值）没有上次状态可显示，此时关 + 置灰；
         // 其余情况显示上次状态、不置灰
         boolean known = calibrated || DebugController.hasConfirmedBefore(getContext());
-        boolean on = calibrated
-                ? DebugController.read(getContext()).anyOn()
-                : DebugController.lastKnownState(getContext()).anyOn();
+        // 主开关聚合语义与 MainActivity / 磁贴 / 通知统一：只算「跟随主开关的项」，
+        // 不能用 State.anyOn()（那会把未跟随项也算进去，两处显示不一致）。
+        // read() 未校准时返回 warmUp 预热的「上次确认态」内存缓存，
+        // 不在每次行绑定时重读偏好磁盘（lastKnownState 的旧路径）。
+        DebugController.State state = DebugController.read(getContext());
+        boolean on = DebugController.masterAnyOn(getContext(), state);
         lastShownOn = on;
         lastKnownAllowed = known;
         // 先摘监听再摆状态，避免绑定时误触发拨动回调
@@ -174,7 +184,8 @@ public class MasterSwitchPreference extends Preference {
             // 启动窗口期（真值尚未读回）的点击直接屏蔽：弹回显示值、不执行，并给一次性轻提示
             if (!DebugController.confirmedThisSession()) {
                 MainActivity.toastReading(getContext());
-                applyState(lastShownOn, true);
+                // 弹回显示值，并沿用当前置灰维度（不要硬编码 true：首次使用未校准时开关本应是灰的）
+                applyState(lastShownOn, lastKnownAllowed);
                 return;
             }
             if (toggleListener != null) {

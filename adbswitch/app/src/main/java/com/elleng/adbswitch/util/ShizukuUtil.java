@@ -90,6 +90,8 @@ public final class ShizukuUtil {
         try {
             Shizuku.addBinderReceivedListenerSticky(l);
             latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         } catch (Throwable t) {
             android.util.Log.w("AdbSwitch", "await Shizuku binder failed", t);
         } finally {
@@ -107,12 +109,17 @@ public final class ShizukuUtil {
     public static RootUtil.Result run(String cmd) {
         RootUtil.Result res = new RootUtil.Result();
         IRemoteProcess proc = null;
+        boolean destroyed = false;
+        // 单一 deadline：awaitBinder + newProcess + waitFor + 收尾 join 全部纳入同一预算，
+        // 总耗时不超过 TIMEOUT_MS + READY_WAIT_MS（旧实现各段独立计时，最坏 16.5s）
+        long deadline = System.nanoTime()
+                + (RootUtil.TIMEOUT_MS + READY_WAIT_MS) * 1_000_000L;
         try {
             // 前置校验：把「服务没启动」「没授权」与「命令执行失败」分开。
             // 旧实现三者都落进同一个 catch，UI 只能给一句笼统的「执行失败」，
             // 用户无从判断该去启动 Shizuku、还是去管理器里授权、还是换 root 模式。
             if (!running()) {
-                awaitBinder(READY_WAIT_MS);
+                awaitBinder(Math.min(READY_WAIT_MS, remainingMs(deadline)));
                 if (!running()) {
                     res.code = -1;
                     res.reason = RootUtil.REASON_NO_BINDER;
@@ -138,12 +145,37 @@ public final class ShizukuUtil {
                 res.err = "shizuku 服务为空";
                 return res;
             }
-            proc = svc.newProcess(new String[]{"sh", "-c", cmd}, null, null);
+            // newProcess 是普通同步 binder 调用（非 oneway）：Shizuku 服务半死（binder 线程
+            // 耗尽 / 后台限制）时会无限期阻塞，而这里跑在 IO 单线程上——一次挂起 = 所有开关
+            // 永久排队失效。故挪到独立线程限时 join，与 waitFor 同一条硬规则。
+            final IRemoteProcess[] holder = new IRemoteProcess[1];
+            final Throwable[] newErr = new Throwable[1];
+            Thread tNew = new Thread(() -> {
+                try {
+                    holder[0] = svc.newProcess(new String[]{"sh", "-c", cmd}, null, null);
+                } catch (Throwable t) {
+                    newErr[0] = t;
+                }
+            });
+            tNew.setDaemon(true);
+            tNew.start();
+            tNew.join(remainingMs(deadline));
+            if (tNew.isAlive()) {
+                // 放弃等待：服务端此后若真建出进程也无人接收，只能由 Shizuku 侧自行回收
+                res.code = RootUtil.CODE_TIMEOUT;
+                res.reason = RootUtil.REASON_TIMEOUT;
+                res.err = "shizuku newProcess 超时";
+                return res;
+            }
+            if (newErr[0] != null) {
+                throw newErr[0];
+            }
+            proc = holder[0];
             // 先并发读流、再等待退出（与 RootUtil.su 的 drain-then-wait 顺序一致）：
             // 若先 waitFor，命令输出一旦撑满管道缓冲，子进程会阻塞在写、waitFor 永不返回，
             // 而 DebugController 的 IO 是单线程执行器 —— 卡死一次，之后所有开关操作全部排队失效。
             final IRemoteProcess p = proc;
-            // StringBuffer：tOut.join(2000) 超时后读取方与 drain 线程仍可能并发访问，
+            // StringBuffer：tOut.join 超时后读取方与 drain 线程仍可能并发访问，
             // StringBuilder 非线程安全（见 RootUtil.su 同款修复）。
             final StringBuffer outB = new StringBuffer();
             final StringBuffer errB = new StringBuffer();
@@ -159,10 +191,12 @@ public final class ShizukuUtil {
                 } catch (Throwable ignored) {
                 }
             });
+            // daemon：子进程僵死、管道不 EOF 时 drain 永久阻塞，不能让它挡住进程退出
+            tOut.setDaemon(true);
+            tErr.setDaemon(true);
             tOut.start();
             tErr.start();
             // 与 RootUtil 同一条硬规则：等待必须有上限。
-            // DebugController 的 IO 是单线程执行器，一次挂起 = 之后所有开关操作永久排队失效。
             // Shizuku 的 IRemoteProcess 只暴露了无参 waitFor()，故把它挪到独立线程再 join 限时；
             // 超时则 destroy 子进程（让它带着退出码返回），IO 线程继续往下走。
             final int[] code = {RootUtil.CODE_TIMEOUT};
@@ -172,22 +206,18 @@ public final class ShizukuUtil {
                 } catch (Throwable ignored) {
                 }
             });
+            tWait.setDaemon(true);
             tWait.start();
-            tWait.join(RootUtil.TIMEOUT_MS);
+            tWait.join(remainingMs(deadline));
             boolean timedOut = tWait.isAlive();
             if (timedOut) {
-                try {
-                    p.destroy();
-                } catch (Throwable ignored) {
-                }
-                try {
-                    tWait.join(500);
-                } catch (Throwable ignored) {
-                }
+                destroyBounded(p, deadline);
+                destroyed = true;
+                tWait.join(Math.min(500, remainingMs(deadline)));
             }
             res.code = code[0];
-            tOut.join(2000);
-            tErr.join(2000);
+            tOut.join(Math.min(500, remainingMs(deadline)));
+            tErr.join(Math.min(500, remainingMs(deadline)));
             res.out = outB.toString();
             res.err = errB.toString();
             if (timedOut) {
@@ -197,19 +227,46 @@ public final class ShizukuUtil {
             } else if (res.code != 0) {
                 res.reason = RootUtil.REASON_EXEC;
             }
+        } catch (InterruptedException ie) {
+            // 恢复中断位再退出：执行器 shutdownNow / 任务取消依赖它
+            Thread.currentThread().interrupt();
+            res.code = RootUtil.CODE_TIMEOUT;
+            res.reason = RootUtil.REASON_TIMEOUT;
+            res.err = "shizuku 等待被中断";
         } catch (Throwable t) {
             res.code = -1;
             res.err = String.valueOf(t);
             res.reason = RootUtil.REASON_EXEC;
         } finally {
-            if (proc != null) {
-                try {
-                    proc.destroy();
-                } catch (Throwable ignored) {
-                }
+            // destroy 也是同步 binder 调用：服务端卡死时会再挂一次，故同样限时；
+            // destroyed 标志避免超时分支已 destroy 后这里二次调用
+            if (proc != null && !destroyed) {
+                destroyBounded(proc, deadline);
             }
         }
         return res;
+    }
+
+    /** deadline 剩余额度（毫秒），不为负 */
+    private static long remainingMs(long deadline) {
+        return Math.max(0, (deadline - System.nanoTime()) / 1_000_000L);
+    }
+
+    /** 限时 destroy：同步 binder 调用挪到独立 daemon 线程，join 上限 500ms 与 deadline 取小 */
+    private static void destroyBounded(IRemoteProcess p, long deadline) {
+        Thread t = new Thread(() -> {
+            try {
+                p.destroy();
+            } catch (Throwable ignored) {
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+        try {
+            t.join(Math.min(500, remainingMs(deadline)));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**

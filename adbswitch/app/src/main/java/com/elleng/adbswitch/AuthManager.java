@@ -87,10 +87,11 @@ public final class AuthManager {
      * （WSS 授权被撤销后自动退回，避免静默失效）。
      */
     public static Mode getEffectiveMode(Context ctx) {
-        if (getMode(ctx) == Mode.SECURE_SETTINGS && hasWriteSecureSettings(ctx)) {
+        Mode mode = getMode(ctx);
+        if (mode == Mode.SECURE_SETTINGS && hasWriteSecureSettings(ctx)) {
             return Mode.SECURE_SETTINGS;
         }
-        return getMode(ctx) == Mode.SHIZUKU ? Mode.SHIZUKU : Mode.ROOT;
+        return mode == Mode.SHIZUKU ? Mode.SHIZUKU : Mode.ROOT;
     }
 
     /** 一次性授权命令（手动 adb 场景给用户复制执行） */

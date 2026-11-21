@@ -44,6 +44,8 @@ public final class UpdateChecker {
 
     private static final int CONNECT_TIMEOUT = 5000;
     private static final int READ_TIMEOUT = 8000;
+    /** 更新元数据响应上限：正常 JSON 只有几 KB，超限按异常响应拒绝，防止恶意/错误响应撑爆内存。 */
+    private static final int MAX_JSON_CHARS = 256 * 1024;
 
     private UpdateChecker() {
     }
@@ -71,7 +73,9 @@ public final class UpdateChecker {
     public static boolean shouldCheck(Context ctx) {
         long last = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getLong(KEY_LAST_CHECK, 0L);
-        return System.currentTimeMillis() - last >= UpdateConfig.CHECK_INTERVAL_MS;
+        long now = System.currentTimeMillis();
+        // 墙钟被回拨（now < last）时按已过期处理，否则会被节流到时钟追上为止
+        return now < last || now - last >= UpdateConfig.CHECK_INTERVAL_MS;
     }
 
     /** 只在「成功拿到结果」时调用；网络失败不写，否则弱网用户 3 天内收不到更新。 */
@@ -132,7 +136,7 @@ public final class UpdateChecker {
             try {
                 github = fetchGitHub(currentVersionCode);
             } catch (Throwable t) {
-                Log.w(TAG, "GitHub 更新检查失败: " + t.getMessage());
+                Log.w(TAG, "GitHub 更新检查失败", t);
             }
             if (github != null && github.hasUpdate) {
                 return withFallback(github, UpdateConfig.PGYER_PAGE_URL);
@@ -144,7 +148,7 @@ public final class UpdateChecker {
             try {
                 pgyer = fetchPgyer(currentVersionName);
             } catch (Throwable t) {
-                Log.w(TAG, "蒲公英更新检查失败: " + t.getMessage());
+                Log.w(TAG, "蒲公英更新检查失败", t);
             }
             if (pgyer != null && pgyer.hasUpdate) {
                 return withFallback(pgyer, UpdateConfig.GITHUB_RELEASES_URL);
@@ -188,16 +192,36 @@ public final class UpdateChecker {
         }
         int remoteCode = obj.optInt("versionCode", current);
         boolean hasUpdate = isNewer(remoteCode, current);
+        String apkUrl = hasUpdate ? emptyToNull(obj.optString("apkUrl")) : null;
+        if (apkUrl != null && !isTrustedApkUrl(apkUrl)) {
+            // update.json 被篡改/误填时不能把用户引向任意包源：降级为跳页面（fallbackUrl）
+            Log.w(TAG, "apkUrl 非可信 GitHub https 直链，降级为页面跳转: " + apkUrl);
+            apkUrl = null;
+        }
         return new UpdateInfo(
                 hasUpdate,
                 remoteCode,
                 obj.optString("versionName", ""),
                 obj.optString("notes", ""),
                 obj.optBoolean("mandatory", false),
-                hasUpdate ? emptyToNull(obj.optString("apkUrl")) : null,
+                apkUrl,
                 emptyToNull(obj.optString("fallbackUrl")),
                 emptyToNull(obj.optString("sha256")),
                 hasUpdate ? UpdateInfo.Source.GITHUB : UpdateInfo.Source.NONE);
+    }
+
+    /** APK 直链只认 GitHub 官方域名的 https 地址（含 release 资产跳转的 objects.githubusercontent.com）。 */
+    private static boolean isTrustedApkUrl(String url) {
+        try {
+            URL u = new URL(url);
+            if (!"https".equalsIgnoreCase(u.getProtocol())) {
+                return false;
+            }
+            String host = u.getHost().toLowerCase(java.util.Locale.ROOT);
+            return host.equals("github.com") || host.endsWith(".githubusercontent.com");
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /**
@@ -225,12 +249,9 @@ public final class UpdateChecker {
             if (code != HttpURLConnection.HTTP_OK) {
                 throw new IllegalStateException("HTTP " + code);
             }
-            String json;
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                json = br.readLine();
-            }
-            JSONObject obj = new JSONObject(json == null ? "" : json);
+            // 读完整响应而非首行：服务端若美化输出（多行 JSON），readLine 只拿到 "{" 直接解析失败
+            String json = readAll(conn);
+            JSONObject obj = new JSONObject(json);
             if (obj.optInt("code", -1) != 0) {
                 throw new IllegalStateException(
                         "pgyer code=" + obj.optInt("code") + " " + obj.optString("message"));
@@ -278,18 +299,27 @@ public final class UpdateChecker {
             if (code != HttpURLConnection.HTTP_OK) {
                 throw new IllegalStateException("HTTP " + code);
             }
-            StringBuilder sb = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    sb.append(line);
-                }
-            }
-            return sb.toString();
+            return readAll(conn);
         } finally {
             conn.disconnect();
         }
+    }
+
+    /** 读完整响应文本，带 {@link #MAX_JSON_CHARS} 上限。 */
+    private static String readAll(HttpURLConnection conn) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+            char[] buf = new char[4096];
+            int n;
+            while ((n = br.read(buf)) > 0) {
+                if (sb.length() + n > MAX_JSON_CHARS) {
+                    throw new IllegalStateException("更新元数据响应超过 " + MAX_JSON_CHARS + " 字符上限");
+                }
+                sb.append(buf, 0, n);
+            }
+        }
+        return sb.toString();
     }
 
     private static String enc(String s) throws Exception {

@@ -6,7 +6,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -53,10 +52,12 @@ public final class UpdateDialog {
     /**
      * 一次「下载→安装」会话的 UI 与状态。静态持有是因为宿主 onResume 需要能找到
      * 当前会话（从「安装未知应用」授权页回来时自动续装）；弹窗 dismiss 或宿主重建时
-     * 置空，不长期持有 Activity。
+     * 置空。宿主用弱引用持有：下载线程可能跑几十秒，期间宿主被销毁也不该被静态字段钉住。
      */
     private static final class Session {
-        final Context host;
+        final java.lang.ref.WeakReference<Context> hostRef;
+        /** 下载/安装等后台操作一律用 app context，不碰 Activity。 */
+        final Context app;
         final UpdateInfo info;
         final AlertDialog dlg;
         final View notes;
@@ -65,10 +66,13 @@ public final class UpdateDialog {
         final Handler main = new Handler(Looper.getMainLooper());
         /** install() 因缺「安装未知应用」授权返回 false 后置 true，授权回来自动续装。 */
         boolean awaitingInstallPermission;
+        /** 下载进行中：防止「重试」与 onHostResumed 续装并发拉起两条下载线程。 */
+        boolean downloading;
 
         Session(Context host, UpdateInfo info, AlertDialog dlg,
                 View notes, ProgressBar bar, TextView progressText) {
-            this.host = host;
+            this.hostRef = new java.lang.ref.WeakReference<>(host);
+            this.app = host.getApplicationContext();
             this.info = info;
             this.dlg = dlg;
             this.notes = notes;
@@ -132,8 +136,11 @@ public final class UpdateDialog {
                         });
                     }
                 }
-                // 蒲公英通道没有 APK 直链（apkUrl 为 null），此时「立刻更新」退化为打开安装页
-                final boolean directDownload = info.apkUrl != null;
+                // 直链下载必须同时有 apkUrl 与 sha256：UpdateDownloader 在 sha256 为空时会
+                // 直接抛错，只凭 apkUrl 判定会让主按钮必失败。蒲公英通道无直链、或服务端漏配
+                // sha256 时，「立刻更新」一律退化为打开安装页（备用下载），不误导用户。
+                final boolean directDownload = info.apkUrl != null && !info.apkUrl.trim().isEmpty()
+                        && info.sha256 != null && !info.sha256.trim().isEmpty();
                 if (!directDownload) {
                     positive.setText(ctx.getString(R.string.update_open_page));
                 }
@@ -166,13 +173,13 @@ public final class UpdateDialog {
                 || s.dlg == null || !s.dlg.isShowing()) {
             return;
         }
-        if (s.host != host) {
+        if (s.hostRef.get() != host) {
             // 宿主已重建（配置变更/进程回收后恢复）：旧弹窗已随旧实例销毁，会话作废
             sSession = null;
             return;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                && !host.getPackageManager().canRequestPackageInstalls()) {
+        // minSdk=27，canRequestPackageInstalls 必然可用
+        if (!host.getPackageManager().canRequestPackageInstalls()) {
             return; // 仍未授权：保持「等待授权」状态
         }
         s.awaitingInstallPermission = false;
@@ -185,7 +192,11 @@ public final class UpdateDialog {
      * 或下载后中途返回再点「立刻更新」都不重新下载）。
      */
     private static void startDownload(final Session s) {
-        final Context ctx = s.host;
+        if (s.downloading) {
+            return;
+        }
+        s.downloading = true;
+        final Context ctx = s.app;
         final UpdateInfo info = s.info;
         final AlertDialog dlg = s.dlg;
         final Button positive = dlg.getButton(DialogInterface.BUTTON_POSITIVE);
@@ -233,6 +244,7 @@ public final class UpdateDialog {
             final String finalFailure = failure;
             final boolean finalInstalled = installed;
             s.main.post(() -> {
+                s.downloading = false;
                 if (finalInstalled) {
                     dlg.dismiss();
                     return;
@@ -243,8 +255,7 @@ public final class UpdateDialog {
                     // install() 返回 false：缺「安装未知应用」授权时它已跳系统设置页。
                     // 记住等待状态，授权回来由 onHostResumed 自动续装；若权限其实已授予
                     // （如设备上没有安装器），按失败处理，避免 onHostResumed 无意义自旋。
-                    boolean missingPerm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                            && !ctx.getPackageManager().canRequestPackageInstalls();
+                    boolean missingPerm = !ctx.getPackageManager().canRequestPackageInstalls();
                     s.awaitingInstallPermission = missingPerm;
                     s.progressText.setText(ctx.getString(missingPerm
                             ? R.string.update_need_install_permission

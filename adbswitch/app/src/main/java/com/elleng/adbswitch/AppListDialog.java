@@ -52,7 +52,7 @@ public class AppListDialog {
     private final OnAppsChosenListener multiListener;
     private final PackageManager pm;
 
-    /** 多选模式下被勾选的包名集合（保序：先按列表顺序） */
+    /** 多选模式下被勾选的包名集合（保序：按勾选先后顺序） */
     private final Set<String> checked = new LinkedHashSet<>();
 
     private final ArrayList<AppInfo> all = new ArrayList<>();
@@ -79,11 +79,21 @@ public class AppListDialog {
      * 图标解码的共享后台线程。
      * 原先 getView 里每行 new Thread：快速滑动会瞬间起几十上百个线程（解码图标是重活），
      * 既抢 CPU 又可能 OOM。改成一个串行线程排队解码，配合 ViewHolder 复用行即可。
+     * 队列有界（64）：快速滑动时 getView 对每条绑定过的行都提交任务，无界队列会让
+     * 当前盯着的行排在几十个过期任务后面。队满即拒绝（走下方 catch 复位 iconLoading），
+     * 行下次绑定时重新提交，可见行不会饿死。
      */
     private final java.util.concurrent.ExecutorService iconLoader =
-            java.util.concurrent.Executors.newSingleThreadExecutor();
+            new java.util.concurrent.ThreadPoolExecutor(1, 1, 0L,
+                    java.util.concurrent.TimeUnit.MILLISECONDS,
+                    new java.util.concurrent.LinkedBlockingQueue<>(64));
 
-    /** 多选模式的回调：返回最终勾选的包名集合（顺序即列表顺序）。 */
+    /** 在途扫描线程：弹窗关闭时中断，避免关闭后仍跑完并持有 Activity 数秒。 */
+    private volatile Thread scanThread;
+    /** 扫描进行中：下拉刷新与「刷新重试」共用入口，防止两次扫描并发、按完成顺序互相覆盖。 */
+    private volatile boolean scanning;
+
+    /** 多选模式的回调：返回最终勾选的包名集合（按勾选先后顺序，原样落盘决定联动列表展示顺序）。 */
     public interface OnAppsChosenListener {
         void onAppsChosen(List<String> pkgs);
     }
@@ -109,19 +119,19 @@ public class AppListDialog {
 
     /**
      * 图标跨会话缓存：Bitmap 解码较重，选择器反复打开时复用已解码的图标，
-     * 避免每次都重新 loadIcon + 缩放。按包名索引，上限 200 个（按条数计），进程存活期间有效。
+     * 避免每次都重新 loadIcon + 缩放。按包名索引，进程存活期间有效。
      * 静态字段 → 跨对话框实例（多次打开「管理快捷应用」）共享。
      *
-     * 修正：sizeOf 必须返回「计入总量的单位数」，LruCache 的 maxSize 才是总量。旧实现
-     * sizeOf 返回 KB、maxSize=200 ⇒ 总容量仅 200KB（48dp@3x 约 80KB/张，只容 2 张），
-     * 命中率≈0，与「回前台不再重复解码」初衷相悖。现 sizeOf 返回 1（每条 1 个），
-     * maxSize=200 ⇒ 真正缓存 200 个图标。
+     * 容量按内存预算而非条数：40dp@3x ≈ 120px ⇒ ARGB_8888 约 57KB/张，
+     * 按条数计（200 条）会常驻 ~11.5MB。现 sizeOf 返回 KB、maxSize 取
+     * 进程堆上限的 1/16（KB），内存账由 LruCache 自己算。
      */
     private static final android.util.LruCache<String, Bitmap> ICON_CACHE =
-            new android.util.LruCache<String, Bitmap>(200) {
+            new android.util.LruCache<String, Bitmap>(
+                    (int) (Runtime.getRuntime().maxMemory() / 16 / 1024)) {
                 @Override
                 protected int sizeOf(String key, Bitmap value) {
-                    return 1; // 按条数计，上限 200 个
+                    return Math.max(1, value.getAllocationByteCount() / 1024); // KB
                 }
             };
 
@@ -428,6 +438,10 @@ public class AppListDialog {
     private void release() {
         main.removeCallbacks(filterTask);
         iconLoader.shutdownNow();
+        Thread t = scanThread;
+        if (t != null) {
+            t.interrupt();
+        }
         dialog = null;
     }
 
@@ -445,43 +459,53 @@ public class AppListDialog {
 
     /** 后台扫描已安装应用，完成后回主线程刷新列表 */
     private void scanAppsAsync() {
-        new Thread(() -> {
-            ArrayList<AppInfo> result;
+        if (scanning) {
+            return; // 已有扫描在途：不并发，完成时统一收刷新圈
+        }
+        scanning = true;
+        Thread t = new Thread(() -> {
             try {
-                result = loadApps();
-            } catch (Throwable t) {
-                android.util.Log.e("AppListDialog", "loadApps failed", t);
-                result = new ArrayList<>();
+                ArrayList<AppInfo> result;
+                try {
+                    result = loadApps();
+                } catch (Throwable t2) {
+                    android.util.Log.e("AppListDialog", "loadApps failed", t2);
+                    result = new ArrayList<>();
+                }
+                final ArrayList<AppInfo> data = result;
+                main.post(() -> {
+                    if (dialog == null || !dialog.isShowing()) {
+                        return;
+                    }
+                    all.clear();
+                    all.addAll(data);
+                    loadingView.setVisibility(View.GONE);
+                    // 未读取到应用列表（扫描失败或一个应用都没读出来，常见于「应用列表」权限未授权）：
+                    // 直接提示需要授权并给「刷新重试」，不再对着空列表干等。
+                    boolean empty = data.isEmpty();
+                    if (empty) {
+                        swipeRefresh.setVisibility(View.GONE);
+                        if (errorView != null) {
+                            errorView.setVisibility(View.VISIBLE);
+                        }
+                    } else {
+                        if (errorView != null) {
+                            errorView.setVisibility(View.GONE);
+                        }
+                        swipeRefresh.setVisibility(View.VISIBLE);
+                    }
+                    // 必须用搜索框里的当前文本重新过滤：写死空串会把用户已输入的关键字冲掉，
+                    // 表现为「下拉刷新一下，搜索条件莫名失效」。
+                    applyFilter(searchBox != null ? searchBox.getText().toString() : "");
+                    // 收掉标准控件的刷新进度圈（不再弹「已刷新应用列表」Toast：进度圈本身就是反馈）
+                    swipeRefresh.setRefreshing(false);
+                });
+            } finally {
+                scanning = false;
             }
-            final ArrayList<AppInfo> data = result;
-            main.post(() -> {
-                if (dialog == null || !dialog.isShowing()) {
-                    return;
-                }
-                all.clear();
-                all.addAll(data);
-                loadingView.setVisibility(View.GONE);
-                // 未读取到应用列表（扫描失败或一个应用都没读出来，常见于「应用列表」权限未授权）：
-                // 直接提示需要授权并给「刷新重试」，不再对着空列表干等。
-                boolean empty = data.isEmpty();
-                if (empty) {
-                    swipeRefresh.setVisibility(View.GONE);
-                    if (errorView != null) {
-                        errorView.setVisibility(View.VISIBLE);
-                    }
-                } else {
-                    if (errorView != null) {
-                        errorView.setVisibility(View.GONE);
-                    }
-                    swipeRefresh.setVisibility(View.VISIBLE);
-                }
-                // 必须用搜索框里的当前文本重新过滤：写死空串会把用户已输入的关键字冲掉，
-                // 表现为「下拉刷新一下，搜索条件莫名失效」。
-                applyFilter(searchBox != null ? searchBox.getText().toString() : "");
-                // 收掉标准控件的刷新进度圈（不再弹「已刷新应用列表」Toast：进度圈本身就是反馈）
-                swipeRefresh.setRefreshing(false);
-            });
-        }, "app-picker-scan").start();
+        }, "app-picker-scan");
+        scanThread = t;
+        t.start();
     }
 
     // —— 应用列表加载 / 过滤 ——
@@ -518,6 +542,9 @@ public class AppListDialog {
 
         List<ApplicationInfo> apps = pm.getInstalledApplications(0);
         for (ApplicationInfo ai : apps) {
+            if (Thread.currentThread().isInterrupted()) {
+                break; // 弹窗已关闭（release 中断了扫描线程）：立即止损
+            }
             if (ai.packageName.equals(self)) {
                 continue;
             }

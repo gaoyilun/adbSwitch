@@ -74,4 +74,28 @@ public class DebugControllerParseStateTest {
         assertEquals(true, s.wireless);
         assertEquals(false, s.dev);
     }
+
+    // —— 无线调试底层意图 prop（仅显示辅助，不改判定）——
+
+    private static final String P = "__ASW_WIFIPROP__";
+
+    @Test
+    public void wifiPropParse() {
+        assertEquals(1, DebugController.parseWifiProp(U + "=1\n" + P + "=1", P));
+        assertEquals(0, DebugController.parseWifiProp(P + "=0", P));
+        // getprop 对不存在的属性返回空行，或标记缺失 → -1（未读到，维持两态）
+        assertEquals(-1, DebugController.parseWifiProp(P + "=", P));
+        assertEquals(-1, DebugController.parseWifiProp(U + "=1", P));
+        assertEquals(-1, DebugController.parseWifiProp(P + "=garbage", P));
+    }
+
+    @Test
+    public void wirelessInactiveOnlyWhenKeyOffAndPropOn() {
+        // key 关 + prop 开 → 未激活；其余组合都不是
+        assertEquals(true, new DebugController.State(false, false, false, 0, 1).wirelessInactive());
+        assertEquals(false, new DebugController.State(false, true, false, 0, 1).wirelessInactive());
+        assertEquals(false, new DebugController.State(false, false, false, 0, 0).wirelessInactive());
+        // 纯 WSS / 读失败（prop=-1）→ 两态，不显示未激活
+        assertEquals(false, new DebugController.State(false, false, false, 0, -1).wirelessInactive());
+    }
 }

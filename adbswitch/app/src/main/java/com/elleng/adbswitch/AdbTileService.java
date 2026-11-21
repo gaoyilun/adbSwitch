@@ -1,10 +1,5 @@
 package com.elleng.adbswitch;
 
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
-import android.os.Build;
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
 import android.widget.Toast;
@@ -36,6 +31,17 @@ public class AdbTileService extends TileService {
         }
     }
 
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        // onStopListening 不保证先于 onDestroy 调用：这里兜底注销，
+        // 否则静态 listener 注册表会一直持有已销毁的 service
+        try {
+            DebugController.removeStateListener(stateListener);
+        } catch (Throwable ignored) {
+        }
+    }
+
     /**
      * 点击磁贴：主开关语义。写入走 DebugController 后台线程（su 不能卡控制面板主线程），
      * 完成后在回调里刷新磁贴；常驻通知按「临时关闭时弹通知」开关决定，与主界面一致。
@@ -47,7 +53,7 @@ public class AdbTileService extends TileService {
         // 不依赖屏幕显示的缓存（刚展开面板那瞬间缓存可能还没校准）。
         DebugController.toggleMaster(this, (ok, s, reason) -> {
             if (ok) {
-                if (s.anyOn()) {
+                if (DebugController.masterAnyOn(this, s)) {
                     AdbToggleService.stop(this);
                 } else {
                     AdbToggleService.syncCloseNotification(this);
@@ -70,9 +76,26 @@ public class AdbTileService extends TileService {
         if (t == null) {
             return;
         }
-        t.setState(s.anyOn() ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
-        t.setLabel(getString(s.allOff() ? R.string.tile_off
-                : (s.usb && s.wireless ? R.string.tile_all_on : R.string.tile_partial)));
+        // 磁贴 = 主开关语义：状态与标签都按「跟随主开关的项」聚合（a11y / dev 跟随时也参与）
+        java.util.EnumSet<SwitchItem> followed = SwitchConfig.followedItems(this);
+        boolean masterOn = s.anyOn(followed);
+        t.setState(masterOn ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
+        boolean allOn = allFollowedOn(followed, s);
+        t.setLabel(getString(s.allOff(followed) ? R.string.tile_off
+                : (allOn ? R.string.tile_all_on : R.string.tile_partial)));
         t.updateTile();
+    }
+
+    private static boolean allFollowedOn(java.util.Collection<SwitchItem> items,
+                                         DebugController.State s) {
+        if (items.isEmpty()) {
+            return false;
+        }
+        for (SwitchItem i : items) {
+            if (!s.isOn(i)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

@@ -23,8 +23,14 @@ import dalvik.system.PathClassLoader;
  *    荣耀虽存在前者，但外部 {@code :settings:show_fragment} 被 Settings 进程内片段白名单拦截
  *    （root 上下文实测仍回退到开发者选项主页），故荣耀无线调试无法深链到独立页，只能回退开发者选项 + 引导。
  *
- * 兼容策略（AOSP 回退链）：
- *  先按 ROM 选最精确的跳转值，落空时退到「开发者选项」+ 引导 Toast。开发者选项入口未开启时，
+ * 兼容策略（分两种判定，别混用）：
+ *  1. **能探事实就探事实**（无线调试片段类）：按 Settings 包里实际存在的类名选，
+ *     两个已知命名都不存在（ColorOS / OriginOS 等自研命名）就回退开发者选项 + 引导，
+ *     绝不把 {@code :settings:show_fragment} 指向不存在的类（那会落到空白页）。
+ *  2. **探不到才按厂商映射**（USB 高亮的偏好键）：偏好键是数据不是类，无法探测；
+ *     且猜错的代价仅是「不滚动高亮」，页面照常打开不会崩，故按厂商名映射，
+ *     未知厂商统一给 AOSP 的 {@code adb_preference}。
+ *  落空时统一退到「开发者选项」+ 引导 Toast。开发者选项入口未开启时，
  *  若本 App 有可用授权通道（WSS/root/Shizuku）则自行开启入口再跳转；仅当确实开不了
  *  （无任何通道 / 写入被拒）才回退「关于本机」+ Toast（提示连点版本号开启）。
  */
@@ -33,7 +39,7 @@ public final class SettingsNav {
     private SettingsNav() {}
 
     /** 跳转目标 */
-    public enum Target { USB, WIRELESS, DEV_OPTIONS }
+    public enum Target { USB, WIRELESS, DEV_OPTIONS, A11Y }
 
     private static final String ACTION_DEV = Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS;
     private static final String ACTION_ABOUT = Settings.ACTION_DEVICE_INFO_SETTINGS;
@@ -92,6 +98,11 @@ public final class SettingsNav {
      * 会导致「界面显示已开启、点箭头却跳关于本机」的矛盾。
      */
     public static void navigate(Context ctx, Target target) {
+        // 无障碍设置是独立设置页，不依赖开发者选项入口：直接跳，不经 dev 门控
+        if (target == Target.A11Y) {
+            openAccessibility(ctx);
+            return;
+        }
         if (DebugController.read(ctx).dev) {
             openTarget(ctx, target);
             return;
@@ -136,7 +147,17 @@ public final class SettingsNav {
             case DEV_OPTIONS:
                 openDevOptions(ctx);
                 break;
+            case A11Y:
+                openAccessibility(ctx);
+                break;
         }
+    }
+
+    /** 无障碍设置：通用 Action，全 ROM 可用，不需要开发者选项入口 */
+    public static void openAccessibility(Context ctx) {
+        Intent it = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        it.addFlags(FLAGS);
+        startSafely(ctx, it);
     }
 
     /** 开不了开发者选项入口时的回退：跳关于本机并提示连点版本号开启 */
@@ -145,59 +166,111 @@ public final class SettingsNav {
         Toast.makeText(ctx, R.string.toast_devopts_off_hint, Toast.LENGTH_LONG).show();
     }
 
-    /** USB 调试：跳转开发者选项并滚动/高亮到「USB 调试」项 */
+    /**
+     * USB 调试：跳转开发者选项并滚动/高亮到「USB 调试」项。
+     *
+     * 这里保留厂商判断是有意的：偏好键名是数据、无法像片段类那样探测，而猜错的代价
+     * 仅是「不滚动/不高亮」，页面仍会正常打开，不会崩也不会落空白页。
+     * 故 HyperOS / 荣耀给 OEM 键 {@code enable_adb}，其余（含 OPPO / vivo 等未列出的厂商）
+     * 给 AOSP 键 {@code adb_preference}。
+     */
     public static void openUsb(Context ctx) {
         String key = (isXiaomi() || isHonor()) ? KEY_USB_OEM : KEY_USB_AOSP;
         Intent it = new Intent(ACTION_DEV);
         it.putExtra(EXTRA_FRAGMENT_ARG_KEY, key);
         it.addFlags(FLAGS);
-        ctx.startActivity(it);
+        startSafely(ctx, it);
     }
 
     /** 开发者选项：跳转开发者选项主页 */
     public static void openDevOptions(Context ctx) {
         Intent it = new Intent(ACTION_DEV);
         it.addFlags(FLAGS);
-        ctx.startActivity(it);
+        startSafely(ctx, it);
     }
 
     /** 关于本机：通用 Action，全 ROM 可用 */
     public static void openAbout(Context ctx) {
         Intent it = new Intent(ACTION_ABOUT);
         it.addFlags(FLAGS);
-        ctx.startActivity(it);
+        startSafely(ctx, it);
     }
 
-    /** 无线调试：能深链则深链，不能则回退开发者选项 + 引导 Toast */
+    /** 无线调试：先探测本机确实存在哪个片段类，存在才深链，否则回退开发者选项 + 引导 */
     public static void openWireless(Context ctx) {
         if (isHonor()) {
-            // 荣耀：片段白名单拦截外部深链 → 回退开发者选项 + 引导
+            // 荣耀：片段类存在，但外部 :settings:show_fragment 被 Settings 进程内白名单拦截
+            // （root 上下文实测只回到开发者选项主页）——这是系统侧限制，不是命名问题，
+            // 故直接回退并给引导，省掉一次必然落空的跳转
             openDevOptions(ctx);
             Toast.makeText(ctx, R.string.toast_wireless_fallback, Toast.LENGTH_LONG).show();
             return;
         }
-        // 小米 / AOSP：SubSettings 宿主 + 对应片段，全类名避免被其它 App 的 intent-filter 截胡
+        // 事实优先：Settings 包里存在哪个无线调试片段类，才用哪个名字深链。
+        // 两个都不存在（ColorOS / OriginOS 等自研命名）就走回退，绝不把 show_fragment
+        // 指向一个不存在的类 —— 那会落到 SubSettings 的空白页。
+        String frag = existingWirelessFragment(ctx);
+        if (frag == null) {
+            android.util.Log.i("AdbSwitch", "no known wireless fragment in Settings; fallback");
+            openDevOptions(ctx);
+            Toast.makeText(ctx, R.string.toast_wireless_fallback, Toast.LENGTH_LONG).show();
+            return;
+        }
+        // SubSettings 宿主 + 对应片段，全类名避免被其它 App 的 intent-filter 截胡
         Intent it = new Intent();
         it.setClassName(PKG_SETTINGS, HOST_SUBSETTINGS);
-        it.putExtra(EXTRA_SHOW_FRAGMENT, wirelessFragment(ctx));
+        it.putExtra(EXTRA_SHOW_FRAGMENT, frag);
         it.addFlags(FLAGS);
-        ctx.startActivity(it);
+        startSafely(ctx, it);
     }
 
     /**
-     * 解析本机无线调试片段类名。判定规则：Settings 包里若包含小米命名的
-     * {@link #FRAG_WIRELESS_OEM}（AdbWirelessDebuggingFragment），则用小米命名
-     * （此时该命名才是真实可达的片段，如 Redmi K90 / Android 17 HyperOS）；
-     * 否则用 AOSP 命名（如小米 14 / HyperOS OS3）。
-     * 真机验证：K90 上只有 Adb* 能渲染，小米 14 上只有 AOSP 命名能渲染；两者 dext 中
-     * 片段类名不同，故按「Settings 包是否包含该类」选择，比按机型/版本更稳。
+     * 统一跳转保护：ROM 移除目标组件 / 权限不足时 startActivity 会抛
+     * ActivityNotFoundException / SecurityException，裸调用直接崩在设置页点击上。
+     * 异步回调（enableDevAndOpen）到达时宿主可能已销毁，先做存活检查。
+     * 失败回退「关于本机」（通用 Action）+ 提示；回退也失败则只提示。
      */
-    private static String wirelessFragment(Context ctx) {
+    private static void startSafely(Context ctx, Intent it) {
+        if (ctx instanceof Activity) {
+            Activity a = (Activity) ctx;
+            if (a.isFinishing() || a.isDestroyed()) {
+                return;
+            }
+        }
+        try {
+            ctx.startActivity(it);
+        } catch (Throwable t) {
+            android.util.Log.w("AdbSwitch", "settings nav failed: " + it, t);
+            try {
+                Intent about = new Intent(ACTION_ABOUT);
+                about.addFlags(FLAGS);
+                ctx.startActivity(about);
+            } catch (Throwable ignored) {
+            }
+            Toast.makeText(ctx, R.string.toast_nav_unavailable, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * 解析本机真实存在的无线调试片段类名；两个已知命名都不存在时返回 null（调用方回退）。
+     *
+     * 判定规则按**事实**而不是按厂商：Settings 包里若包含小米命名的
+     * {@link #FRAG_WIRELESS_OEM}（AdbWirelessDebuggingFragment），则用它（该命名才是真实可达的片段，
+     * 如 Redmi K90 / Android 17 HyperOS）；否则看 AOSP 命名 {@link #FRAG_WIRELESS_AOSP} 是否存在
+     * （小米 14 / HyperOS OS3、多数 AOSP 派生 ROM）；都不存在（ColorOS / OriginOS 等自研命名）
+     * 返回 null，由调用方回退开发者选项 —— 这样新增厂商不会因为「不在白名单里」而落到空白页。
+     */
+    private static String existingWirelessFragment(Context ctx) {
         if (sWirelessFragment != null) {
             return sWirelessFragment;
         }
-        sWirelessFragment = settingsHasClass(ctx, FRAG_WIRELESS_OEM)
-                ? FRAG_WIRELESS_OEM : FRAG_WIRELESS_AOSP;
+        if (settingsHasClass(ctx, FRAG_WIRELESS_OEM)) {
+            sWirelessFragment = FRAG_WIRELESS_OEM;
+        } else if (settingsHasClass(ctx, FRAG_WIRELESS_AOSP)) {
+            sWirelessFragment = FRAG_WIRELESS_AOSP;
+        } else {
+            return null; // 不缓存：不同 ROM 可能装了两个都没有的 Settings，不写成空串更易读
+        }
         return sWirelessFragment;
     }
 

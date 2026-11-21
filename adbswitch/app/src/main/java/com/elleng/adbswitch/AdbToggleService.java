@@ -31,8 +31,6 @@ public class AdbToggleService extends Service {
     public static final String ACTION_OPEN = "com.elleng.adbswitch.ACTION_OPEN";
     public static final String ACTION_CLOSE = "com.elleng.adbswitch.ACTION_CLOSE";
     public static final String ACTION_SETTINGS = "com.elleng.adbswitch.ACTION_SETTINGS";
-    /** 启动时由调用方告知「当前应为关闭态」，避免在服务里做阻塞 su 读状态导致通知延迟 */
-    public static final String EXTRA_STATE_ON = "state_on";
 
     private NotificationManager nm;
     private boolean observerRegistered = false;
@@ -49,10 +47,10 @@ public class AdbToggleService extends Service {
     private static DebugController.StateListener sDirectStateListener;
     private static android.database.ContentObserver sDirectSettingsObserver;
 
-    /** 状态变化 listener（替代原进程内广播）：任一开启即撤掉常驻通知，否则刷新为已关闭 */
+    /** 状态变化 listener（替代原进程内广播）：主开关任一开启即撤掉常驻通知，否则刷新为已关闭 */
     private final DebugController.StateListener stateListener = s -> {
-        if (s.anyOn()) {
-            // 任一被打开：adbd 又跑起来了，常驻通知没有意义，撤掉
+        if (DebugController.masterAnyOn(AdbToggleService.this, s)) {
+            // 跟随主开关的项任一被打开：常驻通知（恢复入口）没有意义，撤掉
             ToggleShortcuts.markDirty(AdbToggleService.this);
             stopSelf();
         } else {
@@ -90,12 +88,17 @@ public class AdbToggleService extends Service {
         // 状态变化改走进程内 listener 注册表（App 单进程，广播纯开销）
         DebugController.addStateListener(stateListener);
         try {
-            // 只监听这两个键：监听整个 Settings.Global.CONTENT_URI 会让任何 global 变更都回调一次
+            // 只监听被管理的键：监听整个 Settings.Global.CONTENT_URI 会让任何 global 变更都回调一次。
+            // 无障碍列表键在 Settings.Secure 命名空间，单独注册——外部增删无障碍服务
+            // 可能让主开关聚合态翻转（a11y 跟随主开关时），通知同样要跟着退场/刷新。
             for (String key : new String[]{
                     DebugController.KEY_USB, DebugController.KEY_WIRELESS}) {
                 getContentResolver().registerContentObserver(
                         android.provider.Settings.Global.getUriFor(key), false, settingsObserver);
             }
+            getContentResolver().registerContentObserver(
+                    android.provider.Settings.Secure.getUriFor(A11yHelper.KEY), false,
+                    settingsObserver);
             observerRegistered = true;
         } catch (Throwable t) {
             Log.w(TAG, "register settings observer failed", t);
@@ -104,23 +107,16 @@ public class AdbToggleService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // 优先用调用方传入的已知聚合态；只有缺省时才回读（su 是阻塞调用，会拖慢前台服务起通知）。
-        DebugController.State s;
-        if (intent != null && intent.hasExtra(EXTRA_STATE_ON)) {
-            boolean anyOn = intent.getBooleanExtra(EXTRA_STATE_ON, false);
-            // dev 只是随行字段，这里用调用方已知的聚合态构造，dev 取 false（通知不展示它）
-            s = anyOn ? new DebugController.State(true, false, false)
-                    : new DebugController.State(false, false, false);
-        } else {
-            s = DebugController.read(this);
-        }
-        if (s.anyOn()) {
-            // 任一还开着：不需要常驻通知。
+        // read() 是纯内存缓存读（绝不 fork 进程），直接取真值构造通知。
+        // 旧实现由调用方恒传 stateOn=false 伪造全关态：非跟随项实际仍开时副文案长期谎报。
+        DebugController.State s = DebugController.read(this);
+        if (DebugController.masterAnyOn(this, s)) {
+            // 跟随主开关的项任一还开着：不需要常驻通知。
             // 但本服务可能经 startForegroundService() 拉起，必须先 startForeground 再停，
             // 否则系统按「没在时限内进前台」抛 ForegroundServiceDidNotStartInTimeException。
-            // startForeground 后立即 stopSelf，onDestroy 会把这条占位通知取消掉。
+            // startForeground 后立即停，onDestroy 会把这条占位通知取消掉。
             startForegroundCompat(buildNotification(this, s));
-            stopSelf();
+            stopSelfResult(startId);
             return START_NOT_STICKY;
         }
         startForegroundCompat(buildNotification(this, s));
@@ -196,7 +192,7 @@ public class AdbToggleService extends Service {
     }
 
     /**
-     * 开启常驻通知（调用方已先把调试关掉）；显式告知 stateOn=false 以免服务内阻塞读状态。
+     * 开启常驻通知（调用方已先把调试关掉）；服务内用 DebugController.read 取真值构造。
      *
      * 坑：Android 12+ 禁止从后台启动前台服务。通知按钮 / 磁贴触发时进程在后台，
      * 直接 startForegroundService() 会抛 ForegroundServiceStartNotAllowedException，
@@ -205,7 +201,6 @@ public class AdbToggleService extends Service {
      */
     public static void start(Context ctx) {
         Intent i = new Intent(ctx, AdbToggleService.class);
-        i.putExtra(EXTRA_STATE_ON, false);
         try {
             ctx.startForegroundService(i);
         } catch (Throwable t) {
@@ -250,8 +245,8 @@ public class AdbToggleService extends Service {
             sDirectStateListener = st -> {
                 NotificationManager nmm2 = (NotificationManager) app.getSystemService(
                         Context.NOTIFICATION_SERVICE);
-                if (st.anyOn()) {
-                    // 调试被别处打开：撤掉直发通知并自我注销（本路径没有 Service 兜底）
+                if (DebugController.masterAnyOn(app, st)) {
+                    // 主开关被别处打开：撤掉直发通知并自我注销（本路径没有 Service 兜底）
                     if (nmm2 != null) {
                         nmm2.cancel(NOTIFY_ID);
                     }
@@ -279,6 +274,9 @@ public class AdbToggleService extends Service {
                             android.provider.Settings.Global.getUriFor(key), false,
                             sDirectSettingsObserver);
                 }
+                app.getContentResolver().registerContentObserver(
+                        android.provider.Settings.Secure.getUriFor(A11yHelper.KEY), false,
+                        sDirectSettingsObserver);
             } catch (Throwable t) {
                 Log.w(TAG, "direct watchdog observer register failed", t);
             }
@@ -315,7 +313,8 @@ public class AdbToggleService extends Service {
     }
 
     private static Notification buildNotification(Context ctx, DebugController.State s) {
-        boolean on = s.anyOn();
+        // 标题/按钮按主开关聚合（按钮操作的就是 setMaster）；副文本仍摊开 usb/无线真值
+        boolean on = DebugController.masterAnyOn(ctx, s);
         Intent open = new Intent(ctx, NotificationReceiver.class).setAction(ACTION_OPEN);
         PendingIntent piOpen = PendingIntent.getBroadcast(ctx, 1, open, PendingIntent.FLAG_IMMUTABLE);
         Intent close = new Intent(ctx, NotificationReceiver.class).setAction(ACTION_CLOSE);

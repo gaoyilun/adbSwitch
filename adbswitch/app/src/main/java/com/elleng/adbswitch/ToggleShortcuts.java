@@ -53,11 +53,46 @@ final class ToggleShortcuts {
     static final String ACTION_OPEN_HOME = "com.elleng.adbswitch.action.OPEN_HOME";
     static final String ID_LAUNCH = "launch_linkage_app";
 
+    /**
+     * 中转页调用方鉴权 token（P0 安全收口）：
+     * 三个 toggle action 是公开字符串、ShortcutToggleActivity 又必须 exported 供 launcher
+     * 跨 UID 拉起，仅靠 action 白名单挡不住三方 App 构造同 action 的显式 intent 触发特权写。
+     * 故发布 shortcut 时写入一个随安装生成、不可猜测的 extra token，中转页校验通过才执行。
+     * token 存 MODE_PRIVATE 偏好（三方 App 读不到），反编译也拿不到（运行时随机、非硬编码）。
+     */
+    private static final String KEY_ACTION_TOKEN = "shortcut_action_token";
+    private static final String EXTRA_ACTION_TOKEN = "com.elleng.adbswitch.extra.SHORTCUT_TOKEN";
+
+    /** 取（或首次生成）本安装的 action token；仅本应用私有偏好可见 */
+    private static String actionToken(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE);
+        String t = sp.getString(KEY_ACTION_TOKEN, "");
+        if (t == null || t.isEmpty()) {
+            // 两段 UUID 拼接，熵足够；后台线程调用，用 commit 落盘确保发布与校验一致。
+            t = java.util.UUID.randomUUID().toString() + java.util.UUID.randomUUID().toString();
+            sp.edit().putString(KEY_ACTION_TOKEN, t).commit();
+        }
+        return t;
+    }
+
+    /** 校验intent是否携带本安装的合法 token（供 ShortcutToggleActivity 在写入前调用） */
+    static boolean hasValidActionToken(Context ctx, Intent in) {
+        if (in == null) {
+            return false;
+        }
+        SharedPreferences sp = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE);
+        String expected = sp.getString(KEY_ACTION_TOKEN, "");
+        return expected != null && !expected.isEmpty()
+                && expected.equals(in.getStringExtra(EXTRA_ACTION_TOKEN));
+    }
+
     private ToggleShortcuts() {
     }
 
     /** 上次发布的内容指纹：内容没变就不重建（发布要走 IPC 且构造图标，不该随每次状态广播重做） */
     private static volatile String lastSignature = null;
+    /** 正在后台构建的指纹：构建在途期间同指纹不重复提交（慢构建时 250ms 防抖挡不住） */
+    private static volatile String buildingSignature = null;
 
     static void publish(Context ctx) {
         ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
@@ -72,10 +107,15 @@ final class ToggleShortcuts {
 
         // 指纹覆盖一切会影响发布结果的因素；进程重启后 lastSignature 归零，必定重发一次。
         // 指纹比较在主线程（廉价字符串拼接），无变化直接返回，避免高频广播连发重建。
-        String sig = (s.usb ? "1" : "0") + (s.wireless ? "1" : "0") + '|' + linkage + '|' + pkg;
-        if (sig.equals(lastSignature)) {
+        // a11y 计数进指纹：它参与主开关聚合（a11y 跟随时），变化时主开关点要跟着变。
+        // dev 与跟随项集合同理：主开关灯用 masterAnyOn(followed)，漏了它们改跟随后灯不重建。
+        String sig = (s.usb ? "1" : "0") + (s.wireless ? "1" : "0") + (s.dev ? "1" : "0")
+                + ':' + s.a11yCount + '|' + linkage + '|' + pkg
+                + '|' + SwitchConfig.followedItems(ctx);
+        if (sig.equals(lastSignature) || sig.equals(buildingSignature)) {
             return;
         }
+        buildingSignature = sig;
 
         // §2.3：构建 ShortcutInfo 列表（含 PM IPC 取标签/图标 + 位图化）移到后台线程，
         // 只把 setDynamicShortcuts 这个发布调用切回主线程（PUBLISH_HANDLER 绑主线程 Looper），
@@ -104,6 +144,9 @@ final class ToggleShortcuts {
                 // 只有发布成功才记指纹：setDynamicShortcuts 被系统限流/拒绝时返回 false，
                 // 若先记指纹，之后指纹相同就永远不再重试，长按菜单的状态灯会长期失真。
                 PUBLISH_HANDLER.post(() -> {
+                    if (fsig.equals(buildingSignature)) {
+                        buildingSignature = null;
+                    }
                     if (!sm.setDynamicShortcuts(list)) {
                         android.util.Log.w("AdbSwitch", "setDynamicShortcuts rejected, will retry on next publish");
                         return;
@@ -111,19 +154,24 @@ final class ToggleShortcuts {
                     lastSignature = fsig;
                 });
             } catch (Throwable t) {
+                if (fsig.equals(buildingSignature)) {
+                    buildingSignature = null;
+                }
                 android.util.Log.w("AdbSwitch", "shortcut build failed", t);
             }
         });
     }
 
     private static ShortcutInfo buildToggle(Context ctx, DebugController.State s) {
+        // 主开关点 = 跟随主开关的项的聚合态（与磁贴/通知同一语义）
+        boolean on = DebugController.masterAnyOn(ctx, s);
         return new ShortcutInfo.Builder(ctx, ID)
                 .setRank(0)
                 .setShortLabel(ctx.getString(R.string.sc_toggle_short))
                 .setLongLabel(ctx.getString(R.string.sc_toggle_long))
                 .setIcon(Icon.createWithResource(ctx,
-                        s.anyOn() ? R.drawable.ic_dot_on : R.drawable.ic_dot_off))
-                .setIntent(new Intent(ctx, ShortcutToggleActivity.class).setAction(ACTION_TOGGLE))
+                        on ? R.drawable.ic_dot_on : R.drawable.ic_dot_off))
+                .setIntent(toggleIntent(ctx, ACTION_TOGGLE))
                 .build();
     }
 
@@ -136,8 +184,15 @@ final class ToggleShortcuts {
                 .setLongLabel(ctx.getString(longRes))
                 .setIcon(Icon.createWithResource(ctx,
                         on ? R.drawable.ic_dot_on : R.drawable.ic_dot_off))
-                .setIntent(new Intent(ctx, ShortcutToggleActivity.class).setAction(action))
+                .setIntent(toggleIntent(ctx, action))
                 .build();
+    }
+
+    /** 构造中转页 intent 并附上本安装 token（主/子开关三个 action 统一走这里，不漏发） */
+    private static Intent toggleIntent(Context ctx, String action) {
+        return new Intent(ctx, ShortcutToggleActivity.class)
+                .setAction(action)
+                .putExtra(EXTRA_ACTION_TOKEN, actionToken(ctx));
     }
 
     private static ShortcutInfo buildHome(Context ctx, int rank) {
@@ -174,10 +229,9 @@ final class ToggleShortcuts {
     private static Icon appIcon(Context ctx, String pkg) {
         try {
             Drawable d = ctx.getPackageManager().getApplicationIcon(pkg);
-            int size = Math.max(1, Math.max(
-                    d.getIntrinsicWidth() > 0 ? d.getIntrinsicWidth() : 96,
-                    d.getIntrinsicHeight() > 0 ? d.getIntrinsicHeight() : 96));
-            Bitmap bmp = DrawableUtils.toBitmap(d, size);
+            // 固定目标尺寸：自适应图标内在尺寸 108dp（4x 屏 ≈ 432px ⇒ 单张 ≈ 746KB），
+            // 而快捷方式实际只按 ~48dp 显示，按内在尺寸栅格化纯属浪费
+            Bitmap bmp = DrawableUtils.toBitmap(d, 96);
             if (bmp != null) {
                 return Icon.createWithBitmap(bmp);
             }

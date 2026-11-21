@@ -3,7 +3,6 @@ package com.elleng.adbswitch.update;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Log;
@@ -18,16 +17,19 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 更新 APK 的下载与安装拉起。
  *
- * 下载：HttpURLConnection + Range 断点续传 + 可选 SHA-256 校验。
+ * 下载：HttpURLConnection + 强制 SHA-256 校验 + 200MB 体积上限 + 进程级互斥。
  * 安装：FileProvider + ACTION_INSTALL_PACKAGE（缺「安装未知应用」授权时先跳系统设置页）。
  *
  * 为什么不用 DownloadManager：需要边下边显示进度、且要在失败时把半截文件清掉。
  * 为什么写入 getExternalFilesDir：应用专属外部目录，无需任何存储权限；
  * 且与 res/xml/file_paths.xml 的 external-files-path 严格对应。
+ * 为什么不做断点续传：SHA-256 是强制的，而续传时前段数据没参与摘要、哈希必然对不上；
+ * APK 只有几 MB，重下成本可忽略，不值得为续传放弃完整性校验。
  */
 public final class UpdateDownloader {
 
@@ -37,6 +39,10 @@ public final class UpdateDownloader {
     private static final int TIMEOUT = 15000;
     /** 进度回调节流：200ms 一次，否则每收到一个包就 post 一次主线程，列表会卡。 */
     private static final long PROGRESS_INTERVAL_MS = 200L;
+    /** 下载体积上限：正常 APK 只有几 MB，远超此值说明响应异常（错误页/被劫持），及时止损。 */
+    private static final long MAX_DOWNLOAD_BYTES = 200L * 1024 * 1024;
+    /** 进程级互斥：同一时刻只允许一个下载，防止并发写同一个 .part 互相损坏。 */
+    private static final AtomicBoolean DOWNLOADING = new AtomicBoolean(false);
 
     public static final class Progress {
         public final long downloadedBytes;
@@ -75,23 +81,36 @@ public final class UpdateDownloader {
     /**
      * 下载 APK（阻塞，必须在后台线程调用）。
      *
-     * @param expectedSha256 期望的 SHA-256（小写十六进制）；null 时跳过校验。
-     *                       注意：提供它会禁用断点续传 —— 续传时前段数据没参与摘要，
-     *                       算出来的哈希必然对不上（与 LivePhoto 实现保持一致）。
+     * @param expectedSha256 期望的 SHA-256（小写十六进制），**必填**：
+     *                       缺失时直接拒绝下载——没有完整性依据的包绝不落盘、绝不安装。
      * @return 下载完成的文件
      */
     public static File download(Context ctx, String url, String expectedSha256,
                                 ProgressListener listener) throws Exception {
+        if (expectedSha256 == null || expectedSha256.trim().isEmpty()) {
+            throw new IllegalStateException("缺少 SHA-256，拒绝下载");
+        }
+        if (!DOWNLOADING.compareAndSet(false, true)) {
+            throw new IllegalStateException("已有下载进行中");
+        }
+        try {
+            return downloadLocked(ctx, url, expectedSha256, listener);
+        } finally {
+            DOWNLOADING.set(false);
+        }
+    }
+
+    private static File downloadLocked(Context ctx, String url, String expectedSha256,
+                                       ProgressListener listener) throws Exception {
         File dir = targetDir(ctx);
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IllegalStateException("无法创建下载目录: " + dir);
         }
         File part = new File(dir, FILE_NAME + ".part");
         File dest = downloadedFile(ctx);
-        long downloaded = part.exists() ? part.length() : 0L;
-        boolean resume = downloaded > 0 && expectedSha256 == null;
-        if (!resume && part.exists() && !part.delete()) {
-            Log.w(TAG, "删除残留 .part 失败: " + part);
+        // 不做续传：残留的半截文件一律丢弃重下（截断写入即使 delete 失败也能丢弃旧内容）
+        if (part.exists() && !part.delete()) {
+            Log.w(TAG, "删除残留 .part 失败（改用截断写入）: " + part);
         }
 
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
@@ -99,41 +118,30 @@ public final class UpdateDownloader {
             conn.setConnectTimeout(TIMEOUT);
             conn.setReadTimeout(TIMEOUT);
             conn.setInstanceFollowRedirects(true);
-            if (resume) {
-                conn.setRequestProperty("Range", "bytes=" + downloaded + "-");
-            }
             int code = conn.getResponseCode();
-            if (code == 206 && resume) {
-                Log.i(TAG, "断点续传，从 " + downloaded + " 字节继续");
-            } else if (code == 200) {
-                // 服务端不支持续传（或资源已变）：必须丢掉已下载部分重新下。
-                // 关键：resume 也要一并置 false —— 下方 FileOutputStream(part, resume) 是追加模式，
-                // 只重置 downloaded 而留着 append=true，会把完整响应拼在旧 .part 后面，APK 直接损坏。
-                // （截断写入即使 delete 失败也能丢弃旧内容，故 delete 失败只记日志不阻断。）
-                downloaded = 0L;
-                resume = false;
-                if (part.exists() && !part.delete()) {
-                    Log.w(TAG, "丢弃旧 .part 失败（改用截断写入）: " + part);
-                }
-            } else {
+            if (code != HttpURLConnection.HTTP_OK) {
                 throw new IllegalStateException("HTTP " + code);
             }
-            long total = downloaded + conn.getContentLengthLong();
+            long total = conn.getContentLengthLong();
+            if (total > MAX_DOWNLOAD_BYTES) {
+                throw new IllegalStateException("响应体积异常: " + total + " 字节");
+            }
 
-            MessageDigest digest = (expectedSha256 == null) ? null
-                    : MessageDigest.getInstance("SHA-256");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long downloaded = 0L;
             long lastReport = 0L;
             long lastBytes = 0L;
             try (InputStream in = conn.getInputStream();
-                 OutputStream out = new FileOutputStream(part, resume)) {
+                 OutputStream out = new FileOutputStream(part)) {
                 byte[] buf = new byte[8192];
                 int n;
                 while ((n = in.read(buf)) > 0) {
-                    out.write(buf, 0, n);
-                    if (digest != null) {
-                        digest.update(buf, 0, n);
-                    }
                     downloaded += n;
+                    if (downloaded > MAX_DOWNLOAD_BYTES) {
+                        throw new IllegalStateException("下载体积超过上限 " + MAX_DOWNLOAD_BYTES + " 字节");
+                    }
+                    out.write(buf, 0, n);
+                    digest.update(buf, 0, n);
                     long now = System.currentTimeMillis();
                     if (listener != null && now - lastReport >= PROGRESS_INTERVAL_MS) {
                         long speed = (now - lastReport) > 0
@@ -147,20 +155,18 @@ public final class UpdateDownloader {
             if (downloaded <= 0L) {
                 throw new IllegalStateException("下载内容为空");
             }
-            if (digest != null) {
-                StringBuilder sb = new StringBuilder();
-                for (byte b : digest.digest()) {
-                    sb.append(String.format("%02x", b));
-                }
-                if (!sb.toString().equalsIgnoreCase(expectedSha256)) {
-                    // 源被污染或下载损坏，绝不安装
-                    deleteQuietly(part);
-                    deleteQuietly(dest);
-                    throw new IllegalStateException("APK SHA-256 校验失败：期望 " + expectedSha256
-                            + "，实际 " + sb);
-                }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest.digest()) {
+                sb.append(String.format("%02x", b));
             }
-            // 分次写入的文件要先删掉旧的再 rename，否则 rename 可能失败
+            if (!sb.toString().equalsIgnoreCase(expectedSha256)) {
+                // 源被污染或下载损坏，绝不安装
+                deleteQuietly(part);
+                deleteQuietly(dest);
+                throw new IllegalStateException("APK SHA-256 校验失败：期望 " + expectedSha256
+                        + "，实际 " + sb);
+            }
+            // 先删掉旧的再 rename，否则 rename 可能失败
             deleteQuietly(dest);
             if (!part.renameTo(dest)) {
                 throw new IllegalStateException("下载完成但重命名失败: " + part);
@@ -170,7 +176,7 @@ public final class UpdateDownloader {
             }
             return dest;
         } catch (Throwable t) {
-            // 失败时清掉半截文件，否则下次会拿一个残缺的 .part 续传
+            // 失败时清掉半截文件，避免残留
             deleteQuietly(part);
             throw (t instanceof Exception) ? (Exception) t : new IllegalStateException(String.valueOf(t));
         } finally {
@@ -184,8 +190,8 @@ public final class UpdateDownloader {
      * @return true 已成功拉起；false 表示缺少「安装未知应用」授权（已跳系统设置页，需用户授权后重试）
      */
     public static boolean install(Context ctx, File file) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                && !ctx.getPackageManager().canRequestPackageInstalls()) {
+        // minSdk=27，canRequestPackageInstalls 必然可用，无需 SDK_INT 判断
+        if (!ctx.getPackageManager().canRequestPackageInstalls()) {
             Log.w(TAG, "缺少安装未知应用授权，跳转设置页");
             try {
                 ctx.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,

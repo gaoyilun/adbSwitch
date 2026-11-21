@@ -14,7 +14,7 @@
 
     <!-- 副标题不再点名具体授权方式：默认就是免root模式，root / Shizuku 已降为兜底，
          写出来反而让人误以为必须二选一。 -->
-    <string name="header_subtitle">一键开关 USB 与无线调试</string>
+    <string name="header_subtitle">一键开关过检，处理调试与无障碍等痕迹</string>
 
     <string name="card_debug_title">调试开关</string>
 
@@ -35,6 +35,8 @@
     <string name="wireless_title">无线调试</string>
     <string name="wireless_on">已开启 · adbd 运行中</string>
     <string name="wireless_off">已关闭</string>
+    <!-- 开关已开但未连 Wi-Fi：此刻无法无线调试。沿用开启态颜色，仅替换「adbd 运行中」文案。 -->
+    <string name="wireless_inactive">已开启 · 未激活</string>
 
     <!-- 开发者选项入口：独立开关。只控制设置里开发者选项入口的显隐，
          与 USB / 无线调试互不联动（关它不会关 adb，关 adb 也不会关它）。 -->
@@ -113,6 +115,7 @@
     <string name="toast_devopts_off_hint">未开启开发者选项，请到「关于本机」连点版本号 7 次开启</string>
     <!-- 部分 ROM（如荣耀）禁止外部深链无线调试独立页：回退开发者选项并引导用户手动点入 -->
     <string name="toast_wireless_fallback">本机型无法直接打开无线调试，请在开发者选项中点击「无线调试」</string>
+    <string name="toast_nav_unavailable">当前系统无此设置页</string>
     <!-- 调试三行右侧「›」箭头的无障碍描述 -->
     <string name="nav_chevron_desc">打开对应设置项</string>
     <!-- 点击调试三行箭头、但开发者选项入口尚未开启时：进该页会先写入
@@ -234,6 +237,28 @@
          App 内点击会直接弹一次性授权引导；这条文案主要给磁贴 / 桌面快捷方式等无界面入口。 -->
     <string name="toast_wss_need_grant">免root模式尚未授权，请打开App完成一次性授权</string>
     <!-- 免root模式写这些键被系统静默丢弃（HyperOS 等 ROM 对第三方应用直接丢、不抛错）。
-         对齐 Geto/IMD 的做法：用 putString 的布尔返回值识别"没真写进去"，如实告知而非静默弹回。 -->
+         用 putString 的布尔返回值识别"没真写进去"，如实告知而非静默弹回。 -->
     <string name="toast_wss_write_dropped">写入未生效：系统（该机型）未接受本次设置，可能被限制</string>
+    <!-- 无障碍列表被 ROM 对第三方脱敏（读到空、系统里其实有服务）时的二次确认与提示 -->
+    <string name="a11y_hidden_title">无法读取无障碍服务列表</string>
+    <string name="a11y_hidden_msg">系统向本应用隐藏了无障碍服务列表（部分机型会这样），因此无法分辨哪些是系统预装的服务。\n\n继续将按「当前没有服务」处理，可能连带关闭系统预装的无障碍服务，且无法自动撤销。\n\n是否继续？</string>
+    <string name="a11y_hidden_continue">仍要关闭</string>
+    <string name="toast_a11y_read_hidden">系统向本应用隐藏了无障碍服务列表，本次操作已取消（可在应用内确认后重试）</string>
+
+    <!-- 无障碍服务开关（第三方服务的一键开/关；关闭=清掉第三方条目，打开=还原记忆列表） -->
+    <string name="a11y_title">无障碍服务</string>
+    <string name="a11y_on">已启用 %1$d 个第三方服务</string>
+    <string name="a11y_off">无第三方服务</string>
+    <string name="a11y_on_generic">已启用第三方服务</string>
+    <!-- 恢复失败的持久化摘要（数据源 DebugController.a11yRestorePending） -->
+    <string name="a11y_restore_pending">仍有 %1$d 个需手动开启</string>
+    <string name="manage_drag_desc">拖动排序</string>
+    <string name="a11y_no_save">无可恢复的无障碍服务记录，请到系统设置手动开启</string>
+    <string name="a11y_restore_partial">无障碍恢复不完整，仍有 %1$d 个需手动开启</string>
+
+    <!-- 管理开关项：每项可设置「是否显示」（=功能是否启用）与「是否跟随主开关」 -->
+    <string name="manage_items_title">管理开关项</string>
+    <string name="manage_items_sum">设置各开关是否显示、是否跟随主开关</string>
+    <string name="manage_shown">显示</string>
+    <string name="manage_follow">跟随主开关</string>
 </resources>

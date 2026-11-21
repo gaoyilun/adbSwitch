@@ -20,10 +20,12 @@ if [ -z "$PGYER_API_KEY" ] || [ -z "$PGYER_APP_KEY" ]; then
 fi
 
 echo "==> 上传 $APK 到蒲公英"
+# 字段名必须是 buildUpdateDescription：蒲公英 v2 上传接口没有 updateDescription，
+# 传错名字不会报错，但版本更新说明会静默存成空串（1.0.4 首次上传踩到）。
 curl -# -F "_api_key=$PGYER_API_KEY" \
      -F "appKey=$PGYER_APP_KEY" \
      -F "file=@$APK" \
-     -F "updateDescription=${UPDATE_DESC}" \
+     -F "buildUpdateDescription=${UPDATE_DESC}" \
      https://www.pgyer.com/apiv2/app/upload
 echo
 echo "==> 上传完成。到蒲公英后台确认版本；安装页短链回填 UpdateConfig.PGYER_PAGE_URL"

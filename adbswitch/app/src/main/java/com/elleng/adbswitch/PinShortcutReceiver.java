@@ -38,8 +38,10 @@ public class PinShortcutReceiver extends BroadcastReceiver {
     private static int seq = 0;
     private static Context appCtx;
 
-    /** 发起钉选请求后调用：按请求登记等待回调，并挂各自的超时兜底。 */
-    static synchronized void arm(Context ctx) {
+    /** 发起钉选请求**前**调用：按请求登记等待回调，并挂各自的超时兜底。
+     *  必须先登记再 requestPinShortcut——桌面回调可能同步到达，晚登记会空消费。
+     *  @return 本次请求的 token，请求被系统拒绝时用它 {@link #disarm} 回滚 */
+    static synchronized int arm(Context ctx) {
         appCtx = ctx.getApplicationContext();
         final int token = ++seq;
         Runnable timeout = new Runnable() {
@@ -58,6 +60,15 @@ public class PinShortcutReceiver extends BroadcastReceiver {
         };
         PENDING.put(token, timeout);
         MAIN.postDelayed(timeout, TIMEOUT_MS);
+        return token;
+    }
+
+    /** 请求被系统拒绝（requestPinShortcut 返回 false）时回滚登记，避免 5s 后误报失败 */
+    static synchronized void disarm(int token) {
+        Runnable r = PENDING.remove(token);
+        if (r != null) {
+            MAIN.removeCallbacks(r);
+        }
     }
 
     @Override
@@ -74,7 +85,9 @@ public class PinShortcutReceiver extends BroadcastReceiver {
         }
         if (consumed != null) {
             MAIN.removeCallbacks(consumed);
+            Toast.makeText(ctx, R.string.create_shortcut_ok, Toast.LENGTH_SHORT).show();
         }
-        Toast.makeText(ctx, R.string.create_shortcut_ok, Toast.LENGTH_SHORT).show();
+        // consumed == null：无待定请求（进程被杀后重建才收到回调等），不提示——
+        // 无条件报成功会与随后 arm 登记的超时失败提示互相矛盾
     }
 }
