@@ -1,7 +1,12 @@
 package com.elleng.adbswitch.update;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
- * 一次检查的结果。字段与 LivePhoto 项目的 UpdateInfo 保持一致，便于对照维护。
+ * 一次检查的结果。GitHub 与蒲公英两个通道的结果会按版本合并：
+ * 版本说明、SHA-256 等元数据互补，两条直链一起放进 {@link #apkUrls} 供下载器测速择优。
  */
 public final class UpdateInfo {
 
@@ -22,23 +27,28 @@ public final class UpdateInfo {
     public final String notes;
     /** 强制更新：为 true 时不允许点外部/返回关闭。 */
     public final boolean mandatory;
-    /** 主通道 APK 直链；蒲公英通道恒为 null（那边只引导跳安装页）。 */
-    public final String apkUrl;
-    /** 备用下载入口：主通道可用时是蒲公英页，蒲公英通道可用时是 GitHub Release 页。 */
+    /**
+     * 可用的 APK 直链列表（0~2 条）：GitHub Release 资产 + 蒲公英签名直链。
+     * 顺序不代表优先级——下载器会先测速再选。
+     */
+    public final List<String> apkUrls;
+    /** 备用下载入口（页面）：打开安装页/发布页，供直链全部失败时使用。 */
     public final String fallbackUrl;
-    /** APK 的 SHA-256（十六进制小写）；服务器未下发时为 null，此时跳过完整性校验。 */
+    /** APK 的 SHA-256（十六进制小写）；服务器未下发时为 null，此时不做应用内直链下载。 */
     public final String sha256;
     public final Source source;
 
     public UpdateInfo(boolean hasUpdate, int versionCode, String versionName, String notes,
-                      boolean mandatory, String apkUrl, String fallbackUrl, String sha256,
+                      boolean mandatory, List<String> apkUrls, String fallbackUrl, String sha256,
                       Source source) {
         this.hasUpdate = hasUpdate;
         this.versionCode = versionCode;
         this.versionName = versionName == null ? "" : versionName;
         this.notes = notes == null ? "" : notes;
         this.mandatory = mandatory;
-        this.apkUrl = apkUrl;
+        this.apkUrls = apkUrls == null
+                ? Collections.emptyList()
+                : Collections.unmodifiableList(new ArrayList<>(apkUrls));
         this.fallbackUrl = fallbackUrl;
         this.sha256 = sha256;
         this.source = source;

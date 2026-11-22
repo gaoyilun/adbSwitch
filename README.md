@@ -33,10 +33,6 @@ adbSwitch 就是为这件事做的：一个**一键真实改写系统状态的�
 | :--- | :--- |
 | GitHub Releases | <https://github.com/gaoyilun/adbSwitch/releases> |
 | 蒲公英（国内下载） | <https://www.pgyer.com/adbSwitch> |
-| 城通云 | <https://url05.ctfile.com/f/20347205-17569915128163-56f2ca?p=1245> |
-| 蓝奏云 | <https://elleng.lanzouv.com/i2q294gyvi1a> |
-
-> 城通云 / 蓝奏云为网盘镜像，适合 GitHub 与蒲公英访问不畅时备用；各渠道的 APK 均由同一份源码构建。
 
 ## ✨ 功能特性
 

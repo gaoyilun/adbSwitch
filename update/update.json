@@ -1,9 +1,9 @@
 {
   "versionCode": 7,
   "versionName": "1.1.1",
-  "notes": "1.1.1：桌面快捷菜单可按开关自定义，新增默认快捷应用显示开关；管理开关项弹窗重排并支持点击文字勾选，勾选数量与桌面显示一致。",
+  "notes": "1.1.1：桌面快捷菜单可按开关自定义，新增默认快捷应用显示开关；管理开关项弹窗重排并支持点击文字勾选，勾选数量与桌面显示一致；更新下载前自动测速择优，选定后全程不切换。",
   "mandatory": false,
-  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.1.1/com.elleng.adbswitch-1.1.1-universal-release.apk",
+  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.1.1/final-1.1.1.apk",
   "fallbackUrl": "https://github.com/gaoyilun/adbSwitch/releases",
-  "sha256": "23a74d5d94c5254429b03aefae1a56fdc06cccfde9ceee0e63cadfa6bff06dbe"
+  "sha256": "dfd5a5d89ec8dc5236fe9dcf7a7cc304912675ad744d2c3658a82a1548abc0d2"
 }

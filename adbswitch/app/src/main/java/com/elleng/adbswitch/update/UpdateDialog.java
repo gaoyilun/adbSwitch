@@ -136,10 +136,10 @@ public final class UpdateDialog {
                         });
                     }
                 }
-                // 直链下载必须同时有 apkUrl 与 sha256：UpdateDownloader 在 sha256 为空时会
-                // 直接抛错，只凭 apkUrl 判定会让主按钮必失败。蒲公英通道无直链、或服务端漏配
-                // sha256 时，「立刻更新」一律退化为打开安装页（备用下载），不误导用户。
-                final boolean directDownload = info.apkUrl != null && !info.apkUrl.trim().isEmpty()
+                // 直链下载必须同时有直链与 sha256：UpdateDownloader 在 sha256 为空时会
+                // 直接抛错，只凭直链判定会让主按钮必失败。服务端漏配 sha256、或两条源
+                // 都没拿到直链时，「立刻更新」一律退化为打开安装页（备用下载），不误导用户。
+                final boolean directDownload = !info.apkUrls.isEmpty()
                         && info.sha256 != null && !info.sha256.trim().isEmpty();
                 if (!directDownload) {
                     positive.setText(ctx.getString(R.string.update_open_page));
@@ -221,7 +221,7 @@ public final class UpdateDialog {
                     Log.i(TAG, "复用已下载且校验通过的 APK: " + cached);
                     apk = cached;
                 } else {
-                    apk = UpdateDownloader.download(ctx, info.apkUrl, info.sha256, p -> {
+                    apk = UpdateDownloader.download(ctx, info.apkUrls, info.sha256, p -> {
                         final int pct = (int) (p.fraction() * 100);
                         s.main.post(() -> {
                             s.bar.setIndeterminate(false);

@@ -33,10 +33,6 @@ The project is open source under GPL-3.0; the code can be reviewed and built by 
 | :--- | :--- |
 | GitHub Releases | <https://github.com/gaoyilun/adbSwitch/releases> |
 | Pgyer (China mirror) | <https://www.pgyer.com/adbSwitch> |
-| CTFile | <https://url05.ctfile.com/f/20347205-17569915128163-56f2ca?p=1245> |
-| LanZou | <https://elleng.lanzouv.com/i2q294gyvi1a> |
-
-> CTFile / LanZou are net-disk mirrors, handy as backups when GitHub or Pgyer is slow to reach; APKs from every channel are built from the same source.
 
 ## ✨ Features
 

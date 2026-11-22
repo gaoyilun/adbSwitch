@@ -12,6 +12,12 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 在线更新检测：GitHub（主）+ 蒲公英（备）双通道。
@@ -22,12 +28,11 @@ import java.nio.charset.StandardCharsets;
  *     不需要「永久别再提醒」的出口，故不持久化任何忽略状态；
  *  3. 把版本比较抽成纯函数 isNewer()，便于单测与复用。
  *
- * 通道编排（与原实现一致，这里写清理由）：
- *   GitHub 有更新 → 直接返回，不再查蒲公英；
- *   GitHub 无更新但不失败 → **继续**查蒲公英。否则「蒲公英有新包、GitHub 没有」时永远弹不出窗；
- *   GitHub 失败 → 降级到蒲公英；
- *   两个通道都成功且无更新 → 返回 hasUpdate=false，调用方写入节流时间戳；
- *   两个通道都失败 → 抛异常，调用方**不写**节流，下次启动重试（弱网用户不该被节流 3 天）。
+ * 通道编排：
+ *   两个通道**并行**请求，各自成功后按版本合并（见 {@link #merge}）：
+ *   同版本 → 元数据互补、两条直链一起交给下载器测速择优；
+ *   只有一边有新版本 → 用那一边；
+ *   两边都失败 → 抛异常，调用方**不写**节流，下次启动重试（弱网用户不该被节流 3 天）。
  *
  * 当前 {@link UpdateConfig#ENABLED} 为 true，GitHub 主通道已硬编码激活；仅在 {@link #isActive()} 判定通道就绪时才发请求。
  */
@@ -126,49 +131,100 @@ public final class UpdateChecker {
     // —— 检查入口（阻塞，必须在后台线程调用）——
 
     /**
-     * @return 至少一个通道成功确认的结果（hasUpdate 可能为 false）；
-     *         所有通道都失败时抛异常，调用方应静默忽略且不要写节流。
+     * 两个通道**并行**检测，再按版本合并结果：
+     *  - 版本相同：元数据互补（GitHub 提供 sha256，蒲公英提供快速直链），两条直链一起交给下载器测速；
+     *  - 只有一边有新版本：用那一边；直链缺失时退化为打开页面；
+     *  - 两边都失败：抛异常，调用方不写节流，下次启动重试。
+     *
+     * 并行而不是「GitHub 优先、失败再查蒲公英」：串行时一个通道超时会把整体拖到 10 秒以上，
+     * 而且「GitHub 能连但很慢」这种场景下也需要蒲公英的直链作为备选。
+     *
+     * @return 至少一个通道成功确认的结果（hasUpdate 可能为 false）
      */
     public static UpdateInfo check(int currentVersionCode, String currentVersionName)
             throws Exception {
-        UpdateInfo github = null;
+        UpdateInfo github;
+        UpdateInfo pgyer;
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Future<UpdateInfo> ghFuture = null;
+        Future<UpdateInfo> pgFuture = null;
         if (githubEnabled()) {
-            try {
-                github = fetchGitHub(currentVersionCode);
-            } catch (Throwable t) {
-                Log.w(TAG, "GitHub 更新检查失败", t);
-            }
-            if (github != null && github.hasUpdate) {
-                return withFallback(github, UpdateConfig.PGYER_PAGE_URL);
-            }
+            ghFuture = pool.submit(() -> fetchGitHub(currentVersionCode));
         }
-
         if (pgyerEnabled()) {
-            UpdateInfo pgyer = null;
-            try {
-                pgyer = fetchPgyer(currentVersionName);
-            } catch (Throwable t) {
-                Log.w(TAG, "蒲公英更新检查失败", t);
-            }
-            if (pgyer != null && pgyer.hasUpdate) {
-                return withFallback(pgyer, UpdateConfig.GITHUB_RELEASES_URL);
-            }
-            if (pgyer != null) {
-                return pgyer;
-            }
+            pgFuture = pool.submit(() -> fetchPgyer(currentVersionName));
         }
+        try {
+            github = await(ghFuture, "GitHub");
+            pgyer = await(pgFuture, "蒲公英");
+        } finally {
+            pool.shutdownNow();
+        }
+        return merge(github, pgyer);
+    }
 
-        if (github != null) {
-            return github;
+    private static UpdateInfo await(Future<UpdateInfo> future, String name) {
+        if (future == null) {
+            return null;
+        }
+        try {
+            return future.get(20, TimeUnit.SECONDS);
+        } catch (Throwable t) {
+            Log.w(TAG, name + " 更新检查失败", t);
+            return null;
+        }
+    }
+
+    /** 合并两个通道的结果；只有一边成功时按那一边返回。 */
+    private static UpdateInfo merge(UpdateInfo gh, UpdateInfo pg) {
+        boolean ghNew = gh != null && gh.hasUpdate;
+        boolean pgNew = pg != null && pg.hasUpdate;
+        if (ghNew && pgNew) {
+            if (pg.versionCode > gh.versionCode) {
+                // 蒲公英版本更新（先传了包），但没有 sha256：只能跳页面，不能应用内直装
+                return withFallback(pg, UpdateConfig.GITHUB_RELEASES_URL);
+            }
+            if (gh.versionCode > pg.versionCode) {
+                return withFallback(gh, UpdateConfig.PGYER_PAGE_URL);
+            }
+            // 同版本：共享两边的下载直链，说明文字优先用 GitHub 的 update.json
+            List<String> urls = new ArrayList<>();
+            addTrusted(urls, gh.apkUrls);
+            addTrusted(urls, pg.apkUrls);
+            String notes = !gh.notes.trim().isEmpty() ? gh.notes : pg.notes;
+            String fallback = emptyToNull(pg.fallbackUrl);
+            return new UpdateInfo(true, gh.versionCode, gh.versionName, notes, gh.mandatory,
+                    urls, fallback != null ? fallback : UpdateConfig.PGYER_PAGE_URL,
+                    gh.sha256, UpdateInfo.Source.GITHUB);
+        }
+        if (ghNew) {
+            return withFallback(gh, UpdateConfig.PGYER_PAGE_URL);
+        }
+        if (pgNew) {
+            return withFallback(pg, UpdateConfig.GITHUB_RELEASES_URL);
+        }
+        if (gh != null) {
+            return gh;
+        }
+        if (pg != null) {
+            return pg;
         }
         throw new IllegalStateException("所有更新通道检查失败");
     }
 
+    private static void addTrusted(List<String> out, List<String> urls) {
+        for (String u : urls) {
+            if (u != null && !u.trim().isEmpty() && isTrustedDirectUrl(u)) {
+                String v = u.trim();
+                if (!out.contains(v)) {
+                    out.add(v);
+                }
+            }
+        }
+    }
+
     /**
-     * 给主通道结果补上「备用下载」入口（蒲公英通道没有直链，只能跳页面）。
-     *
-     * 主通道自带的 fallbackUrl 优先（如蒲公英返回的安装页 appURl），外部传入的只作兜底：
-     * 直接覆写会把「蒲公英有新包」时的安装页丢成 GitHub，两个按钮跳同一处。
+     * 给主通道结果补上「备用下载」入口（页面）。主通道自带 fallbackUrl 优先。
      */
     private static UpdateInfo withFallback(UpdateInfo info, String fallbackUrl) {
         String fb = (fallbackUrl == null || fallbackUrl.trim().isEmpty()) ? null : fallbackUrl.trim();
@@ -176,7 +232,7 @@ public final class UpdateChecker {
                 ? null : info.fallbackUrl.trim();
         String effective = own != null ? own : fb;
         return new UpdateInfo(info.hasUpdate, info.versionCode, info.versionName, info.notes,
-                info.mandatory, info.apkUrl, effective, info.sha256, info.source);
+                info.mandatory, info.apkUrls, effective, info.sha256, info.source);
     }
 
     /**
@@ -193,10 +249,14 @@ public final class UpdateChecker {
         int remoteCode = obj.optInt("versionCode", current);
         boolean hasUpdate = isNewer(remoteCode, current);
         String apkUrl = hasUpdate ? emptyToNull(obj.optString("apkUrl")) : null;
-        if (apkUrl != null && !isTrustedApkUrl(apkUrl)) {
-            // update.json 被篡改/误填时不能把用户引向任意包源：降级为跳页面（fallbackUrl）
-            Log.w(TAG, "apkUrl 非可信 GitHub https 直链，降级为页面跳转: " + apkUrl);
-            apkUrl = null;
+        List<String> urls = new ArrayList<>();
+        if (apkUrl != null) {
+            if (isTrustedDirectUrl(apkUrl)) {
+                urls.add(apkUrl);
+            } else {
+                // update.json 被篡改/误填时不能把用户引向任意包源：降级为跳页面（fallbackUrl）
+                Log.w(TAG, "apkUrl 非可信直链，降级为页面跳转: " + apkUrl);
+            }
         }
         return new UpdateInfo(
                 hasUpdate,
@@ -204,21 +264,24 @@ public final class UpdateChecker {
                 obj.optString("versionName", ""),
                 obj.optString("notes", ""),
                 obj.optBoolean("mandatory", false),
-                apkUrl,
+                urls,
                 emptyToNull(obj.optString("fallbackUrl")),
                 emptyToNull(obj.optString("sha256")),
                 hasUpdate ? UpdateInfo.Source.GITHUB : UpdateInfo.Source.NONE);
     }
 
-    /** APK 直链只认 GitHub 官方域名的 https 地址（含 release 资产跳转的 objects.githubusercontent.com）。 */
-    private static boolean isTrustedApkUrl(String url) {
+    /** 直链只认官方域名的 https 地址：GitHub 资产（含 objects.githubusercontent.com）与蒲公英签名链。 */
+    private static boolean isTrustedDirectUrl(String url) {
         try {
             URL u = new URL(url);
             if (!"https".equalsIgnoreCase(u.getProtocol())) {
                 return false;
             }
             String host = u.getHost().toLowerCase(java.util.Locale.ROOT);
-            return host.equals("github.com") || host.endsWith(".githubusercontent.com");
+            return host.equals("github.com")
+                    || host.endsWith(".githubusercontent.com")
+                    || host.equals("pgyer.com")
+                    || host.endsWith(".pgyer.com");
         } catch (Throwable t) {
             return false;
         }
@@ -263,6 +326,13 @@ public final class UpdateChecker {
             boolean hasUpdate = data.optBoolean("buildHaveNewVersion", false);
             // 注意字段名就是官方那个拼写 appURl（不是 appUrl）
             String pageUrl = emptyToNull(data.optString("appURl"));
+            // 蒲公英其实提供了签名直链（会 302 到 oss.pgyer.com），有效期数小时；
+            // 它是国内下载的主用候选，是否采用由下载器测速决定。
+            String directUrl = hasUpdate ? emptyToNull(data.optString("downloadURL")) : null;
+            List<String> urls = new ArrayList<>();
+            if (directUrl != null && isTrustedDirectUrl(directUrl)) {
+                urls.add(directUrl);
+            }
             // 关键：蒲公英官方文档中 buildVersionNo 是 String 类型（"Android Version Code，默认 1"），
             // 用 optInt 解析字符串会恒返回 0，导致「关于行可更新提示」与「一次性 Toast 去重」失效。
             // 必须按字符串解析（见 parseIntSafe）。
@@ -272,7 +342,7 @@ public final class UpdateChecker {
                     data.optString("buildVersion", ""),
                     data.optString("buildUpdateDescription", ""),
                     false,
-                    null,
+                    urls,
                     hasUpdate ? (pageUrl != null ? pageUrl : emptyToNull(UpdateConfig.PGYER_PAGE_URL)) : null,
                     null,
                     hasUpdate ? UpdateInfo.Source.PGYER : UpdateInfo.Source.NONE);
