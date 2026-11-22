@@ -33,8 +33,8 @@ The project is open source under GPL-3.0; the code can be reviewed and built by 
 | :--- | :--- |
 | GitHub Releases | <https://github.com/gaoyilun/adbSwitch/releases> |
 | Pgyer (China mirror) | <https://www.pgyer.com/adbSwitch> |
-| CTFile | <https://url05.ctfile.com/f/20347205-17569914982448-ce7e56?p=1245> |
-| LanZou | <https://elleng.lanzouv.com/ir6ul4gupzlc> |
+| CTFile | <https://url05.ctfile.com/f/20347205-17569915128163-56f2ca?p=1245> |
+| LanZou | <https://elleng.lanzouv.com/i2q294gyvi1a> |
 
 > CTFile / LanZou are net-disk mirrors, handy as backups when GitHub or Pgyer is slow to reach; APKs from every channel are built from the same source.
 
@@ -43,7 +43,7 @@ The project is open source under GPL-3.0; the code can be reviewed and built by 
 | Feature | Description |
 | :--- | :--- |
 | 🔌 **Main switch** | One tap turns debugging and accessibility traces off together (adbd stops, truly passes detection); state aggregates the items set to follow it, and turning it back on restores the previous combination |
-| 🧩 **Decoupled, customizable switches** | USB debugging, wireless debugging, Developer options and third-party accessibility services are four independent items. In "Manage switch items" set each one's visibility and whether it follows the main switch, and drag to reorder; hidden items are not managed by this app at all |
+| 🧩 **Decoupled, customizable switches** | USB debugging, wireless debugging, Developer options and third-party accessibility services are four independent items. In "Manage switch items" set each one's visibility, whether it follows the main switch, and whether it appears in the desktop shortcut menu, and drag to reorder; hidden items are not managed by this app at all |
 | 🆓 **Works with no-root / Shizuku / root** | No-root by default: after a one-time authorization the app writes system settings in-process — no root, no always-on Shizuku; root / Shizuku write modes are also available. The grant is sticky, surviving reboots / soft reboots |
 | ♿ **One-tap accessibility toggle** | Turn third-party accessibility services off / back on in one tap; only third-party services are counted. On ROMs that hide the list from this app, a risk confirmation appears first — system preinstalls are never blindly turned off. Writes are confirmed by reading back, and slow-binding devices no longer stay stuck on "needs manual enable" |
 | 🧭 **Jump to system settings** | Each of the three debugging rows has a "›" arrow on the right that opens the corresponding system settings page; long-pressing the whole row does the same. Works even when unauthorized, or even when the switch is greyed out, so you can go flip it in the system yourself |
@@ -100,7 +100,7 @@ Besides the default no-root channel, you can switch to Shizuku or root mode in t
 
 1. Download the latest APK from any channel above and install;
 2. On first launch the one-time authorization guide pops up automatically — pick any method to finish (the default is the recommended no-root mode);
-3. Customize the items: open "Manage switch items" to set visibility / follow-main-switch per item and drag to reorder; hide anything you do not want this app to manage;
+3. Customize the items: open "Manage switch items" to set visibility / follow-main-switch / shortcut-menu per item and drag to reorder; hide anything you do not want this app to manage;
 4. Pull down the notification shade, edit the quick tiles, and drag the "Debug Switch" tile into the quick settings area (long-press the tile to return to the app);
 5. To pass a check temporarily: turn debugging off, include accessibility traces if needed, and when done tap "Restore" on the persistent notification;
 6. For one-tap access: go to "Quick Launch", add the target app, and long-press that row to create a home-screen shortcut.
@@ -144,7 +144,7 @@ A: Usually not. The grant is sticky and survives reboots / soft reboots; you onl
 
 **Q: Can I hide rows I don't need, or keep them out of the main switch?**
 
-A: Yes — open "Manage switch items" and set each item individually. Hidden items are not touched by this app at all (not shown, not written, not followed); to keep a row but toggle it alone, just turn off "Follow main switch". You can also drag to reorder.
+A: Yes — open "Manage switch items" and set each item individually. Hidden items are not touched by this app at all (not shown, not written, not followed); to keep a row but toggle it alone, just turn off "Follow main switch"; to show an item in the desktop long-press menu, check "Shortcut menu". You can also drag to reorder.
 
 **Q: What does "On · inactive" on the wireless debugging row mean?**
 

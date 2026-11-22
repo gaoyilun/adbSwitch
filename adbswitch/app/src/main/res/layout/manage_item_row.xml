@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 「管理开关项」弹窗的宽行：首行=标题+右侧拖动柄；次行=显示/跟随两个带完整文案的复选框。
-     （单行放两个复选框会把「显示 / 跟随主开关」的文字挤没，用户不知道开关含义——故两行布局。） -->
+<!-- 「管理开关项」弹窗行：首行=显示勾选框+标题+拖动柄；次行=从属项（跟随主开关/快捷菜单）。
+     从属行相对标题缩进，一眼可看出归属；整体仍为两行，不比旧版更高。
+     勾选框去掉默认 minWidth/minHeight，避免撑高行、挤掉文字。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -15,40 +16,93 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp">
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
 
-        <TextView
-            android:id="@+id/manage_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="15sp" />
-
+        <!-- 首行：勾选框本身即「显示」，不再重复文字标签；标题与整行空白都可点击切换 -->
         <LinearLayout
+            android:id="@+id/manage_head_row"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <CheckBox
                 android:id="@+id/manage_shown_box"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/manage_shown" />
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:padding="0dp" />
 
-            <CheckBox
-                android:id="@+id/manage_follow_box"
-                android:layout_width="wrap_content"
+            <TextView
+                android:id="@+id/manage_title"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:text="@string/manage_follow" />
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <!-- 次行：从属项，缩进对齐标题文字并再退一点，形成父子层级 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="20dp">
+
+            <!-- 外层容器各占半行、可点击（扩大触发面积）；内层复选框按文字宽度自适应，不会换行 -->
+            <FrameLayout
+                android:id="@+id/manage_follow_slot"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:clickable="true"
+                android:focusable="true">
+
+                <CheckBox
+                    android:id="@+id/manage_follow_box"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:padding="0dp"
+                    android:singleLine="true"
+                    android:text="@string/manage_follow"
+                    android:textSize="12sp" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/manage_shortcut_slot"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:clickable="true"
+                android:focusable="true">
+
+                <CheckBox
+                    android:id="@+id/manage_shortcut_box"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:padding="0dp"
+                    android:singleLine="true"
+                    android:text="@string/manage_shortcut"
+                    android:textSize="12sp" />
+            </FrameLayout>
         </LinearLayout>
     </LinearLayout>
 
     <ImageView
         android:id="@+id/manage_drag"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/manage_drag_desc"
         android:scaleType="center"

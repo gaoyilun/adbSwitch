@@ -1696,6 +1696,29 @@ public final class DebugController {
         }, cb);
     }
 
+    /**
+     * 单独翻转开发者选项入口：先经授权通道读真值再翻，读不到真值则拒绝。
+     * 桌面快捷方式走这个入口（与主界面拨动同一语义）。
+     */
+    public static void toggleDev(Context ctx, final ResultCallback cb) {
+        final Context app = ctx.getApplicationContext();
+        int grantReason = blockedByMissingGrant(app);
+        if (grantReason != RootUtil.REASON_NONE) {
+            failWithoutWrite(app, cb, grantReason);
+            return;
+        }
+        enqueue("dev", c -> {
+            State cur = readViaPrivileged(app);
+            if (cur == null) {
+                failWithoutWrite(app, c, lastFailReason());
+                return;
+            }
+            boolean on = !cur.dev;
+            WriteResult w = writeKey(app, KEY_DEV, on, false);
+            finishSubWrite(app, w, c);
+        }, cb);
+    }
+
     /** 是否有可还原的第三方无障碍记忆（UI 在「开」前预检，无记忆时给明确提示而非「写入未生效」） */
     public static boolean hasA11ySave(Context ctx) {
         String s = savedA11yList(ctx);

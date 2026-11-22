@@ -201,8 +201,14 @@
     <string name="a11y_no_save">No saved accessibility services to restore; enable them manually in system settings</string>
     <string name="a11y_restore_partial">Accessibility restore incomplete; %1$d still need manual enabling</string>
     <string name="manage_items_title">Manage Switch Items</string>
-    <string name="manage_items_sum">Choose which switches are shown and follow the master switch</string>
-    <string name="manage_shown">Show</string>
+    <string name="manage_items_sum">Choose what each switch shows, follows, and appears in the shortcut menu</string>
     <string name="manage_follow">Follow master switch</string>
+    <string name="manage_shortcut">Shortcut menu</string>
+    <string name="manage_shortcut_app">Show default quick app in shortcut menu</string>
+    <string name="manage_shortcut_app_sum">Hide the default quick app from the shortcut menu</string>
+    <string name="sc_toggle_dev_short">Developer options</string>
+    <string name="sc_toggle_dev_long">Toggle developer options without opening the app</string>
+    <string name="sc_toggle_a11y_short">Accessibility</string>
+    <string name="sc_toggle_a11y_long">Toggle third-party accessibility services without opening the app</string>
     <string name="manage_drag_desc">Drag to reorder</string>
 </resources>

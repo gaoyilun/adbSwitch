@@ -1,9 +1,9 @@
 {
-  "versionCode": 6,
-  "versionName": "1.1.0",
-  "notes": "1.1.0：将开关解耦，支持自由自定义；新增无障碍服务一键开关、控制中心磁贴长按直达主页；优化 Wi-Fi 未连接时无线adb的状态指示；修复主开关开始瞬间闪烁。",
+  "versionCode": 7,
+  "versionName": "1.1.1",
+  "notes": "1.1.1：桌面快捷菜单可按开关自定义，新增默认快捷应用显示开关；管理开关项弹窗重排并支持点击文字勾选，勾选数量与桌面显示一致。",
   "mandatory": false,
-  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.1.0/com.elleng.adbswitch-1.1.0-universal-release.apk",
+  "apkUrl": "https://github.com/gaoyilun/adbSwitch/releases/download/v1.1.1/com.elleng.adbswitch-1.1.1-universal-release.apk",
   "fallbackUrl": "https://github.com/gaoyilun/adbSwitch/releases",
-  "sha256": "edcce07355cfcc1029f84f988a7027d51bbfa071f621df125f866ed9e76fd0c0"
+  "sha256": "23a74d5d94c5254429b03aefae1a56fdc06cccfde9ceee0e63cadfa6bff06dbe"
 }

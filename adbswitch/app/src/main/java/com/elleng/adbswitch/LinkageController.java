@@ -15,6 +15,7 @@ import android.widget.Toast;
 import androidx.core.content.ContextCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
+import androidx.preference.SwitchPreferenceCompat;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
@@ -41,6 +42,8 @@ final class LinkageController {
     /** 默认跳转应用行 / 管理联动应用行的固定 key（动态填充，不在 prefs.xml 写死） */
     private static final String LINKAGE_KEY_DEFAULT = "linkage_default";
     private static final String LINKAGE_KEY_MANAGE = "linkage_manage";
+    /** 管理快捷应用下方的独立开关：默认快捷应用是否也进桌面快捷菜单 */
+    private static final String LINKAGE_KEY_SHORTCUT_APP = "linkage_shortcut_app";
 
     private final MainActivity activity;
     /** 上次重建「快捷打开」列表的内容指纹（配置没变就不重建，见 rebuildList） */
@@ -83,7 +86,8 @@ final class LinkageController {
         // 内容指纹：配置与授权状态都没变就不重建。
         // 重建要移除/新建所有 Preference，并在主线程同步 getApplicationIcon（跨进程 + 解码），
         // 而 onResume 每次都会走到这里 —— 每次回前台都为一份没变的列表重做一遍纯属浪费。
-        String sig = activity.privilegedAvailable + "|" + def + "|" + android.text.TextUtils.join(",", apps);
+        String sig = activity.privilegedAvailable + "|" + def + "|" + android.text.TextUtils.join(",", apps)
+                + "|" + SwitchConfig.isLaunchInMenu(activity);
         if (sig.equals(lastLinkageSignature)) {
             return;
         }
@@ -96,6 +100,7 @@ final class LinkageController {
             String k = p.getKey();
             if (k != null && (k.equals(LINKAGE_KEY_DEFAULT)
                     || k.equals(LINKAGE_KEY_MANAGE)
+                    || k.equals(LINKAGE_KEY_SHORTCUT_APP)
                     || k.startsWith(LINKAGE_APP_KEY_PREFIX))) {
                 stale.add(p);
             }
@@ -166,6 +171,25 @@ final class LinkageController {
             return true;
         });
         cat.addPreference(manage);
+
+        // 4) 默认快捷应用是否出现在桌面快捷菜单：关闭后不发布 launch_linkage_app，
+        //    子开关的快捷菜单勾选项上限随之从 2 放宽到 3。放在「管理快捷应用」正下方。
+        SwitchPreferenceCompat shortcutApp = new SwitchPreferenceCompat(activity);
+        shortcutApp.setKey(LINKAGE_KEY_SHORTCUT_APP);
+        shortcutApp.setTitle(R.string.manage_shortcut_app);
+        shortcutApp.setSummary(R.string.manage_shortcut_app_sum);
+        shortcutApp.setLayoutResource(R.layout.pref_row);
+        shortcutApp.setWidgetLayoutResource(R.layout.pref_widget_switch);
+        shortcutApp.setPersistent(false);
+        shortcutApp.setIconSpaceReserved(false);
+        shortcutApp.setChecked(SwitchConfig.isLaunchInMenu(activity));
+        shortcutApp.setOnPreferenceChangeListener((p, v) -> {
+            boolean on = (Boolean) v;
+            SwitchConfig.setLaunchInMenu(activity, on);
+            ToggleShortcuts.markDirty(activity);
+            return true;
+        });
+        cat.addPreference(shortcutApp);
 
         // 联动项跟随授权可用性
         activity.setLinkageEnabled(activity.privilegedAvailable);

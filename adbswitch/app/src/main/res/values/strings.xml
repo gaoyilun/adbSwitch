@@ -256,9 +256,16 @@
     <string name="a11y_no_save">无可恢复的无障碍服务记录，请到系统设置手动开启</string>
     <string name="a11y_restore_partial">无障碍恢复不完整，仍有 %1$d 个需手动开启</string>
 
-    <!-- 管理开关项：每项可设置「是否显示」（=功能是否启用）与「是否跟随主开关」 -->
+    <!-- 管理开关项：每项可设置「是否显示」「是否跟随主开关」「是否加入桌面快捷菜单」 -->
     <string name="manage_items_title">管理开关项</string>
-    <string name="manage_items_sum">设置各开关是否显示、是否跟随主开关</string>
-    <string name="manage_shown">显示</string>
+    <string name="manage_items_sum">设置各开关的显示、跟随与快捷菜单</string>
     <string name="manage_follow">跟随主开关</string>
+    <string name="manage_shortcut">快捷菜单</string>
+    <string name="manage_shortcut_app">在快捷菜单中显示默认快捷应用</string>
+    <string name="manage_shortcut_app_sum">关闭后快捷菜单不再显示默认快捷应用</string>
+    <!-- 快捷方式中四个子开关的文案（桌面长按菜单条目） -->
+    <string name="sc_toggle_dev_short">开发者选项</string>
+    <string name="sc_toggle_dev_long">单独开关开发者选项，不打开界面</string>
+    <string name="sc_toggle_a11y_short">无障碍服务</string>
+    <string name="sc_toggle_a11y_long">单独开关第三方无障碍服务，不打开界面</string>
 </resources>

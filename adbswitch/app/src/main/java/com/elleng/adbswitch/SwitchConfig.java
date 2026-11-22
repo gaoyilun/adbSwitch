@@ -8,25 +8,34 @@ import java.util.EnumSet;
 import java.util.List;
 
 /**
- * 开关项配置（是否显示 / 是否跟随主开关）的持久化与查询。
+ * 开关项配置（是否显示 / 是否跟随主开关 / 是否加入桌面快捷菜单）的持久化与查询。
  *
  * 语义（与用户确认的设计）：
  *  - shown = 该开关功能是否启用。隐藏 = 本 App 完全不管理（不显示、不写入、不跟随）。
  *  - followMaster = 是否跟随主开关一键开/关，仅在 shown=true 时有意义。
- *  - 合法状态三种：不显示 / 显示+跟随 / 显示+不跟随（不存在「不显示+跟随」）。
+ *  - inShortcutMenu = 是否作为子开关出现在桌面长按菜单，仅在 shown=true 时有意义。
+ *    与 followMaster 一样，隐藏期间保留原始值，重新显示时自然恢复。
+ *  - 合法状态：隐藏 / 显示+各从属位的任意组合（不存在「不显示+跟随/快捷」）。
  *
  * 默认值（对齐旧版行为，升级无感）：
- *  - USB / 无线：显示 + 跟随（旧主开关管理的就是这两项）
- *  - 开发者选项：显示 + 不跟随（旧版独立开关）
- *  - 无障碍：显示 + 不跟随（新功能，默认不动它——一键关会停掉读屏等服务，须用户显式纳入）
+ *  - USB / 无线：显示 + 跟随 + 快捷菜单（旧主开关管理的就是这两项，旧快捷菜单也只发这两项）
+ *  - 开发者选项：显示 + 不跟随 + 不进快捷菜单（旧版独立开关，快捷菜单里没有）
+ *  - 无障碍：显示 + 不跟随 + 不进快捷菜单（新功能，默认不动它——一键关会停掉读屏等服务，
+ *    快捷菜单里也默认不出现，须用户显式勾选）
+ *
+ * 「快捷打开」开启时沿用旧行为：桌面长按菜单不发布任何子开关，快捷菜单勾选项在
+ * 管理弹窗中隐藏。此条件由 UI 与 ToggleShortcuts 各自读取 linkage_enabled 判定。
  */
 public final class SwitchConfig {
 
     private static final String PREFS = "cfg";
     private static final String PREFIX_SHOWN = "item_shown_";
     private static final String PREFIX_FOLLOW = "item_follow_";
+    private static final String PREFIX_SHORTCUT = "item_shortcut_";
     /** 显示顺序（SwitchItem.name 逗号串，全量排列；缺省/残缺按枚举顺序补全） */
     private static final String KEY_ORDER = "item_order";
+    /** 是否把「默认快捷应用」也发布到桌面快捷菜单；关闭后多出一个子开关槽位，默认开 */
+    private static final String KEY_SHORTCUT_LAUNCH = "shortcut_launch_app";
 
     private SwitchConfig() {
     }
@@ -48,6 +57,17 @@ public final class SwitchConfig {
         return sp.getBoolean(PREFIX_FOLLOW + item.id, defaultFollow(item));
     }
 
+    /** 该开关项是否作为子开关出现在桌面快捷菜单（隐藏项恒为 false） */
+    public static boolean usesShortcut(Context ctx, SwitchItem item) {
+        return item.supported() && isShown(ctx, item) && rawShortcut(ctx, item);
+    }
+
+    /** 原始快捷菜单值（不带隐藏守卫）：供管理弹窗初始化，重新显示时恢复原设置 */
+    static boolean rawShortcut(Context ctx, SwitchItem item) {
+        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        return sp.getBoolean(PREFIX_SHORTCUT + item.id, defaultShortcut(item));
+    }
+
     /** 设置是否显示。不动跟随值：「不显示+跟随」的非法态由 followsMaster 的读守卫独自维持，
      *  隐藏期间跟随值原样保留，重新显示时自然恢复（避免 USB 隐藏再显示后悄悄不再跟随） */
     public static void setShown(Context ctx, SwitchItem item, boolean shown) {
@@ -64,6 +84,15 @@ public final class SwitchConfig {
                 .edit().putBoolean(PREFIX_FOLLOW + item.id, follow).apply();
     }
 
+    /** 设置是否加入桌面快捷菜单（隐藏项忽略写入，重新显示时恢复原值） */
+    public static void setShortcut(Context ctx, SwitchItem item, boolean inMenu) {
+        if (!isShown(ctx, item)) {
+            return;
+        }
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(PREFIX_SHORTCUT + item.id, inMenu).apply();
+    }
+
     /** 跟随主开关的项集合（主开关一键操作的目标） */
     public static EnumSet<SwitchItem> followedItems(Context ctx) {
         EnumSet<SwitchItem> out = EnumSet.noneOf(SwitchItem.class);
@@ -73,6 +102,17 @@ public final class SwitchConfig {
             }
         }
         return out;
+    }
+
+    /** 桌面快捷菜单是否显示「默认快捷应用」（总开关，与单个开关项无关） */
+    public static boolean isLaunchInMenu(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_SHORTCUT_LAUNCH, true);
+    }
+
+    public static void setLaunchInMenu(Context ctx, boolean show) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_SHORTCUT_LAUNCH, show).apply();
     }
 
     /** 显示顺序（用户在「管理开关项」里拖动排出来的；残缺/未知项按枚举顺序补全） */
@@ -114,6 +154,16 @@ public final class SwitchConfig {
     }
 
     private static boolean defaultFollow(SwitchItem item) {
+        switch (item) {
+            case USB:
+            case WIRELESS:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static boolean defaultShortcut(SwitchItem item) {
         switch (item) {
             case USB:
             case WIRELESS:
