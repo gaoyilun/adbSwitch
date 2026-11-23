@@ -173,6 +173,12 @@
     <string name="notify_channel_desc">调试临时关闭后显示常驻控制通知</string>
     <string name="notify_title_on">adb调试已开启</string>
     <string name="notify_title_off">adb调试已关闭</string>
+    <!-- 关闭态标题按「跟随主开关的项」动态拼接，如「USB调试/无线调试/开发者选项/无障碍已关闭」 -->
+    <string name="notify_item_usb">USB调试</string>
+    <string name="notify_item_wireless">无线调试</string>
+    <string name="notify_item_dev">开发者选项</string>
+    <string name="notify_item_a11y">无障碍</string>
+    <string name="notify_closed_suffix">已关闭</string>
     <string name="notify_action_close">临时关闭</string>
     <string name="notify_action_open">恢复打开</string>
     <string name="notify_sub_safe">adbd 已停止，检测可通过</string>

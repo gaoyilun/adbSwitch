@@ -312,8 +312,53 @@ public class AdbToggleService extends Service {
         nmm.createNotificationChannel(ch);
     }
 
+    /**
+     * 关闭态标题：按用户在「管理开关项」里拖出的顺序，列出所有跟随主开关的项，
+     * 拼成「USB调试/无线调试/开发者选项/无障碍已关闭」。
+     * 只列跟随项——不跟随的项没被主开关关掉，写进去就是谎报。
+     * 极端情况下没有任何跟随项时回退到旧的固定标题，避免空标题。
+     */
+    private static String buildClosedTitle(Context ctx) {
+        java.util.EnumSet<SwitchItem> followed = SwitchConfig.followedItems(ctx);
+        if (followed.isEmpty()) {
+            return ctx.getString(R.string.notify_title_off);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (SwitchItem item : SwitchConfig.getOrder(ctx)) {
+            if (!followed.contains(item)) {
+                continue;
+            }
+            int label;
+            switch (item) {
+                case USB:
+                    label = R.string.notify_item_usb;
+                    break;
+                case WIRELESS:
+                    label = R.string.notify_item_wireless;
+                    break;
+                case DEV:
+                    label = R.string.notify_item_dev;
+                    break;
+                case A11Y:
+                    label = R.string.notify_item_a11y;
+                    break;
+                default:
+                    continue;
+            }
+            if (sb.length() > 0) {
+                sb.append('/');
+            }
+            sb.append(ctx.getString(label));
+        }
+        if (sb.length() == 0) {
+            return ctx.getString(R.string.notify_title_off);
+        }
+        return sb.append(ctx.getString(R.string.notify_closed_suffix)).toString();
+    }
+
     private static Notification buildNotification(Context ctx, DebugController.State s) {
-        // 标题/按钮按主开关聚合（按钮操作的就是 setMaster）；副文本仍摊开 usb/无线真值
+        // 标题按主开关聚合：开启态用固定文案，关闭态列出被关掉的跟随项；
+        // 按钮操作的就是 setMaster；副文本仍摊开 usb/无线真值。
         boolean on = DebugController.masterAnyOn(ctx, s);
         Intent open = new Intent(ctx, NotificationReceiver.class).setAction(ACTION_OPEN);
         PendingIntent piOpen = PendingIntent.getBroadcast(ctx, 1, open, PendingIntent.FLAG_IMMUTABLE);
@@ -326,7 +371,7 @@ public class AdbToggleService extends Service {
         // 「ongoing 通知」为前提——前台服务用的是 specialUse 类型不被提升，所以不设 ongoing 时
         // 实际常驻通知只显示为普通通知（不进状态栏胶囊/锁屏）。
         b.setSmallIcon(R.drawable.ic_tile)
-                .setContentTitle(ctx.getString(on ? R.string.notify_title_on : R.string.notify_title_off))
+                .setContentTitle(on ? ctx.getString(R.string.notify_title_on) : buildClosedTitle(ctx))
                 .setContentText(describeSubStates(ctx, s))
                 .setOngoing(true)
                 .setPriority(Notification.PRIORITY_LOW);

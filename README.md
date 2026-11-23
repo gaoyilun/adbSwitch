@@ -32,6 +32,7 @@ adbSwitch 就是为这件事做的：一个**一键真实改写系统状态的�
 | 渠道 | 地址 |
 | :--- | :--- |
 | GitHub Releases | <https://github.com/gaoyilun/adbSwitch/releases> |
+| Gitee Releases | <https://gitee.com/gaoyilun/adbSwitch/releases> |
 | 蒲公英（国内下载） | <https://www.pgyer.com/adbSwitch> |
 
 ## ✨ 功能特性

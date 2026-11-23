@@ -136,6 +136,13 @@
     <string name="notify_channel_desc">Persistent control notification after debug is temporarily off</string>
     <string name="notify_title_on">adb debugging on</string>
     <string name="notify_title_off">adb debugging off</string>
+    <!-- Closed-state title is built from the items set to follow the main switch,
+         e.g. "USB debugging/Wireless debugging/Developer options/Accessibility off" -->
+    <string name="notify_item_usb">USB debugging</string>
+    <string name="notify_item_wireless">Wireless debugging</string>
+    <string name="notify_item_dev">Developer options</string>
+    <string name="notify_item_a11y">Accessibility</string>
+    <string name="notify_closed_suffix"> off</string>
     <string name="notify_action_close">Temp off</string>
     <string name="notify_action_open">Restore</string>
     <string name="notify_sub_safe">adbd stopped, detectable</string>

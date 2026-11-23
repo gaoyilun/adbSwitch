@@ -32,6 +32,7 @@ The project is open source under GPL-3.0; the code can be reviewed and built by 
 | Channel | Link |
 | :--- | :--- |
 | GitHub Releases | <https://github.com/gaoyilun/adbSwitch/releases> |
+| Gitee Releases | <https://gitee.com/gaoyilun/adbSwitch/releases> |
 | Pgyer (China mirror) | <https://www.pgyer.com/adbSwitch> |
 
 ## ✨ Features
