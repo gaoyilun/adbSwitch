@@ -147,13 +147,13 @@ A: Yes — open "Manage switch items" and set each item individually. Hidden ite
 
 A: The system's wireless-debugging setting is on, but the currently connected default network is not Wi-Fi, so adb over network is unavailable — some ROMs may even show the switch as off in Settings. It returns to "On · adbd running" automatically once Wi-Fi is back.
 
-**Q: After turning debugging off, does the Developer-options master switch still exist?**
-
-A: Yes. The debug switch only changes `adb_enabled` / `adb_wifi_enabled`; the Developer-options entry is an independent switch you control separately when needed.
-
 **Q: How do I restore Developer options after turning its entry off?**
 
-A: System settings → About phone → tap "Build number" 7 times to re-enable Developer options.
+A: You can simply turn the Developer options switch back on in the app. If it cannot be enabled on some devices, go to System settings → About phone → tap "Build number" 7 times to re-enable Developer options (the exact entry and steps vary between vendors, so check your device).
+
+**Q: Is granting root and similar permissions safe? Does the app upload user data?**
+
+A: The app is open source (GPL-3.0), so you can review the code yourself. There is no telemetry and no user data is uploaded. The only network activity is a once-every-3-days update check (with a gentle reminder when an update is available); all features work offline. Root / Shizuku permissions are used only to write system settings or to run the one-time authorization command on your behalf — the app never uses them to read unrelated data such as accounts or files, and the whole authorization process stays local, involving no account or server.
 
 **Q: Is this a fake off?**
 
