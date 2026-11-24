@@ -169,6 +169,10 @@ public final class UpdateChecker {
         }
         try {
             return future.get(20, TimeUnit.SECONDS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, name + " 更新检查被中断", ie);
+            return null;
         } catch (Throwable t) {
             Log.w(TAG, name + " 更新检查失败", t);
             return null;

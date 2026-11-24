@@ -79,17 +79,11 @@ public final class UpdateDownloader {
         public final long downloadedBytes;
         public final long totalBytes;
         public final long speedBytesPerSec;
-        /** 当前源在候选列表里的序号（从 1 开始），用于「已切换下载源」类提示。 */
-        public final int sourceIndex;
-        public final int sourceCount;
 
-        Progress(long downloadedBytes, long totalBytes, long speedBytesPerSec,
-                 int sourceIndex, int sourceCount) {
+        Progress(long downloadedBytes, long totalBytes, long speedBytesPerSec) {
             this.downloadedBytes = downloadedBytes;
             this.totalBytes = totalBytes;
             this.speedBytesPerSec = speedBytesPerSec;
-            this.sourceIndex = sourceIndex;
-            this.sourceCount = sourceCount;
         }
 
         /** 0f..1f；总长未知时给 0f，由调用方用不确定样式进度条。 */
@@ -105,8 +99,9 @@ public final class UpdateDownloader {
     private static final class Candidate {
         final String url;
         final String host;
-        long speed;
-        boolean probed;
+        /** 测速线程写、主线程读；超时后孤儿线程仍可能写，volatile 消除可见性/有序性竞态。 */
+        volatile long speed;
+        volatile boolean probed;
 
         Candidate(String url) {
             this.url = url;
@@ -154,13 +149,6 @@ public final class UpdateDownloader {
         }
     }
 
-    /** 单直链重载（保留给只有一条源/外部调用的场景）。 */
-    public static File download(Context ctx, String url, String expectedSha256,
-                                ProgressListener listener) throws Exception {
-        return download(ctx, url == null ? Collections.<String>emptyList()
-                : Collections.singletonList(url), expectedSha256, listener);
-    }
-
     private static List<String> normalize(List<String> urls) {
         List<String> out = new ArrayList<>();
         if (urls == null) {
@@ -191,8 +179,7 @@ public final class UpdateDownloader {
         for (int i = 0; i < candidates.size(); i++) {
             Candidate c = candidates.get(i);
             try {
-                File out = downloadFrom(ctx, c, expectedSha256, listener, i + 1,
-                        candidates.size());
+                File out = downloadFrom(ctx, c, expectedSha256, listener);
                 rememberBestHost(ctx, c.host);
                 return out;
             } catch (Exception e) {
@@ -320,8 +307,7 @@ public final class UpdateDownloader {
     // —— 单源下载 ——
 
     private static File downloadFrom(Context ctx, Candidate c, String expectedSha256,
-                                     ProgressListener listener, int index, int count)
-            throws Exception {
+                                     ProgressListener listener) throws Exception {
         File dir = targetDir(ctx);
         File part = new File(dir, FILE_NAME + ".part");
         File dest = downloadedFile(ctx);
@@ -360,7 +346,7 @@ public final class UpdateDownloader {
                     if (listener != null && now - lastReport >= PROGRESS_INTERVAL_MS) {
                         long speed = (now - lastReport) > 0
                                 ? (downloaded - lastBytes) * 1000 / (now - lastReport) : 0;
-                        listener.onProgress(new Progress(downloaded, total, speed, index, count));
+                        listener.onProgress(new Progress(downloaded, total, speed));
                         lastReport = now;
                         lastBytes = downloaded;
                     }
@@ -383,7 +369,7 @@ public final class UpdateDownloader {
                 throw new IllegalStateException("下载完成但重命名失败: " + part);
             }
             if (listener != null) {
-                listener.onProgress(new Progress(downloaded, downloaded, 0, index, count));
+                listener.onProgress(new Progress(downloaded, downloaded, 0));
             }
             return dest;
         } catch (Throwable t) {
